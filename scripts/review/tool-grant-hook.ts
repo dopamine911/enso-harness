@@ -46,10 +46,13 @@ export interface ToolGrant {
    */
   readonly readRoots?: readonly string[]
   /**
-   * Dry run: a `gh pr comment` is not posted. Its body is written to this file, and the reviewer
-   * is told the review is recorded.
+   * The post is captured, not run: its body is written to this file and the reviewer is told
+   * `captureReply`. A dry run captures it for a person to read; a real run captures it so the runner
+   * posts it with a token the model never holds (`app-token.ts`, #981).
    */
   readonly captureCommentTo?: string
+  /** What the reviewer is told when its post is captured. Default: the dry-run reply. */
+  readonly captureReply?: string
   /** One JSON line per call is appended here — the tool, its input, the decision — so a run leaves an audit trail. */
   readonly decisionLog?: string
 }
@@ -138,6 +141,8 @@ const POST_COMMAND_PREFIX = 'gh pr comment'
  * other `gh pr comment` (`--body-file <path>`, `-F <path>`, `--repo`, `--edit-last`) is refused.
  */
 const POST_FIRST_LINE = /^gh pr comment \d+ --body-file -$/
+/** What a dry run tells the reviewer when its post is captured. */
+const DRY_RUN_CAPTURE_REPLY = 'Dry run: the review comment was recorded, not posted. The review is complete; stop here.'
 /** What Claude Code reads as "refuse this call, and tell the model why". */
 const HOOK_BLOCK_EXIT_CODE = 2
 
@@ -262,7 +267,7 @@ export function hookOutcome(grant: ToolGrant, call: ToolCall): HookOutcome {
   }
   return {
     exitCode: HOOK_BLOCK_EXIT_CODE,
-    message: 'Dry run: the review comment was recorded, not posted. The review is complete; stop here.\n',
+    message: `${grant.captureReply ?? DRY_RUN_CAPTURE_REPLY}\n`,
     fileWrites: [...logWrites, { path: grant.captureCommentTo ?? '', text: decision.body, append: false }],
   }
 }

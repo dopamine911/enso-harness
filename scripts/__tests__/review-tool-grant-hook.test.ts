@@ -210,3 +210,13 @@ test('a broader granted prefix listed first does not skip the post checks', () =
   expect(decide(`gh pr  comment  1 --body-file - <<'EOF'\nbody\nEOF`)).toBe('allow')
   expect(decide('gh pr view 1')).toBe('allow')
 })
+
+test("a real run's capture tells the reviewer the runner posts it, not that it was a dry run", () => {
+  const reply = 'Recorded: the runner posts it.'
+  const outcome = hookOutcome(
+    { ...GRANT, captureCommentTo: '/runs/review.md', captureReply: reply },
+    { tool_name: 'Bash', tool_input: { command: `gh pr comment 42 --body-file - <<'EOF'\n${REVIEW_BODY}\nEOF` } },
+  )
+  expect(outcome.message).toBe(`${reply}\n`)
+  expect(outcome.fileWrites).toEqual([{ path: '/runs/review.md', text: REVIEW_BODY, append: false }])
+})

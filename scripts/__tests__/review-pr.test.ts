@@ -6,7 +6,6 @@ import {
   parseReviewArguments,
   planReview,
   type PullRequestState,
-  reviewCommentsSince,
   reviewSettings,
   STATUS_MARKER,
   statusCommentBody,
@@ -81,29 +80,6 @@ test('⚠ a review posted before docker-agent failed is reported as posted, with
   )
 })
 
-/**
- * ⚠ POSTED IS WHAT IS ON THE PULL REQUEST. A hook allows a post before `gh` runs it, so "allowed"
- * would record a head nobody reviewed when the post then failed (#989's review).
- */
-test('a review counts as posted only when this login posted a comment in the template after the run began', () => {
-  const since = '2026-10-14T14:00:00Z'
-  const comment = (body: string, created_at: string, author = 'me'): IssueComment => ({
-    id: 1,
-    body,
-    created_at,
-    author,
-  })
-  const comments = [
-    comment('## Code Review\n\n### Overview\nold', '2026-10-14T13:00:00Z'),
-    comment(`${STATUS_MARKER}\n✅`, '2026-10-14T14:05:00Z'),
-    comment('Thanks, fixed in abc1234.', '2026-10-14T14:06:00Z'),
-    comment('## Code Review\nfrom someone else', '2026-10-14T14:06:30Z', 'claude[bot]'),
-  ]
-  expect(reviewCommentsSince(comments, since, 'me')).toEqual([])
-  const posted = comment('## Code Review (commits pushed up to add4fef)\n…', '2026-10-14T14:07:00Z')
-  expect(reviewCommentsSince([...comments, posted], since, 'me')).toEqual([posted])
-})
-
 test("Claude Code's session folder for a directory, named as Claude Code names it", () => {
   expect(claudeSessionFolder('/home/daniel/.cache/enso-review/pr-989-6eb2ed1-1791986401294/tree', '/home/daniel')).toBe(
     '/home/daniel/.claude/projects/-home-daniel--cache-enso-review-pr-989-6eb2ed1-1791986401294-tree',
@@ -131,7 +107,7 @@ test('the command line takes a pull request number and --dry-run', () => {
  * not forget what was reviewed.
  */
 test("the status comment a run updates is its own; the last reviewed head comes from its own, else anyone's", () => {
-  const comment = (author: string, body: string, id: number): IssueComment => ({ id, body, created_at: '', author })
+  const comment = (author: string, body: string, id: number): IssueComment => ({ id, body, author })
   const owners = comment(
     'dopamine911',
     statusCommentBody({ posted: true, headSha: PREVIOUS, scope: 'full', agentExitCode: 0 }),

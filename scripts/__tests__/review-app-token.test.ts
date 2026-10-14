@@ -3,7 +3,7 @@ import { createVerify, generateKeyPairSync } from 'node:crypto'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appJsonWebToken, readReviewAppConfig } from '../review/app-token.ts'
+import { appJsonWebToken, type GithubFetch, readReviewAppConfig, reviewAppIdentity } from '../review/app-token.ts'
 
 /** A throwaway key pair: the test signs with one half and checks with the other. */
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -49,4 +49,51 @@ test('a config file that is not a config is refused, naming what it needs', () =
     installationId: INSTALLATION_ID,
     privateKeyPath: '/k.pem',
   })
+})
+
+test('a config file holding null is refused with the same message, not a TypeError', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'review-app-')), 'app.json')
+  writeFileSync(path, 'null')
+  expect(() => readReviewAppConfig(path)).toThrow('appId')
+})
+
+/**
+ * ⚠ THE MODEL'S TOKEN CANNOT WRITE (#981). Two tokens are asked for, each for this repository only:
+ * the model's with read permissions alone, the runner's with `pull_requests: write` to post. A
+ * permission widened in `reviewAppIdentity` fails here, not in a review a pull request steered.
+ */
+test("⚠ the model's token is read-only and the runner's only posts, both for one repository", async () => {
+  const keyPath = join(mkdtempSync(join(tmpdir(), 'review-app-key-')), 'key.pem')
+  writeFileSync(keyPath, PRIVATE_KEY_PEM)
+  const requests: { url: string; body: unknown }[] = []
+  const fakeGithub: GithubFetch = async (url, init) => {
+    const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
+    requests.push({ url, body })
+    const answer = url.endsWith('/app') ? { slug: 'reviewer' } : { token: `token-${requests.length}` }
+    return new Response(JSON.stringify(answer), { status: 200 })
+  }
+  const identity = await reviewAppIdentity(
+    { appId: APP_ID, installationId: INSTALLATION_ID, privateKeyPath: keyPath },
+    'zen-harness-foundation',
+    fakeGithub,
+  )
+  expect(identity).toEqual({ readToken: 'token-2', postToken: 'token-3', login: 'reviewer[bot]' })
+  const [, readRequest, postRequest] = requests
+  expect(readRequest?.url).toEndWith(`/app/installations/${INSTALLATION_ID}/access_tokens`)
+  expect(readRequest?.body).toEqual({
+    repositories: ['zen-harness-foundation'],
+    permissions: { contents: 'read', metadata: 'read', pull_requests: 'read' },
+  })
+  expect(postRequest?.body).toEqual({
+    repositories: ['zen-harness-foundation'],
+    permissions: { metadata: 'read', pull_requests: 'write' },
+  })
+})
+
+test('a GitHub refusal names its status, even when its body is not JSON', async () => {
+  const keyPath = join(mkdtempSync(join(tmpdir(), 'review-app-key-')), 'key.pem')
+  writeFileSync(keyPath, PRIVATE_KEY_PEM)
+  const refusing: GithubFetch = async () => new Response('<html>bad gateway</html>', { status: 502 })
+  const config = { appId: APP_ID, installationId: INSTALLATION_ID, privateKeyPath: keyPath }
+  await expect(reviewAppIdentity(config, 'zen-harness-foundation', refusing)).rejects.toThrow('502')
 })

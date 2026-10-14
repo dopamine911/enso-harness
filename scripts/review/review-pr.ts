@@ -38,7 +38,10 @@ import { readReviewAppConfig, reviewAppIdentity } from './app-token.ts'
 import type { ToolGrant } from './tool-grant-hook.ts'
 import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow } from './workflow-config.ts'
 
-/** The workflow's status comment marker: the same comment is upserted here, so both reviewers share it. */
+/**
+ * The workflow's status comment marker. Each poster keeps its own comment under it (`statusCommentsOf`):
+ * the Actions step updates the first one it finds, this reviewer only the one its login wrote.
+ */
 export const STATUS_MARKER = '<!-- claude-run-status: pr-review -->'
 /** The second hidden line this reviewer adds: the head it reviewed, so a head is reviewed once. */
 const REVIEWED_HEAD_LINE = /<!-- local-review head=([0-9a-f]{40})/
@@ -48,13 +51,14 @@ const RUNS_DIRECTORY = join(homedir(), '.cache', 'enso-review')
 const SHARED_BUN_CACHE = join(RUNS_DIRECTORY, 'bun-cache')
 /** The directory the prompt and `.claude/pr-review.md` look in for the comment list and the push's diff. */
 const REVIEW_CONTEXT_DIRECTORY = '.review-context'
-/** How the workflow's review comment begins (its template's heading), which is how a post is found. */
-const REVIEW_COMMENT_HEADING = '## Code Review'
 /** The files the comment-list step writes; the workflow's command writes the list at the tree root. */
 const COMMENT_LIST_FILE = 'touched-comments.md'
 const NEW_COMMITS_DIFF_FILE = 'new-commits.diff'
 /** Paths a pull request must not supply to its own reviewer: replaced with the base branch's. */
 const BASE_OWNED_PATHS = ['.claude', '.mcp.json'] as const
+/** What the reviewer is told when its post is captured on a real run: the runner posts it next. */
+const CAPTURE_REPLY =
+  'Recorded: the review comment will be posted to the pull request by the runner. The review is complete; stop here.'
 /** A short SHA, as the workflow's comments print one. */
 const SHORT_SHA_LENGTH = 7
 /** The system directories the credential-less steps need beside bun's own: git, sh, coreutils. */
@@ -106,7 +110,8 @@ export function lastReviewedHeadOf(statusCommentBody: string | undefined): strin
 
 /**
  * The status comments on a pull request, as a run needs them: `own`, the one `login` wrote, which it
- * updates (a token can edit only its own comments); and the last reviewed head, from its own first,
+ * updates (so it never rewrites the Actions step's comment, or the owner's from before the App); and
+ * the last reviewed head, from its own first,
  * else from any status comment that records one, so a change of poster (the owner's login, then the
  * review App's bot) does not forget what was reviewed.
  */
@@ -122,11 +127,10 @@ export function statusCommentsOf(
 
 /**
  * The status comment's body after a run: the workflow's marker first, so both reviewers upsert one
- * comment. `posted` is whether a review comment is ON THE PULL REQUEST (`reviewCommentsSince`), not
- * docker-agent's exit code: on #989's first run docker-agent exited 1 (`bufio.Scanner: token too
+ * comment. `posted` is whether the RUNNER's post of the captured review succeeded (`postCapturedReview`),
+ * not docker-agent's exit code: on #989's first run docker-agent exited 1 (`bufio.Scanner: token too
  * long`, its reader of Claude Code's output) AFTER the review was posted, and an exit-code status
- * said "failed, no verdict" under a posted verdict. Nor the hook's "allowed": a hook runs BEFORE
- * `gh`, so an allowed post that then failed would record a head nobody reviewed (#989's review).
+ * said "failed, no verdict" under a posted verdict.
  */
 export function statusCommentBody(run: {
   readonly posted: boolean
@@ -150,23 +154,8 @@ export function statusCommentBody(run: {
 export interface IssueComment {
   readonly id: number
   readonly body: string
-  readonly created_at: string
   /** The login that wrote it. */
   readonly author: string
-}
-
-/**
- * The review comments `author` posted at or after `since` (ISO time): those that begin with the
- * template's heading. ⚠ By author too: the Actions reviewer, or anyone, posting a `## Code Review`
- * during a run would otherwise count as this run's post (#989's review).
- */
-export function reviewCommentsSince(comments: readonly IssueComment[], since: string, author: string): IssueComment[] {
-  return comments.filter(
-    (comment) =>
-      comment.author === author &&
-      comment.created_at >= since &&
-      comment.body.trimStart().startsWith(REVIEW_COMMENT_HEADING),
-  )
 }
 
 /**
@@ -207,21 +196,25 @@ function run(command: readonly string[], options: { cwd?: string; env?: Record<s
 
 /**
  * Who a run reads and posts as: the review App's bot when this machine has its config
- * (`app-token.ts`), else the owner's own `gh` login. `environment` is the whole environment `gh`
- * and the reviewer run with; `undefined` means this process's own.
+ * (`app-token.ts`), else the owner's own `gh` login. Each environment is the whole environment `gh`
+ * runs with (`undefined`: this process's own). `readEnvironment` is the model's: read-only.
+ * `postEnvironment` is the runner's alone, for the review it captured and the status comment.
  */
 interface Poster {
   readonly login: string
-  readonly environment: Record<string, string> | undefined
+  readonly readEnvironment: Record<string, string> | undefined
+  readonly postEnvironment: Record<string, string> | undefined
 }
 
-function runGh(command: readonly string[], poster: Poster): string {
-  return run(command, poster.environment === undefined ? {} : { env: poster.environment })
+function runGh(command: readonly string[], environment: Record<string, string> | undefined): string {
+  return run(command, environment === undefined ? {} : { env: environment })
 }
 
 function readPullRequest(number: number, poster: Poster): PullRequestState {
   const fields = 'number,headRefOid,baseRefName,baseRefOid,isDraft,author'
-  return JSON.parse(runGh(['gh', 'pr', 'view', String(number), '--json', fields], poster)) as PullRequestState
+  return JSON.parse(
+    runGh(['gh', 'pr', 'view', String(number), '--json', fields], poster.readEnvironment),
+  ) as PullRequestState
 }
 
 function repositoryName(): string {
@@ -234,8 +227,11 @@ function repositoryName(): string {
  * comments (#989's review); a filter that prints one object per comment is.
  */
 function pullRequestComments(repository: string, number: number, poster: Poster): IssueComment[] {
-  const filter = '.[] | {id, body, created_at, author: .user.login}'
-  return runGh(['gh', 'api', `repos/${repository}/issues/${number}/comments`, '--paginate', '--jq', filter], poster)
+  const filter = '.[] | {id, body, author: .user.login}'
+  return runGh(
+    ['gh', 'api', `repos/${repository}/issues/${number}/comments`, '--paginate', '--jq', filter],
+    poster.readEnvironment,
+  )
     .split('\n')
     .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as IssueComment)
@@ -244,10 +240,16 @@ function pullRequestComments(repository: string, number: number, poster: Poster)
 function upsertStatusComment(repository: string, number: number, body: string, poster: Poster): void {
   const own = statusCommentsOf(pullRequestComments(repository, number, poster), poster.login).own
   if (own === undefined) {
-    runGh(['gh', 'api', '-X', 'POST', `repos/${repository}/issues/${number}/comments`, '-f', `body=${body}`], poster)
+    runGh(
+      ['gh', 'api', '-X', 'POST', `repos/${repository}/issues/${number}/comments`, '-f', `body=${body}`],
+      poster.postEnvironment,
+    )
     return
   }
-  runGh(['gh', 'api', '-X', 'PATCH', `repos/${repository}/issues/comments/${own.id}`, '-f', `body=${body}`], poster)
+  runGh(
+    ['gh', 'api', '-X', 'PATCH', `repos/${repository}/issues/comments/${own.id}`, '-f', `body=${body}`],
+    poster.postEnvironment,
+  )
 }
 
 /**
@@ -335,7 +337,7 @@ function runReviewer(tree: string, runDirectory: string, prompt: string, poster:
   const reviewer = Bun.spawnSync(['docker', 'agent', 'run', configuration, '--exec', '--working-dir', tree, prompt], {
     stdout: log,
     stderr: log,
-    ...(poster.environment === undefined ? {} : { env: poster.environment }),
+    ...(poster.readEnvironment === undefined ? {} : { env: poster.readEnvironment }),
   })
   return reviewer.exitCode
 }
@@ -345,24 +347,43 @@ interface ReviewOptions {
   readonly dryRun: boolean
 }
 
-/** Whether the poster put a review comment on the pull request after `since`: asked of GitHub, not inferred. */
-function reviewWasPosted(repository: string, number: number, since: string, poster: Poster): boolean {
-  return reviewCommentsSince(pullRequestComments(repository, number, poster), since, poster.login).length > 0
+/**
+ * Posts the review the hook captured, with the runner's token: `true` when GitHub took it. The model
+ * never posts (`app-token.ts#READ_TOKEN_PERMISSIONS`), so this is the one place a review reaches the
+ * pull request, and whether it did is known, not searched for.
+ */
+function postCapturedReview(repository: string, number: number, capture: string, poster: Poster): boolean {
+  if (!existsSync(capture)) return false
+  try {
+    runGh(
+      ['gh', 'api', '-X', 'POST', `repos/${repository}/issues/${number}/comments`, '-F', `body=@${capture}`],
+      poster.postEnvironment,
+    )
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
- * The review App's bot, with a one-hour token for this repository only, when this machine has the
- * App's config; else the owner's own login, as before #981's App. ⚠ The token goes into the
- * reviewer's environment as `GH_TOKEN`, which `gh` prefers over its stored login. The reviewer cannot
- * print it: the grant hook refuses any `$` in a command, and `Read` cannot reach `/proc`.
+ * The review App's bot, with two one-hour tokens for this repository only, when this machine has the
+ * App's config; else the owner's own login, as before #981's App. ⚠ The model's token goes into the
+ * reviewer's environment as `GH_TOKEN`, which `gh` prefers over its stored login; it is read-only,
+ * and the model cannot print it: the grant hook refuses any `$` in a command, and `Read` cannot reach
+ * `/proc`.
  */
 async function reviewPoster(repository: string): Promise<Poster> {
   const config = readReviewAppConfig()
   if (config === undefined) {
-    return { login: run(['gh', 'api', 'user', '--jq', '.login']).trim(), environment: undefined }
+    const login = run(['gh', 'api', 'user', '--jq', '.login']).trim()
+    return { login, readEnvironment: undefined, postEnvironment: undefined }
   }
   const identity = await reviewAppIdentity(config, repository.split('/')[1] ?? repository)
-  return { login: identity.login, environment: { ...process.env, GH_TOKEN: identity.token } }
+  return {
+    login: identity.login,
+    readEnvironment: { ...process.env, GH_TOKEN: identity.readToken },
+    postEnvironment: { ...process.env, GH_TOKEN: identity.postToken },
+  }
 }
 
 interface ReviewRun {
@@ -378,7 +399,6 @@ interface ReviewRun {
 /** Everything after the worktree exists: context, settings, the reviewer, the status. */
 function reviewInWorktree(review: ReviewRun): string {
   const { poster, options, pullRequest, repository, plan, runDirectory, tree } = review
-  const startedAt = new Date().toISOString()
   const config = readReviewWorkflow(
     run(['git', 'show', `${pullRequest.baseRefOid}:${REVIEW_WORKFLOW_PATH}`], { cwd: tree }),
   )
@@ -389,7 +409,9 @@ function reviewInWorktree(review: ReviewRun): string {
     allowedTools: config.allowedTools,
     decisionLog: join(runDirectory, 'tool-calls.jsonl'),
     readRoots: [tree, claudeSessionFolder(tree)],
-    ...(options.dryRun ? { captureCommentTo: capture } : {}),
+    // The post is always captured: a dry run keeps it, a real run posts it with the runner's token.
+    captureCommentTo: capture,
+    ...(options.dryRun ? {} : { captureReply: CAPTURE_REPLY }),
   })
   const values: PromptValues = {
     repository,
@@ -398,7 +420,7 @@ function reviewInWorktree(review: ReviewRun): string {
     headSha: pullRequest.headRefOid,
   }
   const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values), poster)
-  const posted = options.dryRun ? existsSync(capture) : reviewWasPosted(repository, options.number, startedAt, poster)
+  const posted = options.dryRun ? existsSync(capture) : postCapturedReview(repository, options.number, capture, poster)
   if (!options.dryRun) {
     const body = statusCommentBody({ posted, headSha: pullRequest.headRefOid, scope: plan.scope, agentExitCode })
     upsertStatusComment(repository, options.number, body, poster)
