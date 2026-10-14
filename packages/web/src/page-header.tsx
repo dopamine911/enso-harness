@@ -84,7 +84,7 @@ function RunStatusChip({
   const said = (
     <>
       <span aria-hidden="true" className={RUN_DOT[state]} />
-      <span className={cn('font-semibold', RUN_WORD_COLOUR[state])}>{word}</span>
+      <span className={cn('shrink-0 font-semibold whitespace-nowrap', RUN_WORD_COLOUR[state])}>{word}</span>
       {detail === undefined ? null : (
         <span className="min-w-0 truncate text-muted-foreground max-md:hidden">{detail}</span>
       )}

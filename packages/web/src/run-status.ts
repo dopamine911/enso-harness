@@ -215,7 +215,10 @@ export function describeRunStatus(inputs: RunStatusInputs): RunStatus {
     return { kind: 'lost', since: liveView.state === 'live' ? undefined : liveView.since, reload: fault !== undefined }
   }
   if (fault !== undefined) return { kind: 'behind' }
-  if (dialog !== undefined) return { kind: 'waiting', dialogId: dialog.id, question: dialog.dialog.title }
+  if (dialog !== undefined) {
+    // One line (#914): a permission question's title is several — the tool, the rule, the input.
+    return { kind: 'waiting', dialogId: dialog.id, question: dialog.dialog.title.replaceAll(/\s+/g, ' ').trim() }
+  }
   if (inputs.generating) {
     const { step } = inputs.step
     const { stepSince } = inputs

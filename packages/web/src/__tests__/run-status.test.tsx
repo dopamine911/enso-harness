@@ -329,11 +329,18 @@ test('a question opens → "waiting on you" over the run, with its line, which g
 
 // ── 4. possibly stuck ────────────────────────────────────────────────────────
 
-test('⚠ no output for the threshold — keepalives arriving all along — is "possibly stuck", with a Stop; output again is working', async () => {
+test('⚠ no output for the threshold — keepalives and an extension’s status line arriving all along — is "possibly stuck", with a Stop; output again is working', async () => {
   const alpha = thread('alpha')
   const container = await mountPage(alpha)
   alpha.keepAlive()
   await alpha.settle(busy(1))
+  // The harness re-sends its status line whatever the model does (seen live, one a minute): not output.
+  const chatter = setInterval(() => {
+    alpha.server.frame(
+      observed({ kind: 'extension-ui-request', id: 's1', method: 'setStatus', blocking: false, origin: 'run' }),
+    )
+  }, 60)
+  pumps.splice(pumps.length, 0, () => clearInterval(chatter))
   await waitUntil(() => statusOf(container).includes(THREAD_STATUS_WORDS.stuck))
   expect(statusOf(container)).toMatch(/no output for \d+s \(model request open since \d\d:\d\d/)
   expect(statusOf(container)).not.toContain(THREAD_STATUS_WORDS.lost)

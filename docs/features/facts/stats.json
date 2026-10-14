@@ -6,7 +6,7 @@
       "steps": ["open a thread from the rail", "choose the **Stats** tab at the top of the thread"],
       "shown": ["2 refused by a guard — not failures", "Tokens", "Cost per turn", "Costliest calls"],
       "measured": {
-        "totalCost": "$0.1661",
+        "totalCost": "$0.1659",
         "failures": "1 · 12.5%",
         "offBranch": "$0.0302"
       }

@@ -136,7 +136,8 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   /** Whether this page is receiving the thread's updates (#914) — see {@link LiveView}. */
   readonly liveView: Store<LiveView>
   /**
-   * When the follow last carried a frame (#914), `Date.now()` — an event, never a keepalive.
+   * When the follow last carried the run's output (#914), `Date.now()`: an observation, never a
+   * keepalive, a snapshot or a status, nor an extension's fire-and-forget UI request (`carriesOutput`).
    * Undefined before the first. What "no output for 3 min" is measured from.
    */
   readonly outputAt: () => number | undefined

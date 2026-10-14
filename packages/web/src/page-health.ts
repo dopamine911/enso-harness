@@ -62,9 +62,11 @@ export const PAGE_HEALTH_TIMING = {
   stallMs: 10_000,
   /**
    * How long a follow may go without a single byte — the server's 5 s keepalive included — before
-   * the page says it lost its live view (#914): three keepalives missed.
+   * the page says it lost its live view (#914): two keepalives missed and the third nearly due. Not
+   * the full three (15 s): the watchdog reads every second, and #914 asks for it said within 15 s —
+   * measured live, a 15 s threshold read every 3.75 s said it after 16.9 s of a stopped server.
    */
-  silentMs: 15_000,
+  silentMs: 13_000,
   /** How often, while the live view is lost, the page asks whether the server answers again. */
   probeMs: 3000,
   /** How long the page tries to get a lost live view back before it asks for a Reload. */
@@ -110,14 +112,20 @@ export function clearPageFaultForTest(): void {
 }
 
 /**
- * Whether the server answers at all (#914): any response is an answer, a failed fetch is none. The
- * live-view check's probe (`live-view-check.ts`): the cheapest route, its body never read.
+ * Whether the server answers (#914): `/api/about` read OK within `probeMs`. A failed fetch is no
+ * answer, nor is one that hangs — a server stopped mid-run keeps the socket and says nothing — nor
+ * an error status: in front of the dev stack's proxy (`dev-proxy.ts`), a server that is down reads
+ * as a 500 from the proxy, not as a refused connection. The live-view check's probe
+ * (`live-view-check.ts`): the cheapest route, its body never read.
  */
 export async function serverAnswers(): Promise<boolean> {
   try {
-    const response = await fetch('/api/about', { cache: 'no-store' })
+    const response = await fetch('/api/about', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(PAGE_HEALTH_TIMING.probeMs),
+    })
     await response.body?.cancel()
-    return true
+    return response.ok
   } catch {
     return false
   }

@@ -7,6 +7,7 @@ import { gitChildEnvironment } from '../../packages/core/src/git.ts'
 import { isListening } from '../../packages/core/src/loopback.ts'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '../../packages/core/src/permission-rules.ts'
+import { THREAD_STATUS_WORDS } from '../../packages/core/src/thread-status-words.ts'
 import { startFeatureModel } from './feature-model.ts'
 import {
   ANSWER_ENDINGS,
@@ -337,13 +338,26 @@ async function scrollToTop(target: Locator): Promise<void> {
 
 // --- the session: typed, sent and answered through the page, as a user would --------------
 
+/**
+ * The thread's status bar at rest (#914): nothing running, nothing asked — never run here, or the
+ * last run finished, was stopped, or failed. Its first word says which.
+ */
+const AT_REST = new RegExp(
+  `^(${[THREAD_STATUS_WORDS.idle, THREAD_STATUS_WORDS.finished, THREAD_STATUS_WORDS.stopped, THREAD_STATUS_WORDS.failed].join('|')})$`,
+)
+
+/** Waits until the thread's status bar says it is at rest. */
+async function atRest(page: Page): Promise<void> {
+  await page.locator('#thread-status').getByText(AT_REST).first().waitFor({ timeout: STEP_TIMEOUT_MS })
+}
+
 /** Sends `prompt` from the composer and waits for the answer that ends with `ending`. */
 async function send(page: Page, prompt: string, ending: string): Promise<void> {
   const composer = page.getByPlaceholder('Ask pi something')
   await composer.fill(prompt)
   await composer.press('Enter')
   await page.getByText(ending, { exact: false }).last().waitFor({ timeout: STEP_TIMEOUT_MS })
-  await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
+  await atRest(page)
 }
 
 /** Runs a host command on the thread — what `/model` and `/compact` send from the palette. */
@@ -360,7 +374,7 @@ async function hostCommand(page: Page, threadId: string, name: string, value?: s
     { threadId, body: value === undefined ? { name } : { name, value } },
   )
   if (status >= 300) throw new Error(`feature-screenshots: /${name} answered ${status}`)
-  await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
+  await atRest(page)
 }
 
 /**
@@ -414,7 +428,7 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
   await sessionShots(page, 'permission-prompt')
   await yes.click()
   await page.getByText(ANSWER_ENDINGS[2], { exact: false }).last().waitFor({ timeout: STEP_TIMEOUT_MS })
-  await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
+  await atRest(page)
 
   // The command only starts the compaction: it is done once its summary call has been answered.
   await hostCommand(page, threadId, 'compact')
@@ -422,7 +436,7 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
     async () => existsSync(modelLog) && readFileSync(modelLog, 'utf8').includes('auxiliary'),
     'the compaction',
   )
-  await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
+  await atRest(page)
   await send(page, PROMPTS[3], ANSWER_ENDINGS[3])
   return threadId
 }
@@ -435,7 +449,7 @@ async function playIncidentThread(page: Page): Promise<string> {
   await panel.getByRole('button', { name: 'Start session' }).click()
   // A recorded report ends the run, so the thread is done once the card shows it.
   await page.getByText('The uncharitable read', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
-  await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
+  await atRest(page)
   return threadId
 }
 

@@ -277,8 +277,8 @@ export type AbortOutcome = 'aborted' | 'idle' | 'gone' | 'unreachable'
  * may go minutes without.
  *
  *   live    the follow is open and the server is heard from;
- *   silent  the follow is open and not one byte has arrived for `silentMs` (three keepalives
- *           missed): a dead connection the browser has not noticed, or a server that hung;
+ *   silent  the follow is open and not one byte has arrived for `silentMs` (the 5 s keepalive
+ *           missed twice): a dead connection the browser has not noticed, or a server that hung;
  *   ended   the follow closed, failed, never opened, or was abandoned after going silent.
  *
  * `since` is when the page last heard from the server. A silent follow that is heard from again is
@@ -314,6 +314,19 @@ export interface RunPulse {
   readonly composing: ComposingCall | undefined
   /** How the last run ended; undefined before one has, and once the next opens. */
   readonly ended: RunEnding | undefined
+}
+
+/**
+ * Whether a frame is the run's output (#914) — what "possibly stuck" waits on. Not a snapshot or a
+ * status (the run's lifecycle, not its work), and not an extension's fire-and-forget UI request: the
+ * harness's status line and widgets are re-sent every minute or so whatever the model does — measured
+ * live, one a minute through a model request that never answered, which kept the page from ever
+ * calling it stuck.
+ */
+function carriesOutput(frame: EnsoFollowFrame): boolean {
+  if (frame.type !== 'observation') return false
+  const { observation } = frame
+  return observation.kind !== 'extension-ui-request' || observation.blocking
 }
 
 /** Enough of a composing call's arguments to find its subject: pi's tools name it first. */
@@ -424,7 +437,8 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   /** Whether this page is receiving the thread's updates (#914) — see {@link LiveView}. */
   readonly liveView: Store<LiveView>
   /**
-   * When the follow last carried a frame (#914), `Date.now()` — an event, never a keepalive.
+   * When the follow last carried the run's output (#914), `Date.now()`: an observation, never a
+   * keepalive, a snapshot or a status, nor an extension's fire-and-forget UI request (`carriesOutput`).
    * Undefined before the first. What "no output for 3 min" is measured from.
    */
   readonly outputAt: () => number | undefined
@@ -920,7 +934,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /**
    * The watchdog on hearing from the server (#914): no byte for `silentMs` — the 5 s keepalive
-   * missed three times — and the live view is silent until one arrives. Not a fault by itself: the
+   * missed twice, read every second — and the live view is silent until one arrives. Not a fault by itself: the
    * page's live-view check decides whether to wait or to ask for a reload (`live-view-check.ts`).
    */
   function watchSilence(state: Following): () => void {
@@ -932,7 +946,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
         log.warn('the follow has been silent for {seconds}s: no event and no keepalive', { seconds })
         liveView.set({ state: 'silent', since: state.heardAt })
       },
-      Math.max(silentMs / 4, 10),
+      Math.min(Math.max(silentMs / 4, 10), 1000),
     )
     return () => clearInterval(timer)
   }
@@ -1012,6 +1026,16 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     heardAt: number
   }
 
+  /** One frame off the follow: observed if this page can read it, then the applied mark when nothing waits. */
+  function takeFrame(raw: unknown, state: Following): void {
+    if (admitted(raw)) {
+      if (carriesOutput(raw)) outputAt = Date.now()
+      observe(raw)
+    }
+    // A frame that queued nothing for the client is applied once it is observed.
+    if (queue.length === 0 && state.handing === undefined) appliedAt = Date.now()
+  }
+
   /**
    * Frames off the follow, observed into the queue, on their own loop so `send` can interleave
    * chunks. Ends when the server closes the follow, the wire fails, or `follow` aborts.
@@ -1025,10 +1049,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     try {
       for await (const raw of frames) {
         if (follow.aborted) break
-        outputAt = Date.now()
-        if (admitted(raw)) observe(raw)
-        // A frame that queued nothing for the client is applied once it is observed.
-        if (queue.length === 0 && state.handing === undefined) appliedAt = Date.now()
+        takeFrame(raw, state)
       }
       // The server closed it, or this page gave up on it in silence (`abandon`): `followClosed`
       // says so on the page; this is the record of why.
