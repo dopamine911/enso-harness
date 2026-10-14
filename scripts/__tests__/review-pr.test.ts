@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test'
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { gitChildEnvironment } from '../../packages/core/src/git.ts'
 import {
   claudeSessionFolder,
   type IssueComment,
@@ -6,8 +10,10 @@ import {
   parseReviewArguments,
   planReview,
   type PullRequestState,
+  removeAbandonedWorktrees,
   reviewSettings,
   runSummary,
+  shouldRetryReviewer,
   STATUS_MARKER,
   statusCommentBody,
   statusCommentsOf,
@@ -185,4 +191,49 @@ test('⚠ a failed status keeps the previously reviewed head, so the retry is ne
   expect(
     lastReviewedHeadOf(statusCommentBody({ posted: false, headSha: HEAD, scope: 'full', agentExitCode: 1 })),
   ).toBeUndefined()
+})
+
+/** docker-agent's long-line bug before the post loses the review; after it, the review stands (#981 Part 4). */
+test('the reviewer is run once more only when docker-agent failed and nothing was captured', () => {
+  expect(shouldRetryReviewer(1, false)).toBe(true)
+  expect(shouldRetryReviewer(1, true)).toBe(false)
+  expect(shouldRetryReviewer(0, false)).toBe(false)
+  expect(shouldRetryReviewer(0, true)).toBe(false)
+})
+
+/**
+ * ⚠ A WORKTREE LEFT BY A KILLED WORKER IS REMOVED AT THE NEXT START (#993's review). Run against a real
+ * repository: one run folder whose worktree git knows, one whose tree is a plain directory, and one
+ * folder that is not a run.
+ */
+test('⚠ abandoned run worktrees are removed, registered or not, and nothing else is touched', () => {
+  const repository = mkdtempSync(join(tmpdir(), 'review-abandoned-repo-'))
+  const git = (...command: string[]): void => {
+    const answer = Bun.spawnSync(['git', ...command], {
+      cwd: repository,
+      env: gitChildEnvironment(),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    if (answer.exitCode !== 0) throw new Error(answer.stderr.toString())
+  }
+  git('init', '-q')
+  git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'root')
+  const runs = mkdtempSync(join(tmpdir(), 'review-abandoned-runs-'))
+  const registered = join(runs, 'pr-1-abcdef0-1000')
+  mkdirSync(registered)
+  git('worktree', 'add', '-q', '--detach', join(registered, 'tree'))
+  const plain = join(runs, 'pr-2-abcdef0-2000')
+  mkdirSync(join(plain, 'tree'), { recursive: true })
+  mkdirSync(join(runs, 'queue'))
+  expect(removeAbandonedWorktrees(runs, repository).toSorted()).toEqual(['pr-1-abcdef0-1000', 'pr-2-abcdef0-2000'])
+  expect(existsSync(join(registered, 'tree'))).toBe(false)
+  expect(existsSync(join(plain, 'tree'))).toBe(false)
+  expect(existsSync(join(runs, 'queue'))).toBe(true)
+  const worktrees = Bun.spawnSync(['git', 'worktree', 'list'], {
+    cwd: repository,
+    env: gitChildEnvironment(),
+    stdout: 'pipe',
+  }).stdout.toString()
+  expect(worktrees.trim().split('\n')).toHaveLength(1)
 })

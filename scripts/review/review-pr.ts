@@ -30,12 +30,13 @@
  * would run, never the pull request's.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { gitChildEnvironment } from '../../packages/core/src/git.ts'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
-import { readReviewAppConfig, reviewAppIdentity } from './app-token.ts'
-import { RUNS_DIRECTORY } from './review-paths.ts'
+import { readReviewAppConfig, reviewAppIdentity, reviewAppPostToken } from './app-token.ts'
+import { RUNS_DIRECTORY, runFolderName, runFolderOf } from './review-paths.ts'
 import type { ToolGrant } from './tool-grant-hook.ts'
 import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow } from './workflow-config.ts'
 
@@ -215,7 +216,8 @@ function run(command: readonly string[], options: { cwd?: string; env?: Record<s
 interface Poster {
   readonly login: string
   readonly readEnvironment: Record<string, string> | undefined
-  readonly postEnvironment: Record<string, string> | undefined
+  /** Mints the runner's posting token when called, right before the post (`undefined`: the owner's login). */
+  readonly postEnvironment: () => Promise<Record<string, string> | undefined>
 }
 
 function runGh(command: readonly string[], environment: Record<string, string> | undefined): string {
@@ -249,18 +251,24 @@ function pullRequestComments(repository: string, number: number, poster: Poster)
     .map((line) => JSON.parse(line) as IssueComment)
 }
 
-function upsertStatusComment(repository: string, number: number, body: string, poster: Poster): void {
+function upsertStatusComment(
+  target: { readonly repository: string; readonly number: number },
+  body: string,
+  poster: Poster,
+  postEnvironment: Record<string, string> | undefined,
+): void {
+  const { repository, number } = target
   const own = statusCommentsOf(pullRequestComments(repository, number, poster), poster.login).own
   if (own === undefined) {
     runGh(
       ['gh', 'api', '-X', 'POST', `repos/${repository}/issues/${number}/comments`, '-f', `body=${body}`],
-      poster.postEnvironment,
+      postEnvironment,
     )
     return
   }
   runGh(
     ['gh', 'api', '-X', 'PATCH', `repos/${repository}/issues/comments/${own.id}`, '-f', `body=${body}`],
-    poster.postEnvironment,
+    postEnvironment,
   )
 }
 
@@ -341,25 +349,51 @@ function writeGrant(tree: string, runDirectory: string, grant: ToolGrant): void 
   writeFileSync(join(tree, '.claude', 'settings.local.json'), reviewSettings(grantPath))
 }
 
-/** Runs the reviewer and answers docker-agent's exit code. Its output goes to `review.log`. */
-function runReviewer(tree: string, runDirectory: string, prompt: string, poster: Poster): number {
-  const configuration = join(runDirectory, 'reviewer.yaml')
-  writeFileSync(configuration, agentConfiguration())
-  const log = Bun.file(join(runDirectory, 'review.log'))
-  const reviewer = Bun.spawnSync(['docker', 'agent', 'run', configuration, '--exec', '--working-dir', tree, prompt], {
-    stdout: log,
-    stderr: log,
-    ...(poster.readEnvironment === undefined ? {} : { env: poster.readEnvironment }),
-  })
-  return reviewer.exitCode
+/**
+ * Whether a finished reviewer run should be run once more: docker-agent failed AND nothing was
+ * captured. docker-agent's line reader fails on a Claude Code output line over 64 KiB (`bufio.Scanner:
+ * token too long`, 3 of 7 runs on #989); after the post that is harmless, before it the review is lost.
+ * One retry, not a loop: a second failure is left to the worker's own retry at its next poll.
+ */
+export function shouldRetryReviewer(agentExitCode: number, captured: boolean): boolean {
+  return agentExitCode !== 0 && !captured
 }
 
-/** What one run did: a line for the terminal, and whether it failed (no review reached the pull request). */
+/** Runs the reviewer, and once more when it failed before capturing anything (`shouldRetryReviewer`). Answers the last exit code. */
+function runReviewerWithRetry(reviewer: ReviewerRun, capture: string): number {
+  const first = runReviewer(reviewer, 'review.log')
+  if (!shouldRetryReviewer(first, existsSync(capture))) return first
+  return runReviewer(reviewer, 'review-retry.log')
+}
+
+/** One reviewer run's inputs: where it reviews, where its files go, what it is told, who it reads as. */
+interface ReviewerRun {
+  readonly tree: string
+  readonly runDirectory: string
+  readonly prompt: string
+  readonly poster: Poster
+}
+
+/** Runs the reviewer and answers docker-agent's exit code. Its output goes to `<runDirectory>/<logName>`. */
+function runReviewer(reviewer: ReviewerRun, logName: string): number {
+  const configuration = join(reviewer.runDirectory, 'reviewer.yaml')
+  writeFileSync(configuration, agentConfiguration())
+  const log = Bun.file(join(reviewer.runDirectory, logName))
+  const command = ['docker', 'agent', 'run', configuration, '--exec', '--working-dir', reviewer.tree, reviewer.prompt]
+  const environment = reviewer.poster.readEnvironment
+  return Bun.spawnSync(command, {
+    stdout: log,
+    stderr: log,
+    ...(environment === undefined ? {} : { env: environment }),
+  }).exitCode
+}
+
+/** What one run did: a line for the terminal, whether it failed (no review reached the pull request), and the head it was at. */
 export interface ReviewResult {
   readonly summary: string
   readonly failed: boolean
-  /** The head the run was at, when it got that far: the worker counts failed attempts per head. */
-  readonly head: string | undefined
+  /** The head the run was at; the worker counts failed attempts per head. */
+  readonly head: string
 }
 
 export interface ReviewOptions {
@@ -372,12 +406,17 @@ export interface ReviewOptions {
  * never posts (`app-token.ts#READ_TOKEN_PERMISSIONS`), so this is the one place a review reaches the
  * pull request, and whether it did is known, not searched for.
  */
-function postCapturedReview(repository: string, number: number, capture: string, poster: Poster): boolean {
+function postCapturedReview(
+  repository: string,
+  number: number,
+  capture: string,
+  postEnvironment: Record<string, string> | undefined,
+): boolean {
   if (!existsSync(capture)) return false
   try {
     runGh(
       ['gh', 'api', '-X', 'POST', `repos/${repository}/issues/${number}/comments`, '-F', `body=@${capture}`],
-      poster.postEnvironment,
+      postEnvironment,
     )
     return true
   } catch {
@@ -396,13 +435,14 @@ async function reviewPoster(repository: string): Promise<Poster> {
   const config = readReviewAppConfig()
   if (config === undefined) {
     const login = run(['gh', 'api', 'user', '--jq', '.login']).trim()
-    return { login, readEnvironment: undefined, postEnvironment: undefined }
+    return { login, readEnvironment: undefined, postEnvironment: () => Promise.resolve(undefined) }
   }
-  const identity = await reviewAppIdentity(config, repository.split('/')[1] ?? repository)
+  const repositoryName = repository.split('/')[1] ?? repository
+  const identity = await reviewAppIdentity(config, repositoryName)
   return {
     login: identity.login,
     readEnvironment: { ...process.env, GH_TOKEN: identity.readToken },
-    postEnvironment: { ...process.env, GH_TOKEN: identity.postToken },
+    postEnvironment: async () => ({ ...process.env, GH_TOKEN: await reviewAppPostToken(config, repositoryName) }),
   }
 }
 
@@ -433,8 +473,30 @@ export function runSummary(run: {
   return `#${run.number}: ${outcome}; docker-agent exited ${run.agentExitCode}${listNote}; log ${run.log}`
 }
 
+/**
+ * Posts the captured review and the status comment, with the posting token minted now. Answers whether
+ * the review reached the pull request.
+ */
+async function publishReview(
+  review: ReviewRun,
+  run: { readonly capture: string; readonly agentExitCode: number; readonly scope: string },
+): Promise<boolean> {
+  const { poster, options, pullRequest, repository } = review
+  const postEnvironment = await poster.postEnvironment()
+  const posted = postCapturedReview(repository, options.number, run.capture, postEnvironment)
+  const body = statusCommentBody({
+    posted,
+    headSha: pullRequest.headRefOid,
+    scope: run.scope,
+    agentExitCode: run.agentExitCode,
+    previouslyReviewedHead: review.lastReviewedHead,
+  })
+  upsertStatusComment({ repository, number: options.number }, body, poster, postEnvironment)
+  return posted
+}
+
 /** Everything after the worktree exists: context, settings, the reviewer, the status. */
-function reviewInWorktree(review: ReviewRun): ReviewResult {
+async function reviewInWorktree(review: ReviewRun): Promise<ReviewResult> {
   const { poster, options, pullRequest, repository, plan, runDirectory, tree } = review
   const config = readReviewWorkflow(
     run(['git', 'show', `${pullRequest.baseRefOid}:${REVIEW_WORKFLOW_PATH}`], { cwd: tree }),
@@ -456,18 +518,11 @@ function reviewInWorktree(review: ReviewRun): ReviewResult {
     scope: plan.scope,
     headSha: pullRequest.headRefOid,
   }
-  const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values), poster)
-  const posted = options.dryRun ? existsSync(capture) : postCapturedReview(repository, options.number, capture, poster)
-  if (!options.dryRun) {
-    const body = statusCommentBody({
-      posted,
-      headSha: pullRequest.headRefOid,
-      scope: plan.scope,
-      agentExitCode,
-      previouslyReviewedHead: review.lastReviewedHead,
-    })
-    upsertStatusComment(repository, options.number, body, poster)
-  }
+  const prompt = fillPrompt(config.promptTemplate, values)
+  const agentExitCode = runReviewerWithRetry({ tree, runDirectory, prompt, poster }, capture)
+  const posted = options.dryRun
+    ? existsSync(capture)
+    : await publishReview(review, { capture, agentExitCode, scope: plan.scope })
   const summary = runSummary({
     number: options.number,
     posted,
@@ -501,18 +556,53 @@ export async function reviewPullRequest(options: ReviewOptions): Promise<ReviewR
   if (plan.kind === 'skip') {
     return { summary: `#${options.number}: skipped — ${plan.reason}`, failed: false, head: pullRequest.headRefOid }
   }
-  const runDirectory = join(
-    RUNS_DIRECTORY,
-    `pr-${options.number}-${pullRequest.headRefOid.slice(0, SHORT_SHA_LENGTH)}-${Date.now()}`,
-  )
+  const runDirectory = join(RUNS_DIRECTORY, runFolderName(options.number, pullRequest.headRefOid, Date.now()))
   mkdirSync(runDirectory, { recursive: true })
   const tree = join(runDirectory, 'tree')
   addWorktree(pullRequest, tree)
   try {
-    return reviewInWorktree({ poster, options, pullRequest, repository, plan, runDirectory, tree, lastReviewedHead })
+    return await reviewInWorktree({
+      poster,
+      options,
+      pullRequest,
+      repository,
+      plan,
+      runDirectory,
+      tree,
+      lastReviewedHead,
+    })
   } finally {
     run(['git', 'worktree', 'remove', '--force', tree], { cwd: REPOSITORY_ROOT })
   }
+}
+
+/**
+ * Removes the worktrees runs left behind when their worker died mid-review (SIGKILL, a closed terminal,
+ * a reboot): `reviewPullRequest`'s `finally` never ran, and `git worktree prune` keeps a worktree whose
+ * directory still exists (#993's review). ⚠ Call it only while holding the worker lock: no review is
+ * in progress then, so every run folder that still has a `tree/` is abandoned. Answers the folders cleaned.
+ */
+export function removeAbandonedWorktrees(
+  runsDirectory: string = RUNS_DIRECTORY,
+  repositoryRoot: string = REPOSITORY_ROOT,
+): string[] {
+  if (!existsSync(runsDirectory)) return []
+  const abandoned = readdirSync(runsDirectory).filter(
+    (folderName) => runFolderOf(folderName) !== undefined && existsSync(join(runsDirectory, folderName, 'tree')),
+  )
+  // git in `repositoryRoot`, not in whatever repository an inherited `GIT_DIR` names (a git hook sets one).
+  const environment = gitChildEnvironment()
+  for (const folderName of abandoned) {
+    const tree = join(runsDirectory, folderName, 'tree')
+    const removed = Bun.spawnSync(['git', 'worktree', 'remove', '--force', tree], {
+      cwd: repositoryRoot,
+      env: environment,
+    })
+    // A tree git does not know as a worktree (its folder copied, or the repository moved) is just a directory.
+    if (removed.exitCode !== 0) rmSync(tree, { recursive: true, force: true })
+  }
+  Bun.spawnSync(['git', 'worktree', 'prune'], { cwd: repositoryRoot, env: environment })
+  return abandoned
 }
 
 /** The command line: a pull request number, and `--dry-run`. */

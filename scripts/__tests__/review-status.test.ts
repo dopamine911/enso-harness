@@ -2,8 +2,9 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { type RunFolder, runFolderName, runFolderOf } from '../review/review-paths.ts'
 import { queuedReviews } from '../review/review-queue.ts'
-import { lastToolCall, readableDuration, renderReviewStatus, runFolderOf, workerFrom } from '../review/review-status.ts'
+import { lastToolCall, readableDuration, renderReviewStatus, workerFrom } from '../review/review-status.ts'
 
 test('a run folder name reads back as its pull request, head and start; anything else is not a run', () => {
   expect(runFolderOf('pr-993-85b034f-1791993464525')).toEqual({
@@ -49,6 +50,7 @@ test('the status names the worker, the queue, each review in progress, and the r
       pid: 841_451,
       uptime: '15m 02s',
       checkout: '/repos/zen-harness-foundation (fd277b2 Merge …)',
+      startedAt: 0,
     },
     queued: [970, 993],
     inProgress: [
@@ -66,15 +68,17 @@ test('the status names the worker, the queue, each review in progress, and the r
   expect(idle).toContain('in progress: nothing')
 })
 
-test('the worker is none without a lock, stale when its pid is gone, and running with an uptime otherwise', () => {
-  expect(workerFrom(undefined, undefined, '')).toEqual({ kind: 'none' })
-  expect(workerFrom('4242', undefined, '')).toEqual({ kind: 'stale', pid: 4242 })
-  expect(workerFrom('4242', '  ', '')).toEqual({ kind: 'stale', pid: 4242 })
-  expect(workerFrom('4242', '  900\n', '/repos/x (abc)')).toEqual({
+test('the worker is none without a lock, stale when its pid is gone, and running with an uptime and a start otherwise', () => {
+  const now = 1_000_000
+  expect(workerFrom(undefined, undefined, '', now)).toEqual({ kind: 'none' })
+  expect(workerFrom('4242', undefined, '', now)).toEqual({ kind: 'stale', pid: 4242 })
+  expect(workerFrom('4242', '  ', '', now)).toEqual({ kind: 'stale', pid: 4242 })
+  expect(workerFrom('4242', '  900\n', '/repos/x (abc)', now)).toEqual({
     kind: 'running',
     pid: 4242,
     uptime: '15m 00s',
     checkout: '/repos/x (abc)',
+    startedAt: 100_000,
   })
 })
 
@@ -95,4 +99,23 @@ test('with no worker running, a run folder that kept its worktree is shown as ab
   expect(renderReviewStatus({ worker: { kind: 'none' }, queued: [], inProgress: [run], recent: [] })).toContain(
     'abandoned  : #969 at c9d85de, started 2h 10m ago',
   )
+})
+
+/** ⚠ A FOLDER OLDER THAN THE RUNNING WORKER IS NOT ITS REVIEW (#993's review). */
+test('⚠ with a worker running, a run folder that started before it is abandoned; one after it is in progress', () => {
+  const worker = { kind: 'running', pid: 1, uptime: '5m', checkout: '/x', startedAt: 5000 } as const
+  const run = (startedAt: number): { run: RunFolder; elapsed: string; lastCall: undefined } => ({
+    run: { number: 7, shortHead: 'abcdef0', startedAt },
+    elapsed: '1m',
+    lastCall: undefined,
+  })
+  const rendered = renderReviewStatus({ worker, queued: [], inProgress: [run(4000), run(6000)], recent: [] })
+  expect(rendered).toContain('abandoned  : #7 at abcdef0')
+  expect(rendered).toContain('in progress: #7 at abcdef0')
+})
+
+test('a run folder name is written and read back by one definition', () => {
+  const name = runFolderName(994, 'cb6d0a99a62078291f3816a7463c9f1708595d8a', 1_791_997_871_168)
+  expect(name).toBe('pr-994-cb6d0a9-1791997871168')
+  expect(runFolderOf(name)).toEqual({ number: 994, shortHead: 'cb6d0a9', startedAt: 1_791_997_871_168 })
 })

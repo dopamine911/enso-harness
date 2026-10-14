@@ -9,6 +9,7 @@ import {
   readReviewAppConfig,
   readTokenPermissions,
   reviewAppIdentity,
+  reviewAppPostToken,
 } from '../review/app-token.ts'
 
 /** A throwaway key pair: the test signs with one half and checks with the other. */
@@ -86,12 +87,11 @@ test("⚠ the model's token is read-only and the runner's only posts, both for o
     requests.push({ url, body })
     return new Response(JSON.stringify(fakeAnswer(url, requests.length)), { status: 200 })
   }
-  const identity = await reviewAppIdentity(
-    { appId: APP_ID, installationId: INSTALLATION_ID, privateKeyPath: keyPath },
-    'zen-harness-foundation',
-    fakeGithub,
-  )
-  expect(identity).toEqual({ readToken: 'token-3', postToken: 'token-4', login: 'reviewer[bot]' })
+  const config = { appId: APP_ID, installationId: INSTALLATION_ID, privateKeyPath: keyPath }
+  const identity = await reviewAppIdentity(config, 'zen-harness-foundation', fakeGithub)
+  expect(identity).toEqual({ readToken: 'token-3', login: 'reviewer[bot]' })
+  const postToken = await reviewAppPostToken(config, 'zen-harness-foundation', fakeGithub)
+  expect(postToken).toBe('token-4')
   const [, , readRequest, postRequest] = requests
   expect(readRequest?.url).toEndWith(`/app/installations/${INSTALLATION_ID}/access_tokens`)
   expect(readRequest?.body).toEqual({

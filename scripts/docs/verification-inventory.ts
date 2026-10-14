@@ -135,6 +135,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Recognizes the known fatal stderr banners; arbitrary tool corruption with different output is outside the matcher. It also holds the two pages that state what the gate IS — the step lists and the gate census — against `GATES` and the generated inventory, but says nothing about the prose around them.',
   },
+  'test/git-environment-gate.test.ts': {
+    roots: ['packages', 'scripts', 'test'],
+    exceptions: [],
+    limitation:
+      'A per-file check: a test file that runs `git init` must contain an `env:` or a call to `gitChildEnvironment()` / `withoutGitLocalVariables()`. A file with one `env:` somewhere and a separate bare `git init` would pass.',
+  },
   'test/glossary-gate.test.ts': {
     rootArrays: ['SEARCHED_ROOTS'],
     exceptions: [

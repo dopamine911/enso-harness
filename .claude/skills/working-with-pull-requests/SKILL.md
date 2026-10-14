@@ -104,7 +104,7 @@ gh api repos/dopamine911/zen-harness-foundation/issues/<number>/comments --pagin
 - **Check the status's `head=`** against the SHA you pushed. A review of an older head is not a
   review of your fix.
 - **A ❌ status** means no review was posted. A running worker tries that head again at its next poll
-  (every 3 minutes), up to 3 times per head; after that its log says "giving up", and only
+  (every 3 minutes), for up to 3 failed attempts per head in all (so 2 retries); after that its log says "giving up", and only
   `bun run review-notify` retries it. If no worker is running, notify again once one is. The retry
   reviews the commits since the last head that was reviewed. A ✅ with "docker-agent exited 1
   after the review was posted" is a known upstream issue, and the review stands.
