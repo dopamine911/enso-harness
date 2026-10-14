@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { type DiffHunk, type DiffLine, hiddenBefore, parsePatch, type SplitRow, splitRows } from './diff-rows.ts'
 import { buildFileTree, filesInOrder, type TreeNode } from './file-tree.ts'
+import { type LiveRun, type PendingWrite, runningEmptyText } from './live-request.ts'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, readThreadRoute, type ThreadReadOutcome } from './route-read.ts'
 import { baselineText } from './thread-git.tsx'
@@ -378,10 +379,13 @@ function RepositoryChanges({
   repository,
   files,
   truncated,
+  running,
 }: {
   readonly repository: EnsoGitRepository
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
+  /** What an empty diff says while a run is in progress (#913). */
+  readonly running: string | undefined
 }): React.ReactNode {
   return (
     <ChangedFiles
@@ -402,7 +406,7 @@ function RepositoryChanges({
       }
       files={files}
       truncated={truncated}
-      nothingText="Nothing differs: the tree matches the baseline."
+      nothingText={running ?? 'Nothing differs: the tree matches the baseline.'}
     />
   )
 }
@@ -415,10 +419,12 @@ function CopyChanges({
   project,
   files,
   truncated,
+  running,
 }: {
   readonly project: string
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
+  readonly running: string | undefined
 }): React.ReactNode {
   // The project directory's name; the whole path is its title.
   const name = project.split('/').findLast((part) => part !== '') ?? project
@@ -431,24 +437,104 @@ function CopyChanges({
       }
       files={files}
       truncated={truncated}
-      nothingText="Nothing differs: the copy matches the project as it was copied."
+      nothingText={running ?? 'Nothing differs: the copy matches the project as it was copied.'}
     />
   )
 }
 
-/** Pure view of the outcome: every state said as what it is. */
-export function ThreadChangesView({ outcome }: { readonly outcome: ChangesOutcome }): React.ReactNode {
+/** How much of a pending write's content is drawn: its latest stretch — the model writes at the end. */
+const PENDING_TAIL_CHARS = 16_384
+
+/** The pending write's state in words — every one says it is not applied. */
+const PENDING_WORDS: Readonly<Record<PendingWrite['state'], string>> = {
+  composing: 'being written — not applied yet',
+  judging: 'written — not applied yet: the guards, the permission rules and the tool have not answered',
+  refused: 'refused — not applied',
+  failed: 'failed — not applied',
+}
+
+/** `812 B`, `21 KB`: how much of the call's arguments have streamed. */
+function sizeText(size: number): string {
+  return size < 1024 ? `${size} B` : `${Math.round(size / 1024)} KB`
+}
+
+/**
+ * A write or an edit the run has not applied (#913): the model's output, drawn as text and labelled
+ * as unapplied — never as a diff. A refused or failed call keeps only its path and the reason.
+ */
+function PendingWriteCard({ pending }: { readonly pending: PendingWrite }): React.ReactNode {
+  const { change } = pending
+  const dropped = pending.state === 'refused' || pending.state === 'failed'
+  const content = change.content ?? ''
+  const tail = content.length > PENDING_TAIL_CHARS ? content.slice(-PENDING_TAIL_CHARS) : content
+  return (
+    <section
+      aria-label="pending write"
+      data-pending-write={pending.state}
+      className="flex max-h-1/2 min-h-0 shrink-0 flex-col border-b border-dashed"
+    >
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm">
+        <code className="font-mono font-medium text-foreground">
+          {change.tool} {change.path ?? '…'}
+        </code>
+        <span className={dropped ? 'font-medium text-refuse' : 'font-medium text-foreground'}>
+          {PENDING_WORDS[pending.state]}
+        </span>
+        {dropped ? null : (
+          <span className="ml-auto font-mono text-xs text-muted-foreground" title="the call's arguments so far">
+            {sizeText(change.size)} so far
+          </span>
+        )}
+      </header>
+      {dropped ? (
+        <div className="grid gap-1 overflow-auto px-4 pb-2 text-sm text-muted-foreground">
+          <p className="whitespace-pre-wrap">{pending.reason.length > 0 ? pending.reason : 'no reason was given'}</p>
+          <p className="text-xs">Nothing was written by this call, and its preview is gone.</p>
+        </div>
+      ) : (
+        // Reversed column: the scroll stays at the latest line as the content grows, with no script.
+        <div className="flex min-h-0 flex-col-reverse overflow-auto bg-popover">
+          <pre className="px-4 py-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
+            {change.content === undefined
+              ? change.edits.map((edit, index) => (
+                  // An edit's replacements in order: they have no identity but their place.
+                  // biome-ignore lint/suspicious/noArrayIndexKey: replacements stream in order and never move
+                  <span key={index} className="block">
+                    {edit.oldText === undefined ? null : <span className="block text-refuse">− {edit.oldText}</span>}
+                    {edit.newText === undefined ? null : (
+                      <span className="block text-foreground">+ {edit.newText}</span>
+                    )}
+                  </span>
+                ))
+              : `${tail.length < content.length ? `… ${sizeText(content.length - tail.length)} earlier\n` : ''}${tail}`}
+          </pre>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** What the changes say, the pending write aside. */
+function ChangesBody({
+  outcome,
+  running,
+}: {
+  readonly outcome: ChangesOutcome
+  readonly running: string | undefined
+}): React.ReactNode {
   if (outcome.kind === 'reading') {
     return <p className="px-4 py-6 text-sm text-muted-foreground">reading the changes…</p>
   }
   if (outcome.kind === 'none') {
-    return <p className="px-4 py-6 text-sm text-muted-foreground">Nothing has run in this thread yet.</p>
+    return <p className="px-4 py-6 text-sm text-muted-foreground">{running ?? 'Nothing has run in this thread yet.'}</p>
   }
   if (outcome.kind === 'failed') {
     return <p className="px-4 py-6 text-sm text-refuse">The changes could not be read: {outcome.problem}</p>
   }
   const { git, files, truncated, copy } = outcome.payload
-  if (copy !== null) return <CopyChanges project={copy.project} files={files} truncated={truncated} />
+  if (copy !== null) {
+    return <CopyChanges project={copy.project} files={files} truncated={truncated} running={running} />
+  }
   if (git.kind === 'not-a-repository') {
     return (
       <p className="px-4 py-6 text-sm text-muted-foreground">
@@ -459,14 +545,50 @@ export function ThreadChangesView({ outcome }: { readonly outcome: ChangesOutcom
   if (git.kind === 'unavailable') {
     return <p className="px-4 py-6 text-sm text-refuse">git could not answer: {git.reason}</p>
   }
-  return <RepositoryChanges repository={git} files={files} truncated={truncated} />
+  return <RepositoryChanges repository={git} files={files} truncated={truncated} running={running} />
+}
+
+/**
+ * Pure view of the outcome: every state said as what it is — and, while a run is in flight (#913),
+ * the write it is composing above the diff, and an empty diff saying the run is in progress.
+ */
+export function ThreadChangesView({
+  outcome,
+  live,
+  pending,
+}: {
+  readonly outcome: ChangesOutcome
+  readonly live?: LiveRun | undefined
+  readonly pending?: PendingWrite | undefined
+}): React.ReactNode {
+  const since = live?.runSince ?? live?.request?.startedAt
+  const running =
+    live === undefined || since === undefined
+      ? undefined
+      : `Nothing differs yet: ${runningEmptyText(false, since, live.now)}.`
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {pending === undefined ? null : <PendingWriteCard pending={pending} />}
+      <div className="min-h-0 flex-1">
+        <ChangesBody outcome={outcome} running={running} />
+      </div>
+    </div>
+  )
 }
 
 /**
  * The view wired to its thread: read on open, whenever `moment` changes (a tool result settled, the
  * run started or ended) and whenever the thread's usage moves.
  */
-export function ThreadChanges({ moment }: { readonly moment: string }): React.ReactNode {
+export function ThreadChanges({
+  moment,
+  live,
+  pending,
+}: {
+  readonly moment: string
+  readonly live?: LiveRun | undefined
+  readonly pending?: PendingWrite | undefined
+}): React.ReactNode {
   const outcome = useReadOnUsage<ChangesOutcome>(readThreadChanges, ANALYSIS_READING, moment)
-  return <ThreadChangesView outcome={outcome} />
+  return <ThreadChangesView outcome={outcome} live={live} pending={pending} />
 }

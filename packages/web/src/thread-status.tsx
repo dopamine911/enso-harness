@@ -11,6 +11,7 @@ import {
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { useEffect, useLayoutEffect, useState } from 'react'
+import { IN_FLIGHT_ESTIMATE_TITLE, outputCharsText, requestOutput } from './live-request.ts'
 import { STATUS_BUTTON } from './menu-chrome.ts'
 import { useThreadReadable } from './model-state.tsx'
 import { PAGE_FAULT_WORDS, pageFault } from './page-health.ts'
@@ -383,6 +384,11 @@ function WorkingDetail({
           run {formatElapsed(now - status.runSince)}
         </span>
       )}
+      {status.request === undefined || requestOutput(status.request) === 0 ? null : (
+        <span title={`this model request's output so far — ${IN_FLIGHT_ESTIMATE_TITLE}`}>
+          {outputCharsText(requestOutput(status.request))}
+        </span>
+      )}
       {tail.length === 0 ? null : (
         <button
           type="button"
@@ -631,7 +637,7 @@ function useThreadStatusAnnouncement(
  * stuck" move with it, not with events — the moment nothing arrives is the moment that matters. No
  * timer at rest.
  */
-function useRunClock(running: boolean): number {
+export function useRunClock(running: boolean): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!running) return undefined

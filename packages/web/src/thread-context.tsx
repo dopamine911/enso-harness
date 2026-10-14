@@ -17,9 +17,18 @@ import {
   timeText,
 } from './context-parts.tsx'
 import { cn } from './lib/utils.ts'
+import {
+  estimatedTokens,
+  estimatedTokensText,
+  IN_FLIGHT_ESTIMATE_TITLE,
+  type LiveRun,
+  outputCharsText,
+  requestOutput,
+} from './live-request.ts'
 import { useThreadReadable } from './model-state.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readNothingRan, readThreadAnalysis } from './route-read.ts'
+import { formatElapsed } from './run-status.ts'
 import { COMPACT, countText } from './stats-table.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import {
@@ -281,13 +290,99 @@ interface TrendPlotProps {
   readonly mode: TrendMode
   readonly pickedIndex: number
   readonly onPick: (index: number) => void
+  /** The request in flight (#913), drawn after the bars in Total mode. */
+  readonly inFlight?: InFlightRequest | undefined
+}
+
+/**
+ * The model request in flight (#913): its input is pi's `next` estimate as of the request's start,
+ * its output what has streamed so far — both estimates; the provider's count replaces the bar when
+ * the request completes.
+ */
+interface InFlightRequest {
+  readonly turn: number
+  readonly input: EnsoContextMakeup
+  /** Characters streamed so far. */
+  readonly output: number
+  readonly since: number
+  readonly now: number
+}
+
+/** The in-flight bar's words: what it is, its two estimates, and that it is not a count. */
+function inFlightLabel(inFlight: InFlightRequest): string {
+  return `request ${inFlight.turn} in progress · ${formatElapsed(inFlight.now - inFlight.since)} · input ${estimateText(totalOf(inFlight.input))} (pi’s estimate) · output ${estimatedTokensText(inFlight.output)} so far (${outputCharsText(inFlight.output)})`
+}
+
+/** The in-flight bar: dashed, its output hatched on top of its input, never a button — there is no request to open yet. */
+function InFlightBar({ inFlight, scale }: { inFlight: InFlightRequest; scale: number }): React.ReactNode {
+  const categoryOf = useCategoryLabel()
+  const output = estimatedTokens(inFlight.output)
+  const detail = CONTEXT_CATEGORIES.map(
+    (category) => `${categoryOf(category)} ${estimateText(inFlight.input[category])}`,
+  )
+  return (
+    <span
+      role="img"
+      data-in-flight=""
+      aria-label={`${inFlightLabel(inFlight)}, estimated`}
+      title={[`${inFlightLabel(inFlight)} — estimates until the provider counts it`, ...detail].join('\n')}
+      className="relative flex max-w-16 min-w-2.5 flex-1 flex-col rounded-xs outline-1 outline-offset-1 outline-foreground outline-dashed"
+    >
+      <span className="flex min-h-0 flex-1 flex-col justify-end opacity-60">
+        {output > 0 ? (
+          <span
+            className="block w-full shrink-0"
+            style={{
+              height: `${(output / scale) * 100}%`,
+              background: `repeating-linear-gradient(135deg, ${CATEGORY_COLOR.assistant} 0 var(--spacing), transparent var(--spacing) calc(var(--spacing) * 2))`,
+            }}
+          />
+        ) : null}
+        {[...CONTEXT_CATEGORIES].toReversed().map((category) =>
+          inFlight.input[category] > 0 ? (
+            <span
+              key={category}
+              className="block w-full shrink-0"
+              style={{
+                height: `${(inFlight.input[category] / scale) * 100}%`,
+                background: CATEGORY_COLOR[category],
+              }}
+            />
+          ) : null,
+        )}
+      </span>
+    </span>
+  )
+}
+
+/** Under the bars while a request is in flight: its figures, and that they are estimates (#913). */
+function InFlightLine({
+  inFlight,
+  first,
+}: {
+  inFlight: InFlightRequest | undefined
+  /** No request has completed yet. */
+  first: boolean
+}): React.ReactNode {
+  if (inFlight === undefined) return null
+  return (
+    <p data-in-flight-line="" className="text-xs text-muted-foreground" title={IN_FLIGHT_ESTIMATE_TITLE}>
+      <span className="font-medium text-foreground">{inFlightLabel(inFlight)}</span> — estimates, not counts: the
+      provider’s count replaces this bar when the request completes
+      {first ? ' · the first response is still running' : ''}
+    </p>
+  )
 }
 
 function TrendPlot(props: TrendPlotProps): React.ReactNode {
   const { bars, requests, granularity, mode, pickedIndex, onPick } = props
+  const inFlight = mode === 'total' ? props.inFlight : undefined
   const categoryOf = useCategoryLabel()
   const values = barValues(bars, mode)
-  const scale = scaleOf(values)
+  const scale = Math.max(
+    scaleOf(values),
+    inFlight === undefined ? 0 : totalOf(inFlight.input) + estimatedTokens(inFlight.output),
+  )
   const every = Math.ceil(bars.length / AXIS_LABELS)
   const labelOf = (bar: EnsoContextRequest): string => (granularity === 'turn' ? String(bar.turn) : `p${bar.prompt}`)
   const segment = (category: (typeof CONTEXT_CATEGORIES)[number], tokens: number, below: boolean): React.ReactNode => (
@@ -350,6 +445,7 @@ function TrendPlot(props: TrendPlotProps): React.ReactNode {
                 </button>
               )
             })}
+            {inFlight === undefined ? null : <InFlightBar inFlight={inFlight} scale={scale} />}
           </div>
         </div>
         <div aria-hidden="true" className="flex gap-0.75 pt-1 font-mono text-xs text-muted-foreground">
@@ -358,6 +454,7 @@ function TrendPlot(props: TrendPlotProps): React.ReactNode {
               {index % every === 0 ? labelOf(bar) : ''}
             </span>
           ))}
+          {inFlight === undefined ? null : <span className="max-w-16 min-w-2.5 flex-1 text-center">now</span>}
         </div>
       </div>
     </div>
@@ -528,11 +625,14 @@ function ContextTrend({
   requests,
   onPick,
   onOpen,
+  inFlight,
 }: {
   requests: readonly EnsoContextRequest[]
   /** The picked bar's request, for the Context Browser and File Activity to follow. */
   onPick: (turn: number) => void
   onOpen: (request: ContextBrowserRequest, focus?: ContextBrowserFocus) => void
+  /** The request in flight (#913), while one is. */
+  inFlight: InFlightRequest | undefined
 }): React.ReactNode {
   const [granularity, setGranularity] = useState<TrendGranularity>('turn')
   const [mode, setMode] = useState<TrendMode>('total')
@@ -567,7 +667,7 @@ function ContextTrend({
         </>
       }
     >
-      {requests.length === 0 ? (
+      {requests.length === 0 && inFlight === undefined ? (
         <p className="text-sm text-muted-foreground">
           a bar appears for each model request, once the first one has run
         </p>
@@ -581,7 +681,9 @@ function ContextTrend({
               mode={mode}
               pickedIndex={pickedIndex}
               onPick={pick}
+              inFlight={inFlight}
             />
+            <InFlightLine inFlight={inFlight} first={requests.length === 0} />
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
                 <LayersIcon aria-hidden="true" className="size-4" />
@@ -590,7 +692,7 @@ function ContextTrend({
               <span>Bars stack in context order, system prompt at the base.</span>
               {mode === 'delta' ? <span>Below the line: what left.</span> : null}
               <span className="ml-auto font-mono tabular-nums">
-                {pickedIndex + 1} / {bars.length}
+                {bars.length === 0 ? '—' : `${pickedIndex + 1} / ${bars.length}`}
               </span>
             </p>
           </div>
@@ -616,7 +718,7 @@ function ContextTrend({
  * (the design's `ctx-grid`, a container query) the browser takes two columns and Events and Files
  * stack in the third.
  */
-function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactNode {
+function ContextCards({ context, live }: { context: EnsoThreadContext; live: LiveRun | undefined }): React.ReactNode {
   const stores = useThreadStores()
   const cwd = useStore(stores.cwd)
   const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
@@ -639,6 +741,17 @@ function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactN
           setBrowserRequest(turn)
         }}
         onOpen={openInBrowser}
+        inFlight={
+          live?.request === undefined
+            ? undefined
+            : {
+                turn: (context.requests.at(-1)?.turn ?? 0) + 1,
+                input: context.next,
+                output: requestOutput(live.request),
+                since: live.request.startedAt,
+                now: live.now,
+              }
+        }
       />
       {/* Two columns from @4xl: inside the prototype's wide view (65rem, #417) the card row is 62rem, under @5xl. */}
       <div className="grid grid-cols-1 items-start gap-4 @4xl:grid-cols-3">
@@ -684,17 +797,28 @@ function whenRead(outcome: ContextOutcome, show: (context: EnsoThreadContext) =>
 }
 
 /** Pure view — the data arrives as props; the cards' choices are their own state. */
-export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcome }): React.ReactNode {
-  return whenRead(outcome, (context: EnsoThreadContext) => <ContextCards context={context} />)
+export function ThreadContextView({
+  outcome,
+  live,
+}: {
+  readonly outcome: ContextOutcome
+  /** The run in flight (#913): its request is drawn as an in-flight bar. */
+  readonly live?: LiveRun | undefined
+}): React.ReactNode {
+  return whenRead(outcome, (context: EnsoThreadContext) => <ContextCards context={context} live={live} />)
 }
 
-/** The Context view wired to its thread: read on open and whenever the thread's usage moves. */
-export function ThreadContextDrawer(): React.ReactNode {
+/**
+ * The Context view wired to its thread: read on open, whenever the thread's usage moves, and when a
+ * model request opens (#913) — so the in-flight bar's input is pi's `next` as that request left.
+ */
+export function ThreadContextDrawer({ live }: { readonly live?: LiveRun | undefined }): React.ReactNode {
   const outcome = useReadOnUsage<ContextOutcome>(
     useThreadReadable() ? readThreadContext : readNothingRan,
     ANALYSIS_READING,
+    String(live?.request?.startedAt ?? ''),
   )
-  return <ThreadContextView outcome={outcome} />
+  return <ThreadContextView outcome={outcome} live={live} />
 }
 
 /** `/context`'s two cards: what the next request holds, and every request's elements. */

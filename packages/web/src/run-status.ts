@@ -2,7 +2,14 @@ import { type EnsoSessionIncidents, openIncidentOf, summarizeToolInput, THREAD_S
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, type ChatUISelectedToolPart, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
-import type { ComposingCall, LiveView, RunEnding, RunPulse } from './follow-connection.ts'
+import {
+  COMPOSING_HEAD_CHARS,
+  type ComposingCall,
+  type LiveView,
+  type RequestPulse,
+  type RunEnding,
+  type RunPulse,
+} from './follow-connection.ts'
 import type { PageFault } from './page-health.ts'
 import type { EnsoPendingDialog, ProviderRefusalMark } from './thread-stores.ts'
 
@@ -115,8 +122,8 @@ export function describeStep(messages: ReadonlyArray<UIMessage>, composing: Comp
       step: {
         kind: 'composing',
         tool: composing.toolName,
-        subject: partialSubject(composing.head),
-        size: composing.size,
+        subject: partialSubject(composing.args.slice(0, COMPOSING_HEAD_CHARS)),
+        size: composing.args.length,
       },
       key: `composing:${composing.toolCallId}`,
     }
@@ -167,6 +174,8 @@ export type RunStatus =
       readonly step: RunStep
       readonly stepSince: number
       readonly runSince: number | undefined
+      /** The model request in flight (#913): its output so far, in characters. */
+      readonly request: RequestPulse | undefined
     }
   | { readonly kind: 'stuck'; readonly step: RunStep; readonly stepSince: number; readonly quietSince: number }
   | {
@@ -224,7 +233,7 @@ export function describeRunStatus(inputs: RunStatusInputs): RunStatus {
     const { stepSince } = inputs
     const quietSince = Math.max(inputs.outputAt ?? 0, pulse.runStartedAt ?? 0, stepSince)
     if (inputs.now - quietSince >= RUN_STATUS_TIMING.stuckMs) return { kind: 'stuck', step, stepSince, quietSince }
-    return { kind: 'working', step, stepSince, runSince: pulse.runStartedAt }
+    return { kind: 'working', step, stepSince, runSince: pulse.runStartedAt, request: pulse.request }
   }
   return pulse.ended === undefined ? { kind: 'idle' } : endingOf(pulse.ended, inputs)
 }

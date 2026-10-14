@@ -68,15 +68,14 @@ test('a call the model is composing is the step, named by its subject so far and
   const composing = {
     toolCallId: 't1',
     toolName: 'write',
-    head: '{"path":"site/arcade.html","content":"<!doc',
-    size: 49_300,
+    args: `{"path":"site/arcade.html","content":"<!doc${'x'.repeat(49_257)}`,
   }
   expect(describeStep(messages, composing)).toEqual({
     step: { kind: 'composing', tool: 'write', subject: 'site/arcade.html', size: 49_300 },
     key: 'composing:t1',
   })
   // Cut mid-subject: what has come so far.
-  expect(describeStep(messages, { ...composing, head: '{"command":"git sta' }).step).toMatchObject({
+  expect(describeStep(messages, { ...composing, args: '{"command":"git sta' }).step).toMatchObject({
     subject: 'git sta',
   })
 })
@@ -162,7 +161,7 @@ function inputs(overrides: Partial<RunStatusInputs>): RunStatusInputs {
     disconnected: false,
     fault: undefined,
     dialog: undefined,
-    pulse: { runStartedAt: undefined, composing: undefined, ended: undefined },
+    pulse: { runStartedAt: undefined, composing: undefined, request: undefined, ended: undefined },
     outputAt: undefined,
     refusal: undefined,
     incidents: NO_SESSION_INCIDENTS,
@@ -194,7 +193,7 @@ test('a question outranks the run: waiting on you, with its one line', () => {
 test('working until nothing has come for the threshold — keepalives are not output — then possibly stuck', () => {
   const working = inputs({
     generating: true,
-    pulse: { runStartedAt: AT, composing: undefined, ended: undefined },
+    pulse: { runStartedAt: AT, composing: undefined, request: undefined, ended: undefined },
     outputAt: AT + MINUTE,
     now: AT + 3 * MINUTE + 59_000,
   })
@@ -207,7 +206,7 @@ test('working until nothing has come for the threshold — keepalives are not ou
 
 test('a run that ended says how until the next prompt: a Stop, its error, the provider, a guard, or finished', () => {
   const ended = (aborted: boolean, error?: string): Partial<RunStatusInputs> => ({
-    pulse: { runStartedAt: undefined, composing: undefined, ended: { aborted, error } },
+    pulse: { runStartedAt: undefined, composing: undefined, request: undefined, ended: { aborted, error } },
   })
   expect(describeRunStatus(inputs({}))).toEqual({ kind: 'idle' })
   expect(describeRunStatus(inputs(ended(false)))).toMatchObject({ ending: 'finished' })
@@ -389,22 +388,36 @@ test('a lost live view says so, then the way back', () => {
   expect(reload).toContain('>Reload</button>')
 })
 
-test('working names the step, how long it has run and how long the run has; counts read as English', () => {
+test('working names the step, how long it has run and how long the run has, and the request’s output so far; counts read as English', () => {
   const rendered = render({
     status: {
       kind: 'working',
-      step: { kind: 'running', tool: 'bash', subject: 'bun test' },
+      step: { kind: 'thinking', text: 'Pong first.' },
       stepSince: AT - 42_000,
       runSince: AT - 10 * MINUTE - 3000,
+      request: { startedAt: AT - 42_000, thinking: 18_000, text: 0, tool: 400 },
     },
     counts: { prompts: 1, toolCalls: 1, refused: 0, failed: 0 },
   })
   expect(rendered).toContain('working')
-  expect(rendered).toContain('running bash bun test')
+  expect(rendered).toContain('thinking')
   expect(rendered).toContain('>42s<')
   expect(rendered).toContain('run 10m 3s')
+  expect(rendered).toContain('~18.4K chars')
   expect(rendered).toContain('1 prompt<')
   expect(rendered).toContain('1 tool call<')
+  // Nothing streamed yet: no figure, rather than a zero.
+  const quiet = render({
+    status: {
+      kind: 'working',
+      step: { kind: 'model' },
+      stepSince: AT,
+      runSince: AT,
+      request: { startedAt: AT, thinking: 0, text: 0, tool: 0 },
+    },
+    counts: { prompts: 1, toolCalls: 0, refused: 0, failed: 0 },
+  })
+  expect(quiet).not.toContain('chars')
 })
 
 test('possibly stuck is an observation, with what has been open and a Stop', () => {

@@ -1,3 +1,4 @@
+import type { UIMessage } from '@tanstack/ai-client'
 import type { LayoutProps } from '@tanstack/ai-react/ui'
 import { useCallback, useContext, useId, useRef } from 'react'
 import { Conversation, ConversationContent, ConversationScrollButton } from './components/ai-elements/conversation.tsx'
@@ -6,6 +7,7 @@ import { PendingQueue } from './composer.tsx'
 import { PendingDialog } from './dialog-card.tsx'
 import { LaunchHead, LaunchNotices, LaunchRecent } from './launch-panel.tsx'
 import { useLaunching } from './launch-settings.tsx'
+import { type LiveRun, pendingWrite } from './live-request.ts'
 import { PaneBoundary } from './page-fault.tsx'
 import { useThreadProject } from './page-listings.ts'
 import {
@@ -15,14 +17,14 @@ import {
   type ThreadView,
   PaneViewContext,
 } from './pane-context.ts'
-import { useThreadStores } from './store.ts'
+import { useStore, useThreadStores } from './store.ts'
 import { ThreadChanges } from './thread-changes.tsx'
 import { ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadEvalDrawer } from './thread-eval.tsx'
 import { settledToolResults } from './thread-git.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
-import { ThreadStatusBar } from './thread-status.tsx'
+import { ThreadStatusBar, useRunClock } from './thread-status.tsx'
 import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
 import {
   type TranscriptScroller,
@@ -68,18 +70,31 @@ function ThreadViewOverlay({
   shown,
   revealInTranscript,
   changesMoment,
+  messages,
+  generating,
 }: {
   shown: ThreadView | undefined
   revealInTranscript: RevealStatsTarget
   /** When the tree may have moved: a settled tool result, the run starting or ending. */
   changesMoment: string
+  messages: ReadonlyArray<UIMessage>
+  generating: boolean
 }): React.ReactNode {
+  const stores = useThreadStores()
+  const refusals = useStore(stores.refusals)
+  // The run in flight (#913), read off the follow each render — every delta re-renders the pane —
+  // and on the run's clock, so the elapsed times move while nothing streams.
+  const now = useRunClock(generating && shown !== undefined && shown !== 'chat')
+  const pulse = stores.connection.pulse()
+  const live: LiveRun | undefined = generating
+    ? { runSince: pulse.runStartedAt, request: pulse.request, now }
+    : undefined
   // The thread's context (#361): what each request was made of, over the transcript.
   if (shown === 'context') {
     return (
       <div role="tabpanel" {...panelIdsOf(shown, 'context')} className="absolute inset-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-context-view">
-          <ThreadContextDrawer />
+          <ThreadContextDrawer live={live} />
         </div>
       </div>
     )
@@ -89,17 +104,22 @@ function ThreadViewOverlay({
     return (
       <div role="tabpanel" {...panelIdsOf(shown, 'stats')} className="absolute inset-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-stats-view">
-          <ThreadStatsDrawer onNavigate={revealInTranscript} />
+          <ThreadStatsDrawer onNavigate={revealInTranscript} live={live} />
           <ThreadEvalDrawer onNavigate={revealInTranscript} />
         </div>
       </div>
     )
   }
-  // What changed since the last push (#452): the tree and the chosen file's diff, over the transcript.
+  // What changed since the last push (#452): the tree and the chosen file's diff, over the transcript;
+  // above it, a write the run is composing and has not applied (#913).
   if (shown === 'changes') {
     return (
       <div role="tabpanel" {...panelIdsOf(shown, 'changes')} className="absolute inset-0">
-        <ThreadChanges moment={changesMoment} />
+        <ThreadChanges
+          moment={changesMoment}
+          live={live}
+          pending={pendingWrite(messages, pulse.composing, refusals, generating)}
+        />
       </div>
     )
   }
@@ -182,6 +202,8 @@ function ThreadViews(): React.ReactNode {
           shown={shown}
           revealInTranscript={revealInTranscript}
           changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
+          messages={chat.messages}
+          generating={chat.sessionGenerating}
         />
       </PaneBoundary>
     </div>

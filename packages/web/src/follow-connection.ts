@@ -292,10 +292,26 @@ export type LiveView = { readonly state: 'live' } | { readonly state: 'silent' |
 export interface ComposingCall {
   readonly toolCallId: string
   readonly toolName: string
-  /** The arguments' opening, up to {@link COMPOSING_HEAD_CHARS}: where a path or a command is. */
-  readonly head: string
-  /** How much of the arguments has streamed, in characters. */
-  readonly size: number
+  /**
+   * The arguments as they have streamed so far (#913): cut mid-JSON. The same text the call's
+   * transcript row shows once it lands whole — a `write` being composed is drawn from it, labelled
+   * as not applied.
+   */
+  readonly args: string
+}
+
+/**
+ * The model request in flight (#913): from pi's `turn_start` (or the assistant message's start)
+ * until the assistant message ends, when the provider's count replaces every figure here. The
+ * output is counted in CHARACTERS as it streams — an estimate, said as one wherever it is shown.
+ */
+export interface RequestPulse {
+  /** When this page saw the request open (`Date.now()`). */
+  readonly startedAt: number
+  /** Characters of thinking, reply text and tool-call arguments streamed so far. */
+  readonly thinking: number
+  readonly text: number
+  readonly tool: number
 }
 
 /** How the last run on this page ended (#914). */
@@ -312,6 +328,8 @@ export interface RunPulse {
   readonly runStartedAt: number | undefined
   /** The tool call the model is writing now; undefined while it writes none. */
   readonly composing: ComposingCall | undefined
+  /** The model request in flight (#913); undefined between requests and at rest. */
+  readonly request: RequestPulse | undefined
   /** How the last run ended; undefined before one has, and once the next opens. */
   readonly ended: RunEnding | undefined
 }
@@ -330,7 +348,7 @@ function carriesOutput(frame: EnsoFollowFrame): boolean {
 }
 
 /** Enough of a composing call's arguments to find its subject: pi's tools name it first. */
-const COMPOSING_HEAD_CHARS = 2048
+export const COMPOSING_HEAD_CHARS = 2048
 
 /** What `abort()` returns: the outcome, and the prompts pi had waiting — handed back to the composer (#75). Empty unless `aborted`. */
 export interface AbortResult {
@@ -512,7 +530,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   /** `outputAt`'s answer: when the follow last carried a frame. */
   let outputAt: number | undefined
   /** The tool call the model is writing now — mutated per delta, copied out by `pulse` (#914). */
-  let composing: { toolCallId: string; toolName: string; head: string; size: number } | undefined
+  let composing: { toolCallId: string; toolName: string; args: string } | undefined
+  /** The model request in flight — mutated per delta, copied out by `pulse` (#913). */
+  let request: { startedAt: number; thinking: number; text: number; tool: number } | undefined
   /** How the last run on this page ended; cleared when the next opens (#914). */
   let lastEnding: RunEnding | undefined
   /** Ends the open follow as the server closing it would (`abandon`); undefined while none is open. */
@@ -593,7 +613,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   function closeRun(run: OpenRun, chunk: StreamChunk, known = true): void {
     runs.delete(run.runId)
     if (current === run) current = undefined
-    if (runs.size === 0) composing = undefined
+    if (runs.size === 0) {
+      composing = undefined
+      request = undefined
+    }
     if (known) {
       const error = chunk.type === EventType.RUN_ERROR ? chunk.message : run.error
       lastEnding = { aborted: run.aborted, error }
@@ -604,8 +627,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   /**
    * A tool call the model is writing (#914), off pi's own `message_update` events, which cross as
    * `unmapped` (`host/map-events.ts`): `toolcall_start` names the tool, each `toolcall_delta` adds to
-   * its arguments, `toolcall_end` ends it. Only the arguments' opening is kept — a 68 KB `write`
-   * needs its size, not its content, here.
+   * its arguments, `toolcall_end` ends it. The arguments are kept whole (#913): the Diff view draws a
+   * `write` being composed from them — the same text the call's row holds once it lands.
    */
   function observeComposing(event: unknown): void {
     if (typeof event !== 'object' || event === null) return
@@ -618,19 +641,46 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       composing = {
         toolCallId: typeof update.id === 'string' ? update.id : '',
         toolName: typeof update.toolName === 'string' ? update.toolName : 'a tool call',
-        head: '',
-        size: 0,
+        args: '',
       }
       return
     }
-    if (update.type === 'toolcall_delta' && composing !== undefined && typeof update.delta === 'string') {
-      composing.size += update.delta.length
-      if (composing.head.length < COMPOSING_HEAD_CHARS) {
-        composing.head = (composing.head + update.delta).slice(0, COMPOSING_HEAD_CHARS)
-      }
+    if (update.type === 'toolcall_delta' && typeof update.delta === 'string') {
+      observeToolArguments(update.delta)
       return
     }
     if (update.type === 'toolcall_end') composing = undefined
+  }
+
+  /** A piece of a call's arguments: the call's text grows, and so does the request's output (#913). */
+  function observeToolArguments(delta: string): void {
+    if (current !== undefined) request ??= { startedAt: Date.now(), thinking: 0, text: 0, tool: 0 }
+    if (request !== undefined) request.tool += delta.length
+    if (composing !== undefined) composing.args += delta
+  }
+
+  /**
+   * The request in flight (#913): opened by `turn-start` — or, for a page that joined mid-request,
+   * the assistant message's start or its first delta, timed from when this page saw it — grown by
+   * each delta, ended by the assistant message's end, whose usage is the provider's count.
+   */
+  function observeRequest(observation: EnsoObservation): void {
+    if (observation.kind === 'turn-start') {
+      request = { startedAt: Date.now(), thinking: 0, text: 0, tool: 0 }
+      return
+    }
+    if (observation.kind === 'message-end') {
+      if (observation.role === 'assistant') request = undefined
+      return
+    }
+    const opens =
+      (observation.kind === 'message-start' && observation.role === 'assistant') ||
+      observation.kind === 'thinking-delta' ||
+      observation.kind === 'text-delta'
+    if (!opens || current === undefined) return
+    request ??= { startedAt: Date.now(), thinking: 0, text: 0, tool: 0 }
+    if (observation.kind === 'thinking-delta') request.thinking += observation.delta.length
+    else if (observation.kind === 'text-delta') request.text += observation.delta.length
   }
 
   function pulse(): RunPulse {
@@ -638,7 +688,12 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     for (const run of runs.values()) {
       if (runStartedAt === undefined || run.startedAt < runStartedAt) runStartedAt = run.startedAt
     }
-    return { runStartedAt, composing: composing === undefined ? undefined : { ...composing }, ended: lastEnding }
+    return {
+      runStartedAt,
+      composing: composing === undefined ? undefined : { ...composing },
+      request: request === undefined ? undefined : { ...request },
+      ended: lastEnding,
+    }
   }
 
   /** End the run's assistant bubble and open a new one after it: everything that follows lands there. */
@@ -805,6 +860,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    * (`to-agui.ts`); pi's run settles later, and its ending says it too.
    */
   function observeRun(observation: EnsoObservation): void {
+    observeRequest(observation)
     if (observation.kind === 'unmapped') observeComposing(observation.event)
     if (observation.kind === 'tool-call' || observation.kind === 'message-start') composing = undefined
     if (observation.kind !== 'extension-error') return

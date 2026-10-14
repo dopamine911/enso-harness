@@ -270,6 +270,8 @@ test('working names the step and its time; the thinking tail moves live; a call 
   await alpha.settle(observed({ kind: 'thinking-delta', contentIndex: 0, delta: ' then the colours' }))
   await waitUntil(() => statusOf(container).includes('first the grid then the colours'))
   expect(statusOf(container)).toContain('first the grid then the colours')
+  // #913: the request's output so far, counted as it streams.
+  expect(statusOf(container)).toContain('~49 chars')
   // Opened, the thinking's latest stretch.
   const tail = [...container.querySelectorAll<HTMLButtonElement>('#thread-status button')].find(
     (button) => button.getAttribute('aria-expanded') !== null,

@@ -17,6 +17,7 @@ export const STATS: FeatureSpec = {
   landingTagline: 'tokens · cache · cost · latency',
   shows: [
     "The **Stats** tab analyses one thread: what it cost, how the cache behaved, which parts of the conversation were expensive, and which tools did the most. Every figure comes from pi's own session file, so a thread from last month gives the same answer as one from a minute ago.",
+    'While a run is in progress, a dashed line at the top says which turn is running, for how long, and how much output it has streamed so far (`turn 3 in progress · 7m 12s · output ≈4.5K tokens so far (~18K chars)`). Those figures are estimates, and the turn is not added to any total, chart or ranking until it completes and the provider has counted it. A thread with no completed turn yet says *the first response is still running* instead of what the charts wait for.',
   ],
   opens: ['{steps}.', 'A point on a chart, a call or a prompt in a list opens that spot in the chat.'],
   shots: [
