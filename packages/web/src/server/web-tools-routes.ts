@@ -94,7 +94,7 @@ export interface WebToolsRoutes {
 /**
  * At most one request to `https://<host>/` (#924), as `web_fetch` would make it: none when the host
  * does not resolve or resolves to an address web_fetch's gate refuses (`nonPublicAddressReason`, the
- * tool's own — the server never asks a private one); sent with web_fetch's User-Agent, its redirects
+ * tool's own, and advisory as it is: the request resolves the host again); sent with web_fetch's User-Agent, its redirects
  * reported, never followed. ⚠ The answer is the host's, not a page web_fetch is sure to read: the
  * tool still applies its content-type check to each page.
  */
