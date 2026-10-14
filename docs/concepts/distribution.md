@@ -178,14 +178,17 @@ the "no physical copy of a host package" rule, but it is deliberate: pi's loader
 (`docs/seams/guards.md:447-451`, #535). Whether pi's duplicate-copy warning fires on the alias was
 **not tested**. It needs a packed install to find out.
 
-### 4. pi's version is pinned by the launcher, and `pi install` bypasses the launcher
+### 4. pi's version was pinned by the launcher, and `pi install` bypassed the launcher — resolved by #953
 
-`scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS` accepts pi `>= 1.1.0, < 1.2.0` and refuses everything else before the
-spawn, because the guard carries a replica of pi's path resolver (#217). `pi install npm:<name>` loads
-the package into **whatever pi the user has**, so the check never runs. A distributed harness would
-need the check moved into the extension itself (refuse at `session_start` outside the supported range)
-or it would be correct only by luck. **Confidence 0.85.** Caveat: pi's package manifest may support an
-engine constraint I did not find, because I read only `packages.md`.
+`packages/core/src/supported-pi-versions.ts#SUPPORTED_PI_VERSIONS` accepts pi `>= 1.1.0, < 1.2.0`,
+because the guard carries a replica of pi's path resolver (#217). Before #953 only the launcher checked
+it, before the spawn. `pi install npm:<name>` loads the package into **whatever pi the user has** and
+never runs the launcher, so an installed harness was correct only by luck.
+
+**Since #953 the guard checks it too.** It reads the running pi's own `VERSION`, and under a pi outside
+the range it refuses every tool call and says why at `session_start` (`docs/seams/guards.md`). The
+launcher and the guard read the same constant. What stays open: nothing at **install** time stops an
+unsupported pi, because pi's installer ignores peer ranges. The refusal happens when the harness loads.
 
 ### 5. `bun run enso`'s isolation does not come with a pi package
 
@@ -265,7 +268,7 @@ tarball's production tree, which does not exist yet.
 | Route | Ships | Needs first | Cost [inference] | Keeps "only Enso" isolation |
 |---|---|---|---|---|
 | **A. Source** — clone + `bun install` | everything | a license, and the multi-account decision | near zero: document it | yes |
-| **B. pi package** — `pi install npm:<name>` | terminal surface only | blockers 1 (guards), 2, 3, 4, 7, 8 | small to medium | no, unless it ships its own launcher bin (5) |
+| **B. pi package** — `pi install npm:<name>` | terminal surface only | blockers 1 (guards), 2, 3, 7, 8 (4 is done, #953) | small to medium | no, unless it ships its own launcher bin (5) |
 | **C. npm CLI needing Bun** — `bunx <name>` | both surfaces, frontend pre-built | everything in B, plus 1 (all rows) and 6 | medium to large | yes, the bin is the launcher |
 | **D. Single binary** — `bun build --compile` | both, plus pi itself | everything in C, plus proof that pi's jiti loader can load extensions from Bun's embedded filesystem | unknown, needs a spike | yes |
 | **E. Container image** | both, with pi and Bun pinned | the multi-account decision; a story for host git credentials and the project mount | medium | yes, and confinement as a bonus (#896) |
@@ -280,8 +283,8 @@ sandbox" (README) towards one. It also changes the product, so it is not just a 
 **Recommendation (confidence 0.6, because it depends on the audience decision below):** do A now. It
 needs only a license and a multi-account answer, and it is what every other route also needs. Then do
 the shared refactor that B and C both require: one "where is this package installed" resolver replacing
-the five runtime `findRepoRoot` calls, `@enso/core` bundled, `bundledDependencies` declared, and the pi
-version check moved into the extension. Choose between B and C after that, depending on whether the
+the five runtime `findRepoRoot` calls, `@enso/core` bundled, and `bundledDependencies` declared (the pi
+version check already moved into the extension, #953). Choose between B and C after that, depending on whether the
 audience wants the web surface. Spike D only if a one-file install is a requirement.
 
 ---

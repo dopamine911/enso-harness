@@ -196,6 +196,14 @@ export interface GuardRuntime {
   on(channel: string, handler: (data: unknown) => void): void
   /** Every tool the runtime registers now, by its own name. May throw: the floor reads a throw as a mismatch. */
   toolNames(): readonly string[]
+  /**
+   * Why this runtime's version is not one the guard was pinned against, or undefined when it is (#953).
+   * The guard replicates its runtime's path resolver, so under a version the replica was not checked
+   * against a deny can be computed against the wrong target (#217). The glue owns the range, since it
+   * is the runtime's (pi's is `@enso/core`'s `SUPPORTED_PI_VERSIONS`). May throw: the floor reads a
+   * throw as a refusal.
+   */
+  versionRefusal(): string | undefined
 }
 
 /**
@@ -387,8 +395,28 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
     }
   }
 
+  let runtimeVersionRefusal: string | undefined
+
+  /**
+   * The floor's other leg (#953): a runtime whose version the guard was not pinned against denies
+   * EVERY call, with the runtime's own refusal as the reason. The terminal launcher refuses such a pi
+   * before spawning it, but `pi install` loads the harness into whatever pi the user has and never
+   * runs the launcher — so the guard checks the pi it is actually running in. Checked where the tool
+   * list is (each `session_start`, and lazily on the first call), and the same way: a variable,
+   * never a throw, and a version that cannot be read is a refusal, not a pass.
+   */
+  function verifyRuntimeVersion(): void {
+    try {
+      runtimeVersionRefusal = runtime.versionRefusal()
+    } catch (error) {
+      log.error('the runtime version could not be read during the floor check: {error}', { error })
+      runtimeVersionRefusal = `the guard could not read ${runtime.name}'s version: ${String(error)}`
+    }
+  }
+
   function start(facts: GuardStart): void {
     readTracker.reset()
+    verifyRuntimeVersion()
     verifyPolicyToolNames()
     try {
       recordDirectories = [facts.recordDirectory(), dependencies.logsDirectory]
@@ -495,7 +523,12 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
     // The lazy leg: an unchecked state here means this call arrived before session_start
     // ever fired, and unchecked must not read as "checked, fine" — verify now.
     if (!policyToolsChecked) {
+      verifyRuntimeVersion()
       verifyPolicyToolNames()
+    }
+    // The version leg first: under an unpinned runtime the tool-list check itself means nothing.
+    if (runtimeVersionRefusal !== undefined) {
+      return deny('policy-mismatch', `All tool calls are blocked: ${runtimeVersionRefusal}`)
     }
     if (policyToolMismatch !== undefined) {
       return deny(

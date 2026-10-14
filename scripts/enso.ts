@@ -47,7 +47,7 @@
  * ⚠ THE `pi` SPAWNED HERE IS VERSION-GATED (#217). It comes from `PATH`, while the guard's
  *   replica of pi's path resolver is pinned against the pi in the workspace tree — two
  *   resolutions that nothing held together. The version is read before the spawn and refused
- *   outside `enso-launch.ts#SUPPORTED_PI_VERSIONS`; see the block below.
+ *   outside `packages/core/src/supported-pi-versions.ts#SUPPORTED_PI_VERSIONS`; see the block below.
  *
  * Usage:  bun run enso -p "hello"
  *         ENSO_HOME=/somewhere/else/.enso bun run enso
@@ -74,14 +74,12 @@ import {
 import { describePermissionPolicy, preparePermissionPolicy } from '../packages/core/src/permission-rules.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
+import { piVersionSupported, unsupportedPiVersionReason } from '../packages/core/src/supported-pi-versions.ts'
 import {
   isPrintRun,
   isRegisteredProject,
   piArguments,
-  piVersionSupported,
-  piVersionText,
   projectLine,
-  SUPPORTED_PI_VERSIONS,
   secretsKeptOutLine,
   vanillaPiLine,
 } from './enso-launch.ts'
@@ -251,7 +249,7 @@ if (quarantine.misplaced.length > 0) {
  * a shim printing `0.85.0` earlier on `PATH`: it launched, and the whole suite stayed green —
  * the guard resolving a path differently from the tool it gates is exactly the failure the
  * replica exists to prevent. So the version is read BEFORE the spawn and refused when it falls
- * outside `enso-launch.ts#SUPPORTED_PI_VERSIONS`, the shape `assertVendorLinks` already uses on
+ * outside `packages/core/src/supported-pi-versions.ts#SUPPORTED_PI_VERSIONS`, the shape `assertVendorLinks` already uses on
  * the other surface: one precondition, enforced at both launch points.
  *
  * There is no override flag, deliberately: the range is widened by running the corpus against
@@ -309,15 +307,10 @@ try {
   process.stderr.write('enso: no `pi` on PATH — the terminal surface spawns it, so install it first\n')
   process.exit(1)
 }
+/** Which pi the launcher's refusal is about: the one it was about to spawn. */
+const LAUNCHED_PI_SUBJECT = 'the `pi` on PATH'
 if (!piVersionSupported(reportedPiVersion)) {
-  process.stderr.write(
-    `enso: the \`pi\` on PATH reports ${reportedPiVersion === '' ? 'no version' : reportedPiVersion}, ` +
-      `outside the range the guards are pinned against ` +
-      `(>=${piVersionText(SUPPORTED_PI_VERSIONS.minimum)} <${piVersionText(SUPPORTED_PI_VERSIONS.below)}).\n` +
-      "The guard replicates pi's path resolver; against an unpinned pi a deny can be computed against the wrong\n" +
-      'target (#217). Either use the pinned pi, or run the corpus against this one and widen the range:\n' +
-      '  bun test packages/harness/core/__tests__/paths.test.ts   then scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS\n',
-  )
+  process.stderr.write(`enso: ${unsupportedPiVersionReason(LAUNCHED_PI_SUBJECT, reportedPiVersion)}`)
   process.exit(1)
 }
 

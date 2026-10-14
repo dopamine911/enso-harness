@@ -30,6 +30,9 @@ import {
   ENSO_THREAD_TREE_ENTRY,
   incidentPolicyOf,
   judgeContextsOfTranscript,
+  piVersionText,
+  SUPPORTED_PI_VERSIONS,
+  unsupportedPiVersionReason,
   customEntriesOf,
   transcriptOf,
   incidentEntriesOf,
@@ -82,6 +85,8 @@ const PI_SHIPPED_TOOL_NAMES = ['read', 'bash', 'powershell', 'edit', 'write', 'g
  * contract test is the one place the real library runs, with that pinning stated.
  */
 const ALLOW_ALL_ANALYZER: GuardDependencies['analyzeBashCommand'] = () => ({ kind: 'allow' })
+/** A pi the guard was pinned against (#953): the range's own minimum, so a range move cannot strand the suite. */
+const SUPPORTED_PI = piVersionText(SUPPORTED_PI_VERSIONS.minimum)
 
 /** A harness root holding no credential location — the default, so only the test that means it has one. */
 const NO_CREDENTIALS_ROOT = mkdtempSync(join(tmpdir(), 'enso-guard-harness-'))
@@ -113,6 +118,8 @@ function loadGuardRuntime(
     /** The command judge as `config.json` names it at each start (#469); off — the shipped default — when absent. */
     readonly commandJudge?: () => CommandJudge | undefined
     readonly judgeSecretValues?: readonly string[]
+    /** The running pi's version (#953); a supported one when absent. */
+    readonly runningPiVersion?: string
   } = {},
 ): GuardRuntime {
   const handlers = new Map<string, Handler>()
@@ -126,6 +133,7 @@ function loadGuardRuntime(
     projectsDirectory: PROJECTS_DIR,
     commandJudge: options.commandJudge ?? ((): undefined => undefined),
     judgeSecretValues: () => options.judgeSecretValues ?? [],
+    runningPiVersion: options.runningPiVersion ?? SUPPORTED_PI,
   })
   const appendEntry = (customType: string, data: unknown): void => {
     options.onAppendEntry?.(customType, data)
@@ -904,6 +912,59 @@ test('the lazy check runs once — a healthy registry is not re-enumerated per c
   expect(enumerations).toBe(1)
 })
 
+// ── #953: the floor's version leg — the pi the harness runs in must be one the guard was pinned against ──
+// `pi install` loads the harness into whatever pi the user has and never runs the launcher, so the
+// launcher's own refusal (#217) cannot be the only one: the guard refuses every call under an
+// unpinned pi, with the launcher's words, before any other rule — and from the first call, whether
+// or not session_start fired.
+
+/** The guard's runtime with pi's UI faked: what a session_start notice said, and how. */
+function notices(runningPiVersion: string): { runtime: GuardRuntime; shown: { message: string; level: string }[] } {
+  const shown: { message: string; level: string }[] = []
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { runningPiVersion })
+  runtime.sessionStart(
+    { type: 'session_start', reason: 'start' },
+    { cwd, hasUI: true, ui: { notify: (message: string, level: string) => shown.push({ message, level }) } },
+  )
+  return { runtime, shown }
+}
+
+// @pins guarded-tool-call/fail-closed-floor boot-and-launchers/pi-version-gate
+test('⚠ a running pi outside the supported range refuses every tool call, with the launcher’s reason (#953)', () => {
+  const { runtime } = notices('1.2.0')
+  const result = runtime.toolCall(toolCallEvent('read', 'src/a.ts'), { cwd })
+  expect(result?.block).toBe(true)
+  expect(result?.reason).toBe(`All tool calls are blocked: ${unsupportedPiVersionReason('the running pi', '1.2.0')}`)
+  // Every call, not the first: a bash command the policy would otherwise allow is refused too.
+  expect(runtime.toolCall(toolCallEvent2('bash', 'ls'), { cwd })?.block).toBe(true)
+})
+
+test('a running pi inside the supported range arms the guard normally, and says nothing at session start (#953)', () => {
+  const { runtime, shown } = notices('1.1.9')
+  expect(runtime.toolCall(toolCallEvent('read', 'src/a.ts'), { cwd })).toBeUndefined()
+  expect(shown).toEqual([])
+})
+
+test('the refusal is shown at session start, before any tool call, where pi has a UI (#953)', () => {
+  const { shown } = notices('1.0.4')
+  expect(shown).toHaveLength(1)
+  expect(shown[0]?.level).toBe('error')
+  expect(shown[0]?.message).toContain('the running pi reports 1.0.4, outside the range the guards are pinned against')
+})
+
+test('an unpinned pi is refused on the FIRST tool_call even when session_start never fired (#953)', () => {
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { runningPiVersion: '1.2.0' })
+  // No sessionStart call, deliberately: the lazy leg is the floor's guarantee against pi's event order.
+  expect(runtime.toolCall(toolCallEvent('read', 'src/a.ts'), { cwd })?.reason).toContain('the running pi reports 1.2.0')
+})
+
+test('a pi that reports no version is refused, not passed (#953)', () => {
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { runningPiVersion: '' })
+  expect(runtime.toolCall(toolCallEvent('read', 'src/a.ts'), { cwd })?.reason).toContain(
+    'the running pi reports no version',
+  )
+})
+
 // ── #9: bash policy — cc-safety-net as a library, then the network deny, then the patch ───
 
 const toolCallEvent2 = (toolName: string, command: string) =>
@@ -1247,6 +1308,7 @@ test('⚠ the guard registers no tool: it participates through tool_call only, s
     projectsDirectory: PROJECTS_DIR,
     commandJudge: () => undefined,
     judgeSecretValues: () => [],
+    runningPiVersion: SUPPORTED_PI,
   })({
     on: (event: string) => events.push(event),
     registerTool: (tool: { name: string }) => registered.push(tool.name),

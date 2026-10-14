@@ -120,6 +120,13 @@ export {
   SECRET_BASENAME_PATTERNS,
 } from './guard.ts'
 export {
+  piVersionSupported,
+  piVersionText,
+  type ReportedVersion,
+  SUPPORTED_PI_VERSIONS,
+  unsupportedPiVersionReason,
+} from './supported-pi-versions.ts'
+export {
   ENSO_LOG_ROOT,
   ENSO_REDACT_FIELDS,
   ENSO_REDACTED,
