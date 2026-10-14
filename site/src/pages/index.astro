@@ -26,10 +26,10 @@ import Closing from '../components/Closing.astro'
 import Pairs from '../components/Pairs.astro'
 import Shot from '../components/Shot.astro'
 import landingFeatureGroups from '../generated/landing-features.json'
-import { SITE_PATH as base, REPOSITORY_URL as github } from '../site-urls'
+import { REPOSITORY_URL, SITE_PATH } from '../site-urls'
 import '../styles/landing.css'
 
-const feature = (slug: string): string => `${base}/features/${slug}/`
+const feature = (slug: string): string => `${SITE_PATH}/features/${slug}/`
 
 const factory = [
   ['Model', 'Which model is doing the work, and with how much effort?'],
@@ -102,7 +102,7 @@ const outcomes = [
           wrong. Enso gives you somewhere to look when the result and the intent part ways.
         </p>
         <nav class="chapter-links" aria-label="Where Enso came from">
-          <a href={`${base}/origin/`}>Where Enso came from →</a>
+          <a href={`${SITE_PATH}/origin/`}>Where Enso came from →</a>
         </nav>
       </div>
     </section>
@@ -367,7 +367,7 @@ const outcomes = [
           </p>
           <nav class="chapter-links" aria-label="Foundation documentation">
             <a href="https://github.com/earendil-works/pi">pi →</a>
-            <a href={`${base}/architecture/`}>Architecture →</a>
+            <a href={`${SITE_PATH}/architecture/`}>Architecture →</a>
           </nav>
         </div>
       </div>
@@ -402,7 +402,7 @@ const outcomes = [
       </div>
       <p class="feature-docs-note">
         The feature docs document not only what each capability does, but also how to open it, what to look for, and what it does
-        <em>not</em> do. <a href={`${base}/features/`}>Browse all feature documentation →</a>
+        <em>not</em> do. <a href={`${SITE_PATH}/features/`}>Browse all feature documentation →</a>
       </p>
     </section>
 
@@ -417,9 +417,9 @@ const outcomes = [
             build checks for drift.
           </p>
           <nav class="chapter-links" aria-label="Documentation evidence">
-            <a href={`${base}/features/`}>Features →</a>
-            <a href={`${base}/verification/`}>Verification →</a>
-            <a href={`${base}/architecture/`}>Architecture →</a>
+            <a href={`${SITE_PATH}/features/`}>Features →</a>
+            <a href={`${SITE_PATH}/verification/`}>Verification →</a>
+            <a href={`${SITE_PATH}/architecture/`}>Architecture →</a>
           </nav>
         </div>
       </div>
@@ -429,9 +429,9 @@ const outcomes = [
       <h2>I check your work.<br />You check mine.<br />The system keeps the receipts.</h2>
       <p>Enso is for developers who want capable agents to do real work without making the process disappear.</p>
       <div class="hero-actions">
-        <a class="button primary" href={github}>View on GitHub</a>
-        <a class="button" href={`${base}/features/`}>Read the docs</a>
-        <a class="button" href={`${base}/origin/`}>Where it came from</a>
+        <a class="button primary" href={REPOSITORY_URL}>View on GitHub</a>
+        <a class="button" href={`${SITE_PATH}/features/`}>Read the docs</a>
+        <a class="button" href={`${SITE_PATH}/origin/`}>Where it came from</a>
       </div>
     </Closing>
   </div>

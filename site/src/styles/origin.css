@@ -218,8 +218,8 @@
 }
 
 /* ── Every `Pairs` list on this page: the primitives in #debugger and the inheritance list ── */
-.landing.origin .factory-item {
-  grid-template-columns: 220px 1fr;
+.landing.origin {
+  --pairs-name-column: 220px;
 }
 
 .landing.origin .final .hero-actions {
@@ -232,11 +232,6 @@
   .landing.origin .receipts-grid {
     grid-template-columns: 1fr;
     gap: 20px;
-  }
-
-  /* The 220px rule outranks `landing.css`'s 90px mobile column, so the page restates it here. */
-  .landing.origin .factory-item {
-    grid-template-columns: 90px 1fr;
   }
 
   .landing.origin .loop {

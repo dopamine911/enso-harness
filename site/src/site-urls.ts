@@ -4,8 +4,9 @@
  *
  * `SITE_PATH` is Astro's `base` (`scripts/docs/site-base.ts`) without its trailing slash, so a page
  * writes `${SITE_PATH}/features/` and gets one slash whatever the base is, including the custom
- * domain's empty one.
+ * domain's empty one. `REPOSITORY_URL` is decided beside the base, where Starlight's header link in
+ * `astro.config.ts` reads it too.
  */
 export const SITE_PATH: string = import.meta.env.BASE_URL.replace(/\/$/, '')
 
-export const REPOSITORY_URL = 'https://github.com/dopamine911/zen-harness-foundation'
+export { REPOSITORY_URL } from '../../scripts/docs/site-base.ts'

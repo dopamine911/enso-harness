@@ -12,7 +12,7 @@ import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
 import Closing from '../components/Closing.astro'
 import Pairs from '../components/Pairs.astro'
 import SectionHead from '../components/SectionHead.astro'
-import { SITE_PATH as base, REPOSITORY_URL as github } from '../site-urls'
+import { REPOSITORY_URL, SITE_PATH } from '../site-urls'
 import '../styles/landing.css'
 import '../styles/origin.css'
 
@@ -310,8 +310,8 @@ const inheritance = [
     <Closing>
       <h2>None of these projects disappeared.<br />They live here now.</h2>
       <div class="hero-actions">
-        <a class="button primary" href={`${base}/`}>See what Enso does</a>
-        <a class="button" href={github}>View on GitHub</a>
+        <a class="button primary" href={`${SITE_PATH}/`}>See what Enso does</a>
+        <a class="button" href={REPOSITORY_URL}>View on GitHub</a>
       </div>
     </Closing>
   </div>
