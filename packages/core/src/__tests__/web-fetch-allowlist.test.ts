@@ -176,29 +176,59 @@ test('a symlink into a directory not there is an error, and the link is left as 
   expect(readdirSync(directory)).toEqual(['config.json'])
 })
 
+test('a dangling `..` link under a symlinked directory writes where the kernel resolves it (#972 review)', () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-home-'))
+  mkdirSync(join(home, 'dotfiles', 'enso'), { recursive: true })
+  mkdirSync(join(home, 'dotfiles', 'shared'))
+  mkdirSync(join(home, 'shared')) // the textual reading of `..` — must stay empty
+  symlinkSync(join(home, 'dotfiles', 'enso'), join(home, '.enso'))
+  symlinkSync('../shared/enso.json', join(home, 'dotfiles', 'enso', 'config.json'))
+  const path = join(home, '.enso', 'config.json')
+  replaceFileText(path, '{}\n')
+  expect(readFileSync(join(home, 'dotfiles', 'shared', 'enso.json'), 'utf8')).toBe('{}\n')
+  expect(readdirSync(join(home, 'shared'))).toEqual([])
+  expect(lstatSync(path).isSymbolicLink()).toBe(true)
+})
+
+test('⚠ a link loop throws ELOOP and the link is never replaced by a file (#972 review)', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-replace-'))
+  const self = join(directory, 'config.json')
+  symlinkSync('config.json', self)
+  expect(() => replaceFileText(self, '{}\n')).toThrow('ELOOP')
+  expect(lstatSync(self).isSymbolicLink()).toBe(true)
+  symlinkSync('b.json', join(directory, 'a.json'))
+  symlinkSync('a.json', join(directory, 'b.json'))
+  expect(() => replaceFileText(join(directory, 'a.json'), '{}\n')).toThrow('ELOOP')
+  expect(lstatSync(join(directory, 'a.json')).isSymbolicLink()).toBe(true)
+  expect(readdirSync(directory).toSorted()).toEqual(['a.json', 'b.json', 'config.json'])
+})
+
 // --- nonPublicAddressReason: web_fetch's address gate, the one copy (#972 re-review) ---------------
 
 const answering = (addresses: readonly string[]) => async (): Promise<readonly string[]> => addresses
 
 test('any one non-public address refuses, wherever it stands in the answer', async () => {
-  expect(await nonPublicAddressReason('mixed.example', answering(['93.184.216.34', '10.0.0.1']))).toBe(
-    '"mixed.example" resolves to a non-public address (10.0.0.1)',
-  )
+  expect(await nonPublicAddressReason('mixed.example', answering(['93.184.216.34', '10.0.0.1']))).toEqual({
+    kind: 'non-public',
+    reason: '"mixed.example" resolves to a non-public address (10.0.0.1)',
+  })
 })
 
 test('an empty answer refuses: no address is provably public', async () => {
-  expect(await nonPublicAddressReason('empty.example', answering([]))).toBe(
-    '"empty.example" resolves to a non-public address',
-  )
+  expect(await nonPublicAddressReason('empty.example', answering([]))).toEqual({
+    kind: 'non-public',
+    reason: '"empty.example" resolves to a non-public address',
+  })
 })
 
-test('a lookup that throws refuses, naming the error', async () => {
+test('a lookup that throws refuses as unresolved — missing, not private — naming the error', async () => {
   const failing = async (): Promise<readonly string[]> => {
     throw new Error('queryA ENOTFOUND nowhere.example')
   }
-  expect(await nonPublicAddressReason('nowhere.example', failing)).toBe(
-    '"nowhere.example" did not resolve (Error: queryA ENOTFOUND nowhere.example)',
-  )
+  expect(await nonPublicAddressReason('nowhere.example', failing)).toEqual({
+    kind: 'unresolved',
+    reason: '"nowhere.example" did not resolve (Error: queryA ENOTFOUND nowhere.example)',
+  })
 })
 
 test('every address public passes; an IP literal (bracketed or not) is classified without a lookup', async () => {
@@ -209,5 +239,8 @@ test('every address public passes; an IP literal (bracketed or not) is classifie
     throw new Error('a literal is never looked up')
   }
   expect(await nonPublicAddressReason('93.184.216.34', neverAsked)).toBe(undefined)
-  expect(await nonPublicAddressReason('[::1]', neverAsked)).toBe('"::1" resolves to a non-public address (::1)')
+  expect(await nonPublicAddressReason('[::1]', neverAsked)).toEqual({
+    kind: 'non-public',
+    reason: '"::1" resolves to a non-public address (::1)',
+  })
 })

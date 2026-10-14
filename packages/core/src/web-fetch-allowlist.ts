@@ -11,6 +11,10 @@ import { isPublicIpAddress, readWebFetchHostInput, type WebFetchAllowlistChange 
  * other key keeps its place and its formatting (the list itself is written on one line); the result must pass `parseEnsoConfig` before it
  * replaces the file (`replaceFileText`: a symlinked file stays a link, the file keeps its mode), and a result that does not changes
  * nothing. A file that is there and unreadable is NEVER overwritten: the reason comes back.
+ *
+ * It also holds web_fetch's address gate (`nonPublicAddressReason`), so the Settings host check and
+ * the tool judge an address alike: the harness tool imports it at runtime (hence `node:net` and
+ * `jsonc-parser` load in the tool's process too).
  */
 
 /**
@@ -93,11 +97,19 @@ export function changeUserAllowedHosts(path: string, change: WebFetchAllowlistCh
 }
 
 /**
+ * Why web_fetch's address gate refuses a host: it did not resolve (`unresolved` — the host is
+ * missing, not private), or it resolved to nothing or to any one non-public address (`non-public`).
+ * Each caller words its own tail; only `non-public` earns "the public web only".
+ *
+ * @group Web tools
+ */
+export type AddressRefusal = { readonly kind: 'unresolved' | 'non-public'; readonly reason: string }
+
+/**
  * web_fetch's address gate (#54), the one copy: why a request to `host` would be refused by its
- * addresses — it did not resolve, it resolved to nothing, or any one address is not public
- * (`isPublicIpAddress`) — or undefined when every address is public. An IP literal is classified as
- * it is, without a lookup (URL brackets on an IPv6 literal are dropped). The tool and Settings' host
- * check (#924) both ask here, each adding its own tail to the reason.
+ * addresses (`AddressRefusal`), or undefined when every address is public (`isPublicIpAddress`).
+ * An IP literal is classified as it is, without a lookup (URL brackets on an IPv6 literal are
+ * dropped). The tool and Settings' host check (#924) both ask here.
  *
  * ⚠ ADVISORY: `resolve` answers now, the request resolves again later (the stated non-coverage in
  * `web-fetch-policy.ts`). The lookup carries no deadline of its own: the system resolver's bounds it.
@@ -107,17 +119,20 @@ export function changeUserAllowedHosts(path: string, change: WebFetchAllowlistCh
 export async function nonPublicAddressReason(
   host: string,
   resolve: (host: string) => Promise<readonly string[]>,
-): Promise<string | undefined> {
+): Promise<AddressRefusal | undefined> {
   const bareHost = host.replace(/^\[/, '').replace(/\]$/, '')
   let addresses: readonly string[]
   try {
     addresses = isIP(bareHost) === 0 ? await resolve(bareHost) : [bareHost]
   } catch (error: unknown) {
-    return `"${bareHost}" did not resolve (${String(error)})`
+    return { kind: 'unresolved', reason: `"${bareHost}" did not resolve (${String(error)})` }
   }
   const nonPublic = addresses.find((address) => !isPublicIpAddress(address))
   if (addresses.length > 0 && nonPublic === undefined) return undefined
-  return `"${bareHost}" resolves to a non-public address${nonPublic === undefined ? '' : ` (${nonPublic})`}`
+  return {
+    kind: 'non-public',
+    reason: `"${bareHost}" resolves to a non-public address${nonPublic === undefined ? '' : ` (${nonPublic})`}`,
+  }
 }
 
 /**
