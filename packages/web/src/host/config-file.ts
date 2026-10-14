@@ -26,6 +26,16 @@ export function readConfigFile(home: string): {
   }
 }
 
+/** Where Settings' `config.json` sections' files are, and how a `threads.projects` key is matched. */
+export interface SettingsPlaces {
+  /** `ENSO_HOME`: its `config.json`. */
+  readonly home: string
+  /** pi's agent directory: its `settings.json` holds `defaultProjectTrust`. */
+  readonly agentDir: string
+  /** A key as written to the canonical path the resolver matches it as (`canonicalConfigPath`). */
+  readonly canonical: (key: string) => string
+}
+
 /** @group Configuration */
 export type ConfigSectionWrite<Read> =
   | { readonly kind: 'written'; readonly read: Read }

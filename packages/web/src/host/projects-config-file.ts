@@ -6,7 +6,7 @@ import type {
   EnsoThreadTreeMode,
 } from '@enso/core'
 import type { WriteCondition } from './atomic-file.ts'
-import { type ConfigSectionWrite, readConfigFile, writeConfigSections } from './config-file.ts'
+import { type ConfigSectionWrite, readConfigFile, type SettingsPlaces, writeConfigSections } from './config-file.ts'
 import { readDefaultProjectTrust } from './project-trust.ts'
 
 /**
@@ -25,16 +25,6 @@ import { readDefaultProjectTrust } from './project-trust.ts'
  *
  * `defaultProjectTrust` is pi's key, in pi's file: read and written in `project-trust.ts`.
  */
-
-/** Where Settings' `config.json` sections' files are, and how a `threads.projects` key is matched. */
-export interface SettingsPlaces {
-  /** `ENSO_HOME`: its `config.json`. */
-  readonly home: string
-  /** pi's agent directory: its `settings.json` holds `defaultProjectTrust`. */
-  readonly agentDir: string
-  /** A key as written to the canonical path the resolver matches it as (`canonicalConfigPath`). */
-  readonly canonical: (key: string) => string
-}
 
 /**
  * `threads.projects` keyed by canonical path; of two keys naming one project, the first — the

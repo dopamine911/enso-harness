@@ -44,7 +44,8 @@ export type SecuritySettingsWrite = ConfigSectionWrite<EnsoSecuritySettingsRead>
  */
 export function prunedSecurity(security: EnsoSecurityConfig): EnsoSecurityConfig | undefined {
   const kept = Object.entries(security).filter(
-    ([, value]) => value !== undefined && (typeof value !== 'object' || Object.keys(value).length > 0),
+    ([, value]) =>
+      value !== undefined && (value === null || typeof value !== 'object' || Object.keys(value).length > 0),
   )
   return kept.length === 0 ? undefined : Object.fromEntries(kept)
 }
