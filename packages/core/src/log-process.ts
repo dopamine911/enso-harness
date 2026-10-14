@@ -450,6 +450,8 @@ export function reportSessionMigration(log: EnsoLogger, sessions: SessionMigrati
  * line for what moved, a `warn` per file left because `ENSO_HOME` already had one: nothing is
  * overwritten), and the shutdown flush installed. One function, so the two dev launchers cannot
  * drift into different orders; `bun run dev` starts both at once, and either may migrate first.
+ * An installed Enso (`repoRoot` undefined, #950) has no checkout `.enso/`: the migration and its
+ * report are skipped, and everything after them runs as it does in a checkout.
  *
  * @group Logging
  */
