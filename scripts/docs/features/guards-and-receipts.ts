@@ -104,10 +104,10 @@ export const GUARDS_AND_RECEIPTS: FeatureSpec = {
         { target: { text: 'Enso guard', within: REFUSED_CURL }, says: '**{shown}**: who refused it.' },
       ],
       measure: {
-        // The Stats tab's line under the failures: the same thread's refusals, counted apart.
+        // The Stats tab's line under the failures: the same thread's refusals, counted apart and named by who refused.
         refusedApart: async (page) => {
           await page.getByRole('tab', { name: 'Stats', exact: true }).click()
-          return page.getByText('refused by a guard — not failures').first()
+          return page.getByText('— not failures').first()
         },
       },
     },
