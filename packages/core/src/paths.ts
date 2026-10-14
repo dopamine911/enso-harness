@@ -84,6 +84,8 @@ const MAX_LINK_HOPS = 40
 /**
  * The file `path` names, through every link — also a link whose file is not there yet (a dotfiles
  * repo not checked out), which `realpathSync` refuses. A path with nothing at it names itself.
+ * A link's target is read against its directory's REAL path, as the kernel reads a `..` in it.
+ * ⚠ A link loop (more than `MAX_LINK_HOPS` links) throws ELOOP: the link is never replaced.
  */
 function fileBehindLinks(path: string): string {
   let current = path
@@ -91,7 +93,7 @@ function fileBehindLinks(path: string): string {
     try {
       return realpathSync(current)
     } catch {
-      // Not there, or a link to something not there: follow the link by hand.
+      // realpath refused (nothing there, a dangling link, a loop, no access): walk the link by hand.
     }
     let isLink: boolean
     try {
@@ -100,9 +102,9 @@ function fileBehindLinks(path: string): string {
       return current
     }
     if (!isLink) return current
-    current = resolve(dirname(current), readlinkSync(current))
+    current = resolve(realpathOrSelf(dirname(current)), readlinkSync(current))
   }
-  return current
+  throw Object.assign(new Error(`ELOOP: too many symbolic links behind "${path}"`), { code: 'ELOOP' })
 }
 
 /**

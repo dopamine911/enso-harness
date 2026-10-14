@@ -1188,7 +1188,7 @@ test('⚠ the host check never asks a host web_fetch would refuse by its address
   }
   expect(await checked('nowhere.example')).toEqual({
     kind: 'failed',
-    reason: expect.stringContaining('"nowhere.example" did not resolve (Error: queryA ENOTFOUND nowhere.example)'),
+    reason: '"nowhere.example" did not resolve (Error: queryA ENOTFOUND nowhere.example), so web_fetch would refuse it',
   })
   expect(asked).toEqual([])
 })
