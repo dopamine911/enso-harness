@@ -170,8 +170,8 @@ export interface ThreadRegistry {
   /** Every live thread, for the inspection listing. Never creates. */
   list(): ThreadView[]
   /**
-   * Every live thread's run now, and every change from now on (#911): a run taking a thread, its
-   * release, the thread dropped — the moments its `status` reaches its followers, told here for
+   * Every live thread's run now, and every change from now on (#911): the thread built, a run taking
+   * it, its release, the thread dropped — the moments its `status` reaches its followers, told here for
    * EVERY thread, followed or not, so a page hears a run it has not opened end. `states` is read in
    * the same tick as the subscription. Never creates.
    */

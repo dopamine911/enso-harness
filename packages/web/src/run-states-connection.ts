@@ -10,6 +10,11 @@ import { readSseFrames } from './follow-connection.ts'
  *
  * A refusal (4xx) is the page asking wrong, and asking again changes nothing: said once, not
  * retried. A frame off its schema is said and skipped.
+ *
+ * ⚠ No silence watchdog, unlike the follow's (#914): the route's keepalives are read and dropped.
+ * A server that stops, or restarts, closes the socket, and that ends the read and reconnects; only
+ * a half-open connection (a network that vanished without a close) would keep this waiting. What
+ * that costs is a not-open row's dot clearing late — the next listing read still corrects it.
  */
 
 const log = ensoLogger('browser', 'run-states')
@@ -19,8 +24,11 @@ const RUN_STATES_ROUTE = '/api/run-states'
 /** Compiled once: it checks every frame. */
 const frameValidator = Compile(EnsoRunStatesFrame)
 
+/** The longest a reconnect waits: kept to once the shorter waits are spent. */
+const LONGEST_RECONNECT_DELAY_MS = 5000
+
 /** How long a reconnect waits, by consecutive attempt that heard nothing; a stream that delivered starts over. */
-const RECONNECT_DELAYS_MS = [250, 1000, 5000] as const
+const RECONNECT_DELAYS_MS = [250, 1000, LONGEST_RECONNECT_DELAY_MS] as const
 
 export interface RunStatesWatchOptions {
   /** The caller leaving: closes the stream and ends the loop. */
@@ -38,7 +46,7 @@ export async function watchRunStates(options: RunStatesWatchOptions): Promise<vo
     const attempt = await readOnce(options)
     if (attempt === 'refused') return
     failures = attempt === 'delivered' ? 0 : failures + 1
-    const delay = RECONNECT_DELAYS_MS[Math.min(failures, RECONNECT_DELAYS_MS.length - 1)] ?? 5000
+    const delay = RECONNECT_DELAYS_MS[Math.min(failures, RECONNECT_DELAYS_MS.length - 1)] ?? LONGEST_RECONNECT_DELAY_MS
     await sleep(delay, signal)
   }
 }

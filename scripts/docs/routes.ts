@@ -498,7 +498,7 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     handler: 'followRunStates → ThreadRegistry.watchRunStates',
     input: 'none',
     success:
-      '200 SSE stream of `EnsoRunStatesFrame` (#911): `run-states`, every thread the server holds with its `busy` and `waiting`, then a `run-state` each time a run takes a thread, releases it or the thread is dropped — how a page hears a run it has not opened end',
+      '200 SSE stream of `EnsoRunStatesFrame` (#911): `run-states`, every thread the server holds with its `busy` and `waiting`, then a `run-state` each time a thread is built, a run takes it, releases it or the thread is dropped — how a page hears a run it has not opened end',
     errors: '403 untrusted origin',
     routeClass: 'observation',
     builds: 'no',
