@@ -532,7 +532,8 @@ export type EnsoPermissionPolicyRead = Static<typeof EnsoPermissionPolicyRead>
  * the engine's own schema, puts `**` first where a mode needs it, and writes each file atomically:
  * the record first, then the policy, the record put back when the policy's write fails. Not one
  * step: a crash between the two leaves the new record over the old policy — what is in force does not
- * change, but a rule being switched back on is then in neither file.
+ * change, but a rule being switched back on is then in neither file, and a group being turned off
+ * leaves its rules as yours.
  *
  * @group Permission policy
  */

@@ -69,9 +69,9 @@ export function disabledAt(record: EnsoRuleRecord, surface: string, pattern: str
  * back after. Enso's `**` is not switched off, as it is not removed: a mode needs it.
  *
  * ⚠ A surface the switch empties stays, as `{}` — no rule, the same to the engine as no key — so it
- * keeps its PLACE. Surfaces are matched as wildcards in file order, last match winning: dropped and
- * put back last, `read: { 'notes/*': 'allow' }` would come after a `'*': 'deny'` it came before, and
- * switching it off and on would turn that deny into an allow.
+ * keeps its PLACE, and switching the rule off and back on gives the file back byte for byte. The
+ * reason is that round trip, not the engine: its schema says a surface-specific rule beats the `*`
+ * fallback whatever the key order in the file.
  */
 export function withRuleDisabled(draft: RuleDraft, surface: string, pattern: string): RuleDraft {
   const { permission, record } = draft

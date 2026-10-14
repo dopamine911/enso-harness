@@ -204,7 +204,8 @@ const isEmptyRecord = (record: EnsoRuleRecord): boolean =>
  * policy's write then fails, the record that was on disk is put back (or, none there, removed). Each
  * write is atomic, the pair is not: a crash between them leaves the new record over the old policy.
  * What is in force does not change; a rule being switched off reads as still in force (`liveRecord`
- * on the page), and one being switched back on is in neither file. A record the same as on disk is
+ * on the page), one being switched back on is in neither file, and a group being turned off leaves
+ * its rules as yours. A record the same as on disk is
  * not rewritten, and an empty one is not created where there was none.
  */
 function writeBoth(policyPath: string, policyText: string, record: EnsoRuleRecord | undefined): void {

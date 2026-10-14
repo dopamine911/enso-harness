@@ -844,9 +844,8 @@ test('⚠ a rule switched off leaves the file for Enso’s record, greyed in pla
   expect(reread.section().querySelector('[aria-label="rules switched off"]')).toBeNull()
 })
 
-// PR #970 review: surfaces match as wildcards in file order, last match winning. The only rule on a
-// surface switched off must not move that surface after a `*` it came before: switched back on, an
-// allow the `*` deny used to beat would beat it.
+// PR #970 review: the only rule on a surface switched off keeps that surface in place, as `{}`, so
+// switching it back on gives the file back byte for byte (the engine itself ignores key order).
 test('⚠ the only rule on a surface switched off keeps the surface in its place, empty; switched on, the file is as it was (#945)', async () => {
   const file = {
     authorizerChain: ['enso-auto'],

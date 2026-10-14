@@ -569,7 +569,8 @@ from the policy it runs. One `ETag` names both files; a save writes the record f
 second, each atomically, and puts the old record back when the policy's write fails: both, or the
 record put back. A crash between the two is the one gap, and it never changes what is in force (the
 policy is the old one): a rule being switched off is read as still in force, and its record entry goes
-at the next save; a rule being switched back on is in neither file, so it is lost as a switched-off rule.
+at the next save; a rule being switched back on is in neither file, so it is lost as a switched-off rule;
+a group being turned off leaves its rules in the policy with no group entry, so they read as yours.
 A reset drops the groups' part of the record and keeps the rules switched off. The record is under
 `ENSO_HOME`, which the guards refuse the agent as a write target. The per-mode view is a
 MODEL of the engine's merge in core (`core/src/permission-policy.ts#effectiveRows`: the shorthand expansion,
