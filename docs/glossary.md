@@ -323,7 +323,8 @@ observation; stop, answer and prompt are Control, and never share a surface with
 - **status** — the frame that says whether the thread is live, busy, and at which generation. Closes a
   run in every browser alike; a status that says busy with no run to match opens an *external* run.
 - **follow** — one browser's subscription to a thread: snapshot, then frames, until the page or the
-  server drops it. A dropped follow is said (`follow-ended`), never silent. *Id:* none — per page,
+  server drops it. A dropped follow is said (`follow-ended`), never silent; so is a page that stops
+  applying one (#915). *Id:* none — per page,
   per thread. *Minted by:* the follow route. *Owner:* the page.
 - **tail** — the recent events kept for inspection (#97). Two per thread: the **emitted tail** (what
   the host received from the runtime, with how) and the **sent tail** (what the server put on the

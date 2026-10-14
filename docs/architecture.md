@@ -142,6 +142,7 @@ type-only crossing is still a dependency.
 | `harness-extension-tests` | `packages/harness/extensions/**/__tests__/` | `harness-extensions`, `core`, `harness-core`, `judge-backends`, `test-support` |
 | `harness-extensions` | `packages/harness/extensions/` (all else) | `core`, `harness-core`, `judge-backends` |
 | `host-tests` | `packages/web/src/host/**/__tests__/` | `host`, `core`, `test-support` |
+| `page-follow-tests` | `packages/web/src/server/__tests__/follow-page.test.ts` | `server-tests`, `server`, `browser`, `host`, `core`, `test-support` |
 | `server-tests` | `packages/web/src/server/**/__tests__/` | `server`, `core`, `host`, `test-support` |
 | `browser-tests` | `packages/web/src/**/__tests__/` | `browser`, `core`, `test-support` |
 | `host` | `packages/web/src/host/` (all else) | `core` |
@@ -226,7 +227,11 @@ stateDiagram-v2
 frame that says busy with no run to match (another tab's — `external-<generation>`). Closed by the
 feed's `settled` + `status` for every run the server took, and by the returning POST only where no
 frame ever will — see invariant 1. A dropped follow is said as a chunk (`follow-ended`) so the page
-can say so; the next follow's snapshot is the resync (#103, #114).
+can say so; the next follow's snapshot is the resync (#103, #114). A page that stops APPLYING the
+follow — a throw while handling a chunk ends TanStack's subscription — closes the socket and says so
+too: a warning naming the chunk, and the exception in the run alert and the log
+(`follow-connection.ts#consumerStopped`, #915). Before that it kept reading a live follow it no
+longer applied, with nothing said.
 
 **A dialog.** pi blocks; the follow carries a blocking `extension-ui-request`; an answer is `POST …/dialog`, validated
 against the question (#112); every settle path — answered, cancelled, timeout, abort — emits
@@ -242,7 +247,7 @@ question so a reconnect renders the card at once.
    `docs/flows/prompt-run-settle.md` pins it). A prompt that never became a run — a refused image,
    an unreachable or refusing POST, an unreadable receipt, a rejection that beat its own receipt —
    is opened and closed on this side, because no frame will ever name it; and a follow that drops
-   closes what is still open as an error rather than leaving it hanging (`#subscribe`'s `finally`).
+   closes what is still open as an error rather than leaving it hanging (`follow-connection.ts#followClosed`).
    This is why abort (#116), dialogs (#113, #114) and resume (#95) landed without regressions: each
    added a unary route and changed nothing about how a run ends.
 2. **A route tells pi; the feed ends the run.** Four control routes, each answering before its effect
