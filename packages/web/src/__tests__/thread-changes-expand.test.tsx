@@ -2,8 +2,9 @@ import { afterAll, expect, test } from 'bun:test'
 import type { EnsoGitFileChange, EnsoGitFileText, EnsoGitRepository } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot } from 'react-dom/client'
-import type { ChangedFileOutcome, ReadChangedFile } from '../changed-file.ts'
+import { type ChangedFileOutcome, expansionOf, type ReadChangedFile } from '../changed-file.ts'
 import { highlightLines } from '../diff-highlight.ts'
+import { parsePatch } from '../diff-rows.ts'
 import type * as ThreadChangesModule from '../thread-changes.tsx'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 import { waitUntil } from './wait-until.ts'
@@ -200,6 +201,9 @@ async function mountRead(reader: ReturnType<typeof readingOnce>, change: EnsoGit
   return container
 }
 
+/** A reader for `expansionOf` called directly, with its outcome given: it only checks a reader is there. */
+const UNUSED_READ: ReadChangedFile = () => Promise.reject(new Error('expansionOf never reads'))
+
 const DELETED_LINES = ['a', 'b', 'c']
 
 test('⚠ a file become a symbolic link offers no unchanged lines: the deleted file is never drawn as context after the link', async () => {
@@ -283,9 +287,46 @@ test('⚠ an added file that grew after its patch offers no unchanged lines: the
     omitted: null,
   }
   const grown = await mountRead(readingOnce({ kind: 'none' }, text(['a', 'b', 'c', 'd', 'e'])), added)
-  expect(grown.textContent).not.toContain('unchanged line')
+  await waitUntil(() => (grown.textContent ?? '').includes('changed since this diff'))
+  expect(countButton(grown, 'unchanged lines')).toBeUndefined()
   // As the patch has it, the file is all its hunk: nothing to expand, and nothing blocked either.
+  // The view draws no run to say so, so the expansion is read where the view reads it.
   const whole = await mountRead(readingOnce({ kind: 'none' }, text(['a', 'b', 'c'])), added)
   expect(whole.textContent).not.toContain('unchanged line')
   expect(whole.textContent).not.toContain('changed since this diff')
+  const wholeFile = { threadId: 't1', ...added, oldText: { kind: 'none' }, newText: text(['a', 'b', 'c']) } as const
+  expect(expansionOf(UNUSED_READ, { kind: 'read', file: wholeFile }, added, parsePatch(added.patch ?? ''))).toEqual({
+    kind: 'ready',
+    lines: ['a', 'b', 'c'],
+    side: 'new',
+  })
+})
+
+test('an added file whose new side is too large to send: blocked, said too large', () => {
+  const patch = ['diff --git a/f.ts b/f.ts', 'new file mode 100644', '@@ -0,0 +1,3 @@', '+a', '+b', '+c', ''].join('\n')
+  const change: EnsoGitFileChange = {
+    path: 'f.ts',
+    oldPath: null,
+    status: 'added',
+    added: 3,
+    removed: 0,
+    patch,
+    omitted: null,
+  }
+  const file = {
+    threadId: 't1',
+    ...change,
+    oldText: { kind: 'none' },
+    newText: { kind: 'too-large', bytes: 700 * 1024 },
+  } as const
+  expect(expansionOf(UNUSED_READ, { kind: 'read', file }, change, parsePatch(patch))).toMatchObject({
+    kind: 'blocked',
+    why: 'too large to expand',
+  })
+})
+
+test('the old side binary, the new text and agreeing: the runs stay counts, said binary — the new side alone never fills them', async () => {
+  const container = await mount(answering(text(NEW), { kind: 'binary' }))
+  await waitUntil(() => (container.textContent ?? '').includes('a binary file'))
+  expect(countButton(container, 'unchanged lines')).toBeUndefined()
 })

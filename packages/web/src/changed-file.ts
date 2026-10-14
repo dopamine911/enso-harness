@@ -106,7 +106,7 @@ const TYPE_CHANGED: Expansion = {
   detail: 'the old and new sides are different kinds of file, with no unchanged lines between them',
 }
 
-/** Why the runs cannot be shown from `side`, the side they would come from. */
+/** Why the runs cannot be shown from `side`, the side they would come from — that one side only. */
 function blockedBy(side: EnsoGitFileText): Expansion {
   switch (side.kind) {
     case 'too-large':
@@ -122,7 +122,7 @@ function blockedBy(side: EnsoGitFileText): Expansion {
     case 'unavailable':
       return { kind: 'blocked', why: "can't be read", detail: side.reason }
     case 'none':
-      return { kind: 'blocked', why: "can't be read", detail: 'the file is on neither side' }
+      return { kind: 'blocked', why: "can't be read", detail: 'the file is not on this side' }
   }
 }
 
