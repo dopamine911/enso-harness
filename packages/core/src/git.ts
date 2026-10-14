@@ -627,17 +627,20 @@ async function emptyTree(runGit: GitRunner, root: string): Promise<string | null
   return hashed.code === 0 ? hashed.stdout.trim() : null
 }
 
-/** Tracked files under `scope` that differ from `base`, in the working tree: committed, staged or not. */
-async function trackedChanges(
+/**
+ * The files `git diff <range>` lists, run from `root`, each with its patch while `budget` has room:
+ * the work tree against a base (`[base, '--', scope]`), or one commit against another.
+ */
+async function diffedFiles(
   runGit: GitRunner,
-  comparison: TreeComparison,
+  root: string,
+  range: readonly string[],
   budget: { left: number },
 ): Promise<EnsoGitFileChange[]> {
   const listing = ['diff', ...DIFF_OPTIONS, '--raw', '--numstat', '-z']
-  const range = [comparison.base, '--', scopePathspec(comparison.scope)]
-  const whole = await runGit([...listing, '--patch', ...range], comparison.root)
+  const whole = await runGit([...listing, '--patch', ...range], root)
   // Too much output to hold, or no answer in time: the files and their counts, without patches.
-  const read = whole.code === 0 ? whole : await runGit([...listing, ...range], comparison.root)
+  const read = whole.code === 0 ? whole : await runGit([...listing, ...range], root)
   if (read.code !== 0) throw new Error(reasonOf(read))
   const { listed, counts, parts } = parseDiff(read.stdout)
   // A split that does not account for the list sends no patch rather than risk pairing a file
@@ -648,6 +651,43 @@ async function trackedChanges(
       ? []
       : [withPatch(file, counts[fileIndex] ?? UNCOUNTED, patches?.[fileIndex], budget)],
   )
+}
+
+/**
+ * Every file that differs between two commits of the repository `runGit` reads, `from` to `to`
+ * (#553): the work tree is not looked at, so the answer is the two commits' alone, however the
+ * tree has moved since. Each with its patch while the answer has room (`MAX_*` above). Throws, with
+ * git's words, when either commit cannot be read.
+ *
+ * @group Git
+ */
+export async function readCommitChanges(
+  runGit: GitRunner,
+  place: { readonly root: string; readonly from: string; readonly to: string },
+): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }> {
+  const files = await diffedFiles(runGit, place.root, [place.from, place.to, '--'], {
+    left: MAX_TOTAL_PATCH_CHARS,
+  })
+  return { files: files.slice(0, MAX_CHANGED_FILES), truncated: files.length > MAX_CHANGED_FILES }
+}
+
+/**
+ * One file that differs between two commits, whole on both sides (#553): the old side at `from`,
+ * read from `oldPath` for a rename or copy, the new side at `to` — both from the repository's
+ * objects, never the work tree. ⚠ The caller holds both paths to the tree first ({@link isPathInScope}).
+ *
+ * @group Git
+ */
+export async function readCommitFileTexts(
+  runGit: GitRunner,
+  place: { readonly root: string; readonly from: string; readonly to: string },
+  paths: ChangedFilePaths,
+): Promise<ChangedFileTexts> {
+  const [oldText, newText] = await Promise.all([
+    readCommittedText(runGit, place.root, place.from, paths.oldPath ?? paths.path),
+    readCommittedText(runGit, place.root, place.to, paths.path),
+  ])
+  return { oldText, newText }
 }
 
 /**
@@ -737,7 +777,13 @@ export async function readTreeChanges(
   comparison: TreeComparison,
 ): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }> {
   const budget = { left: MAX_TOTAL_PATCH_CHARS }
-  const tracked = await trackedChanges(runGit, comparison, budget)
+  // Tracked files under `scope` that differ from `base`, in the working tree: committed, staged or not.
+  const tracked = await diffedFiles(
+    runGit,
+    comparison.root,
+    [comparison.base, '--', scopePathspec(comparison.scope)],
+    budget,
+  )
   // A nested repository is listed as its directory (`vendor/lib/`), which has no diff of its own.
   const untrackedPaths = (await comparison.listUntracked()).filter((path) => path !== '' && !path.endsWith('/'))
   const room = Math.max(0, MAX_CHANGED_FILES - tracked.length)

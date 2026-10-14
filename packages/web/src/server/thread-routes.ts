@@ -70,6 +70,18 @@ const THREAD_CHANGES_ROUTE = threadRoute('changes')
  * repository's scope; any other path is a 400.
  */
 const THREAD_CHANGED_FILE_ROUTE = /^\/api\/threads\/([^/?#]+)\/changes\/file(?:\?([^#]*))?$/
+/** `GET /api/threads/<threadId>/prompts` — the thread's prompts and the snapshots each began and ended at, for the Diff Viewer (#553). */
+const THREAD_PROMPT_RUNS_ROUTE = threadRoute('prompt-runs')
+/**
+ * `GET /api/threads/<threadId>/prompt-runs/changes?from=<hash>&to=<hash>` — every file that differs between
+ * two of the thread's snapshots (#553). Only snapshots its prompts record; any other is a 409.
+ */
+const THREAD_TURN_CHANGES_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt-runs\/changes(?:\?([^#]*))?$/
+/**
+ * `GET /api/threads/<threadId>/prompt-runs/file?from=<hash>&to=<hash>&path=<path>[&oldPath=<path>]` — one
+ * file whole at two of the thread's snapshots, for the Diff Viewer to expand (#553).
+ */
+const THREAD_TURN_FILE_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt-runs\/file(?:\?([^#]*))?$/
 /**
  * `GET /api/threads/<threadId>/tree` — where the thread works, the HTML pages it holds, and the origin
  * its preview is served from (#619, #713: an origin of its own, not a route of this server).
@@ -189,6 +201,7 @@ export function createThreadRoutes(state: ThreadRoutesState): ThreadRoutes {
     [THREAD_EVAL_ROUTE, reads.respondWithThreadEval],
     [THREAD_GIT_ROUTE, reads.respondWithThreadGit],
     [THREAD_CHANGES_ROUTE, reads.respondWithThreadChanges],
+    [THREAD_PROMPT_RUNS_ROUTE, reads.respondWithThreadPromptRuns],
     [THREAD_JUDGE_CASES_ROUTE, reads.respondWithThreadJudgeCases],
     [THREAD_DELETE_PREVIEW_ROUTE, reads.respondWithDeletePreview],
     [THREAD_PAGES_ROUTE, reads.respondWithThreadPages],
@@ -201,6 +214,8 @@ export function createThreadRoutes(state: ThreadRoutesState): ThreadRoutes {
     { method: 'GET', route: THREAD_PROJECT_PROMPT_ROUTE, respond: prompts.respondWithProjectPrompt },
     { method: 'GET', route: THREAD_INCIDENTS_ROUTE, respond: reads.respondWithThreadIncidents },
     { method: 'GET', route: THREAD_CHANGED_FILE_ROUTE, respond: reads.respondWithChangedFile },
+    { method: 'GET', route: THREAD_TURN_CHANGES_ROUTE, respond: reads.respondWithTurnChanges },
+    { method: 'GET', route: THREAD_TURN_FILE_ROUTE, respond: reads.respondWithTurnFile },
     { method: 'GET', route: THREAD_HISTORY_ROUTE, respond: reads.respondWithThreadHistory },
     { method: 'GET', route: THREAD_ROUTE, respond: idOnly(reads.respondWithThread) },
     {

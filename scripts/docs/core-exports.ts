@@ -75,6 +75,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'tool-input.ts': 'Surface',
     'tool-result.ts': 'Surface, Observation',
     'transcript.ts': 'Thread, Record',
+    'turn-diffs.ts': 'Thread, Observation',
     'ui-events.ts': 'Thread, Surface',
   },
   'config/policy': {

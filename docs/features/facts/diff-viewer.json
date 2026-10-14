@@ -1,0 +1,17 @@
+{
+  "feature": "diff-viewer",
+  "shots": [
+    {
+      "image": "diff-viewer",
+      "steps": ["open a thread from the rail", "choose the **Diff Viewer** tab at the top of the thread"],
+      "shown": [
+        "previous turn",
+        "what the diff compares",
+        "prompts",
+        "the files as turn 3 began (e6992c36) → the files after turn 3 (4de4af58)",
+        "+ databaseUrl: required('DATABASE_URL'),"
+      ],
+      "measured": {}
+    }
+  ]
+}

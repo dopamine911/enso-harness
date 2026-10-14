@@ -618,6 +618,11 @@ export function createFakeAgentHost(
     threadTree: () => Promise.resolve(undefined),
     readCopyChanges: () => Promise.reject(new Error('the fake host holds no snapshot store')),
     readCopyFileTexts: () => Promise.reject(new Error('the fake host holds no snapshot store')),
+    threadPromptRuns: () => Promise.resolve(undefined),
+    readTurnChanges: (threadId: string) =>
+      Promise.resolve({ kind: 'no-thread', reason: `the fake host holds no snapshot store for ${threadId}` }),
+    readTurnFileTexts: (threadId: string) =>
+      Promise.resolve({ kind: 'no-thread', reason: `the fake host holds no snapshot store for ${threadId}` }),
     readStoredThread: (threadId: string) => {
       const storedThread = served(threadId)
       return Promise.resolve(

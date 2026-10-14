@@ -469,15 +469,18 @@ function toggled(set: ReadonlySet<string>, path: string): ReadonlySet<string> {
 
 /**
  * The Diff header — `description` says what the files are compared with — then the changed files
- * as a tree and the chosen file's diff: a repository's and a copy's alike.
+ * as a tree and the chosen file's diff: a repository's and a copy's alike, and the Diff Viewer's
+ * two snapshots (#553) under a `title` of its own.
  */
-function ChangedFiles({
+export function ChangedFiles({
+  title = 'Diff',
   description,
   files,
   truncated,
   nothingText,
   readFile,
 }: {
+  readonly title?: string
   readonly description: React.ReactNode
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
@@ -495,7 +498,7 @@ function ChangedFiles({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-4 py-2 text-sm">
-        <h2 className="font-heading font-semibold text-foreground">Diff</h2>
+        <h2 className="font-heading font-semibold text-foreground">{title}</h2>
         {description}
         <span className="ml-auto text-xs text-muted-foreground">
           {files.length}

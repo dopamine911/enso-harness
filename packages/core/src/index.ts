@@ -83,6 +83,13 @@ export {
   EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'
+export {
+  EnsoThreadTurn,
+  EnsoThreadPromptRuns,
+  EnsoTurnBaseline,
+  EnsoTurnChanges,
+  EnsoTurnSnapshot,
+} from './turn-diffs.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
 export {
   ENSO_TREE_SETUP_ENTRY,

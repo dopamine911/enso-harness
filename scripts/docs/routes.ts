@@ -199,6 +199,30 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
         'path: `threadId`; query: `path` (the file now, from the repository root), optional `oldPath` (a rename or copy’s path at the baseline)',
     },
   ),
+  THREAD_PROMPT_RUNS_ROUTE: threadRead(
+    'respondWithThreadPromptRuns → AgentHost.threadPromptRuns',
+    "200 `EnsoThreadPromptRuns` JSON (#553) — the Diff Viewer's steps: the thread's own prompts (a fork's inherited prompts are counted in `prompt`, not listed), each with the snapshot its run began with (`start`) and the one the next turn's run began with (`end`) — `taken`, `failed`, `unrecorded` (before #551), `pending` (no later turn yet) or `unavailable` (a commit the store lacks) — `idle` when both hold one tree, `restored` when a restore ran in its span; and `baseline`, the tree's base snapshot (a fork's inherited one, with its source) or a checkout thread's first snapshot. Off the branch and the store's objects; the live tree is never read. Read-only",
+    NO_SESSION_ERRORS,
+  ),
+  THREAD_TURN_CHANGES_ROUTE: threadRead(
+    'respondWithTurnChanges → AgentHost.readTurnChanges',
+    "200 `EnsoTurnChanges` JSON (#553) — every file that differs between two of the thread's snapshots, compared in its store (never the live tree), each with its unified diff unless binary or too large; `truncated` past 500 files. Read-only: nothing in the store, the tree or the session is written",
+    "400 malformed thread id, or `from`/`to` missing or not a commit hash; 403 untrusted origin; 404 no session; 409 a snapshot the thread's prompts do not record, or one git cannot read; 500 handler failure",
+    {
+      path: '/api/threads/:threadId/prompt-runs/changes',
+      input: "path: `threadId`; query: `from`, `to` — two snapshot commits the thread's prompts record",
+    },
+  ),
+  THREAD_TURN_FILE_ROUTE: threadRead(
+    'respondWithTurnFile → AgentHost.readTurnFileTexts',
+    "200 `EnsoThreadChangedFile` JSON (#553) — one file whole at two of the thread's snapshots: `oldText` at `from` (a rename's at `oldPath`), `newText` at `to`, both read from the store as stored. What the Diff Viewer expands the unchanged lines between hunks from. Read-only",
+    "400 malformed thread id, `from`/`to` missing or not a commit hash, or a path (either) that names no file of the tree; 403 untrusted origin; 404 no session; 409 a snapshot the thread's prompts do not record, or one git cannot read; 500 handler failure",
+    {
+      path: '/api/threads/:threadId/prompt-runs/file',
+      input:
+        "path: `threadId`; query: `from`, `to` — two snapshot commits the thread's prompts record; `path`; optional `oldPath` (a rename or copy’s path at `from`)",
+    },
+  ),
   THREAD_PAGES_ROUTE: threadRead(
     'respondWithThreadPages',
     "200 `EnsoThreadPages` JSON (#619) — the directory the thread works in (its tree, #551), the HTML files at its top two levels, at most 50 (`truncated` past them; `.git` and `node_modules` are not walked), and, once there is a page, `previewOrigin`: the thread's preview, an origin of its own (#713) — a loopback listener started on that first read, serving the tree at `/`, GET and HEAD only, to a loopback `Host` only, files at most 10 MiB, typed by extension, `nosniff`, `no-referrer`, `no-store`, nothing outside the tree (`..` or a symlink is a 404). Read-only",

@@ -22,7 +22,8 @@ import { ThreadEvalDrawer } from './thread-eval.tsx'
 import { settledToolResults } from './thread-git.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
-import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
+import { ThreadTurnDiffs } from './thread-turn-diffs.tsx'
+import { locateStatsTarget, type RevealStatsTarget, revealElement, ringElement } from './transcript-reveal.ts'
 import {
   type TranscriptScroller,
   TranscriptRevealBridge,
@@ -66,10 +67,13 @@ function panelIdsOf(shown: ThreadView | undefined, view: ThreadView): { id?: str
 function ThreadViewOverlay({
   shown,
   revealInTranscript,
+  revealMessage,
   changesMoment,
 }: {
   shown: ThreadView | undefined
   revealInTranscript: RevealStatsTarget
+  /** Chat opened at the message `messageId` names, ringed; `false` when the transcript does not hold it. */
+  revealMessage: (messageId: string) => boolean
   /** When the tree may have moved: a settled tool result, the run starting or ending. */
   changesMoment: string
 }): React.ReactNode {
@@ -99,6 +103,14 @@ function ThreadViewOverlay({
     return (
       <div role="tabpanel" {...panelIdsOf(shown, 'changes')} className="absolute inset-0">
         <ThreadChanges moment={changesMoment} />
+      </div>
+    )
+  }
+  // The Diff Viewer (#553): the thread's prompts, stepped through snapshot to snapshot, over the transcript.
+  if (shown === 'prompt-runs') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'prompt-runs')} className="absolute inset-0">
+        <ThreadTurnDiffs moment={changesMoment} revealMessage={revealMessage} revealInTranscript={revealInTranscript} />
       </div>
     )
   }
@@ -134,6 +146,27 @@ function ThreadViews(): React.ReactNode {
   const onChat = (shown ?? 'chat') === 'chat'
   const { selection, placed } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
   const incidentReveal = useIncidentReveal(scroller)
+  // A message by its id — a resumed thread's messages are its branch's entries (#553) — wherever it
+  // is: the windowed list (#739) scrolls its row into view first, as an incident's reveal does
+  // (#588), and the row, drawn, is ringed.
+  const { rowScroll } = incidentReveal
+  const revealMessage = useCallback(
+    (messageId: string): boolean => {
+      const row = chat.messages.findIndex((message) => message.id === messageId)
+      const bridge = scroller.current
+      if (row === -1 || bridge === null) return false
+      open('chat')
+      bridge.stopScroll()
+      rowScroll.current?.(row)
+      // The virtualizer settles its own scroll as the rows it draws are measured: ring once it has.
+      window.setTimeout(() => {
+        const element = bridge.content()?.querySelector(`[data-index="${row}"] [data-role]`)
+        if (element !== null && element !== undefined) ringElement(element)
+      }, 400)
+      return true
+    },
+    [chat.messages, open, rowScroll],
+  )
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and `inert`,
@@ -168,6 +201,7 @@ function ThreadViews(): React.ReactNode {
       <ThreadViewOverlay
         shown={shown}
         revealInTranscript={revealInTranscript}
+        revealMessage={revealMessage}
         changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
       />
     </div>

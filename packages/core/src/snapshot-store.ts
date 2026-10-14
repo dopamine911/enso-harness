@@ -92,6 +92,8 @@ import {
   execGit,
   type GitResult,
   type GitRunner,
+  readCommitChanges,
+  readCommitFileTexts,
   readFileTexts,
   readTreeChanges,
   runGitIn,
@@ -1581,4 +1583,77 @@ export function readCopyFileTexts(options: {
     return !('refused' in untracked) && untracked.kept.includes(path)
   }
   return readFileTexts(runStore, { root: tree, base, listed }, options.paths)
+}
+
+// ── Two snapshots compared (#553) ───────────────────────────────────────────────────────────────
+
+/**
+ * git reading the store at `directory` alone, run from inside it: a bare repository finds itself,
+ * so neither the tree — which may have moved or gone since — nor its repository is looked at.
+ * Through `@enso/core/git`'s read-only runner (`GIT_OPTIONAL_LOCKS=0`, filter drivers emptied, no
+ * inherited `GIT_DIR`): nothing in the store is written.
+ */
+function storeObjectsReader(environment: NodeJS.ProcessEnv, directory: string): GitRunner {
+  return (args) => runGitIn(environment, args, directory)
+}
+
+/**
+ * Each of `hashes` the store at `directory` holds as a commit, to its tree's hash (#553): two
+ * snapshots with one tree hold the same files, whatever their commits. A hash the store does not
+ * hold is absent from the answer. Throws, with git's words, when the store cannot be read at all.
+ * Writes nothing.
+ *
+ * @group Snapshot store
+ */
+export async function readSnapshotTrees(options: {
+  readonly directory: string
+  readonly hashes: readonly string[]
+  readonly environment: NodeJS.ProcessEnv
+}): Promise<Map<string, string>> {
+  const trees = new Map<string, string>()
+  if (options.hashes.length === 0) return trees
+  const { directory, environment } = options
+  const args = ['log', '--no-walk=unsorted', '--ignore-missing', '--format=%H %T', ...new Set(options.hashes), '--']
+  const read = await runGitIn(environment, args, directory)
+  if (read.code !== 0) throw new Error(read.stderr.trim() || `git log exited ${read.code}`)
+  for (const line of read.stdout.split('\n')) {
+    const [commit, tree] = line.split(' ')
+    if (commit !== undefined && tree !== undefined) trees.set(commit, tree)
+  }
+  return trees
+}
+
+/**
+ * Every file that differs between two snapshots in the store at `directory`, `from` to `to`
+ * (#553): the two commits' trees compared (`readCommitChanges`), never the live tree. Throws, with
+ * git's words, when either cannot be read. Writes nothing.
+ *
+ * @group Snapshot store
+ */
+export function readSnapshotChanges(options: {
+  readonly directory: string
+  readonly from: string
+  readonly to: string
+  readonly environment: NodeJS.ProcessEnv
+}): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }> {
+  const { directory, from, to, environment } = options
+  return readCommitChanges(storeObjectsReader(environment, directory), { root: directory, from, to })
+}
+
+/**
+ * One file that differs between two snapshots, whole on both sides (#553): the old side at `from`,
+ * the new at `to`, both from the store's objects. The paths are the caller's to hold to the tree.
+ * Writes nothing.
+ *
+ * @group Snapshot store
+ */
+export function readSnapshotFileTexts(options: {
+  readonly directory: string
+  readonly from: string
+  readonly to: string
+  readonly environment: NodeJS.ProcessEnv
+  readonly paths: ChangedFilePaths
+}): Promise<ChangedFileTexts> {
+  const { directory, from, to, environment, paths } = options
+  return readCommitFileTexts(storeObjectsReader(environment, directory), { root: directory, from, to }, paths)
 }
