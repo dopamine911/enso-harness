@@ -44,15 +44,15 @@ export const CloseDebugContext = createContext<(() => void) | undefined>(undefin
 
 /**
  * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
- * choice for the page — switching thread keeps it — rendered by the pane on screen.
+ * choice per pane (#938) — switching the thread in a pane keeps it — rendered by the pane itself.
  */
 export type ThreadView = 'chat' | 'context' | 'stats' | 'changes'
 
 /**
- * What THIS pane shows, and how to change the page's view. `shown` is undefined in a hidden
+ * What THIS pane shows, and how to change its view. `shown` is undefined in a hidden
  * pane, which then draws its transcript and nothing else: the stats view — its fetches, its
- * `stores.usage` subscription, its panel `id`s — exists once, in the pane on screen, the debug
- * column's rule above (#358).
+ * `stores.usage` subscription — exists only in panes on screen, the debug column's rule above
+ * (#358). Each pane on screen keeps its own view (#938); the header's tabs change the focused one's.
  */
 export interface PaneView {
   readonly shown: ThreadView | undefined
@@ -60,6 +60,29 @@ export interface PaneView {
 }
 
 export const PaneViewContext = createContext<PaneView>({ shown: undefined, open: (): void => undefined })
+
+/**
+ * Where THIS pane is among several on screen (#938). `peek`: drawn beside the focused pane — it keeps
+ * streaming, its transcript and views are read but not acted on, and its composer's place shows what
+ * was typed there; a click focuses it, so the page still has exactly one composer (#707), and the
+ * panel `id`s the header's tabs name are the focused pane's alone. `number`: its place, 1-based,
+ * while several are open. `narrow`: side by side, where its status strip drops the counts. The only
+ * pane, and one off screen, is none of these.
+ */
+export interface PaneSlot {
+  readonly peek: boolean
+  readonly number: number | undefined
+  readonly narrow: boolean
+  /** Focus this pane, and its prompt when `prompt` — a click on it, its composer's stand-in. */
+  readonly focus: (prompt: boolean) => void
+}
+
+export const PaneSlotContext = createContext<PaneSlot>({
+  peek: false,
+  number: undefined,
+  narrow: false,
+  focus: (): void => undefined,
+})
 
 /**
  * What a draft's launch panel does on the page (#877): open one of its project's recent threads —

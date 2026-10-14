@@ -207,8 +207,8 @@ thread on the page gets its own:
  * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
  * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
  * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
- * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
- * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * thread, which closes its follow. Neither a thread with a run in flight nor one ON
+ * SCREEN — the focused pane, or one beside it (#938) — is ever the victim: a follow the page is showing or streaming is not spare
  * capacity — so a page made only of those goes over budget and records it. The session is
  * the server's, not the page's, so a dropped thread comes back through the rail's earlier threads —
  * the rail and `popstate` already resume a thread this page does not hold.
@@ -352,6 +352,11 @@ export interface ThreadStores {
    * nothing is discarded when the page leaves it (`discardEmptyDraft`).
    */
   readonly typed: WritableStore<boolean>
+  /**
+   * The words the composer holds, as typed (#938): a pane beside the focused one shows them where its
+   * composer is, so what you were writing there is in sight while you type in another.
+   */
+  readonly draft: WritableStore<string>
   /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has

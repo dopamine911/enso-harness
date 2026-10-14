@@ -66,6 +66,7 @@ import { COMPOSER_ICON_BUTTON, LockedChip } from './setting-chip.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { systemPromptName } from './thread-context-analysis.ts'
 import { ThreadContextDialog } from './thread-context.tsx'
+import type { ThreadStores } from './thread-stores.ts'
 
 /**
  * A thread's composer (#90): the prompt form, its chips (model, effort, mode, the locked system
@@ -430,7 +431,7 @@ function imagesOfAttachments(files: PromptInputMessage['files']): { images: Enso
 }
 
 /** What the composer's empty box says: why it cannot send, or the invitation — the launch panel's own before a session (#877), then by whether pi runs (#878). */
-function composerPlaceholder({
+export function composerPlaceholder({
   disconnected,
   ended,
   launching,
@@ -539,6 +540,18 @@ function ComposerCard({
 }
 
 /**
+ * What the composer holds, told to its thread's stores: whether anything is typed or attached —
+ * what leaving a draft thread reads (#875): words or an image here keep it on the rail — and the
+ * words themselves, which a pane beside the focused one shows in this composer's place (#938).
+ */
+function usePublishedDraft(stores: ThreadStores, draft: string, attached: boolean): boolean {
+  const typed = draft.trim().length > 0 || attached
+  useEffect(() => stores.typed.set(typed), [stores, typed])
+  useEffect(() => stores.draft.set(draft), [stores, draft])
+  return typed
+}
+
+/**
  * Inside the ported form, the composer's card (the prototype's `.composer`, #417): the settings
  * chips on top, the attachment strip, the textarea, then a footer — the hint that says what Enter
  * does (#878) on the left; the `/` palette, attach and stop / send — or, on the launch panel (#877),
@@ -579,9 +592,7 @@ function ComposerBody({
   // A resolution ended the thread (#466): read-only for good — the server refuses a prompt, so
   // the composer says why instead of offering a send that cannot land. Forking still works.
   const ended = useStore(stores.incidents).ended
-  // What leaving a draft thread reads too (#875): words or an image here keep it on the rail.
-  const typed = draft.trim().length > 0 || attachments.files.length > 0
-  useEffect(() => stores.typed.set(typed), [stores, typed])
+  const typed = usePublishedDraft(stores, draft, attachments.files.length > 0)
   const launching = launch !== undefined
   const closed = disconnected || ended
   return (

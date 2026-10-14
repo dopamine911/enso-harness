@@ -2,6 +2,7 @@ import { ENSO_NOTICE_SOURCE, type EnsoModelState, type EnsoRecordedModel, type E
 import {
   BugIcon,
   ChartColumnIcon,
+  Columns2Icon,
   EllipsisIcon,
   FileDiffIcon,
   GitForkIcon,
@@ -9,7 +10,9 @@ import {
   MenuIcon,
   MessagesSquareIcon,
   PencilIcon,
+  PlusIcon,
   Trash2Icon,
+  XIcon,
 } from 'lucide-react'
 import { Tabs as TabsPrimitive } from 'radix-ui'
 import { useRef, useState } from 'react'
@@ -18,6 +21,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu.tsx'
@@ -28,12 +32,13 @@ import { MENU_CONTENT, MENU_ITEM } from './menu-chrome.ts'
 import { storedThreads, useThreadProject } from './page-listings.ts'
 import { isFixtureMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
+import { type BesideRow, MAX_PANES } from './pane-layout.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
 import { InlineRename } from './rename-thread.tsx'
 import { revealQuestion, RUN_DOT, RUN_WORD_COLOUR } from './run-status.ts'
 import { useStore } from './store.ts'
 import { getThreadStores, nameThreadSummary, type ThreadSummary, threadStarted } from './thread-stores.ts'
-import { UNTITLED_THREAD } from './threads-rail.tsx'
+import { Age, LiveDot, UNTITLED_THREAD } from './threads-rail.tsx'
 
 /**
  * The page's header (#90): the active thread's title — renamed in place (#879) — with what it runs
@@ -74,12 +79,15 @@ function QuestionWaiting({ threadId }: { threadId: string }): React.ReactNode {
 function RunStatusChip({
   thread,
   onView,
+  narrow,
 }: {
   thread: ThreadSummary
   onView: (view: ThreadView) => void
+  /** A pane's width (#938): the title needs the room, and the pane's own strip says it just below. */
+  narrow: boolean
 }): React.ReactNode {
   const dialog = useStore(getThreadStores(thread.threadId).dialog)
-  if (thread.headline === undefined || thread.headline.state === 'idle') return null
+  if (narrow || thread.headline === undefined || thread.headline.state === 'idle') return null
   const { state, word, detail } = thread.headline
   const said = (
     <>
@@ -143,15 +151,29 @@ export interface AppHeaderProps {
   readonly onDiscardDraft: (threadId: string) => void
   /** The server's stored-thread listing (#95): a thread in it has a session file. */
   readonly stored: readonly EnsoStoredThread[]
+  /** The panes (#938): the split button, and — with several open — this pane's number and close. Undefined where no page holds panes. */
+  readonly panes?: HeaderPanes | undefined
+}
+
+/** The header's part in the panes (#938), drawn at the top of the focused pane. */
+export interface HeaderPanes {
+  /** The focused pane's number, while several are open: its subtitle says "Pane 2 · typing here". */
+  readonly number: number | undefined
+  /** Side by side with others: the header is a pane's width, and its tabs keep their icons alone. */
+  readonly narrow: boolean
+  readonly split: SplitOffer
+  /** Close this pane, while several are open. */
+  readonly onClose: (() => void) | undefined
 }
 
 /**
  * The page's header, over the main column only — the brand is the rail's (#417): the threads
  * button (narrow screens), where you are — the active thread's title, the same one the rail shows,
- * and what it runs with — then the view tabs, the prompt manager and the thread menu.
+ * and what it runs with — then the view tabs, the split button (#938), the prompt manager, the
+ * thread menu and, with several panes open, the pane's close.
  */
 export function AppHeader(props: AppHeaderProps): React.ReactNode {
-  const { active, notFound, rail, view, onView, stored } = props
+  const { active, notFound, rail, view, onView, stored, panes } = props
   /** The thread whose title is a field (#879); another thread on screen ends it, so coming back shows the title. */
   const [renaming, setRenaming] = useState<string | undefined>(undefined)
   const started = active !== undefined && threadStarted(active, stored)
@@ -163,21 +185,32 @@ export function AppHeader(props: AppHeaderProps): React.ReactNode {
     start: (): void => setRenaming(shown?.threadId),
     done: (): void => setRenaming(undefined),
   }
+  const narrow = panes?.narrow === true
   return (
-    <header className={HEADER}>
+    <header className={narrow ? NARROW_HEADER : HEADER}>
       <RailToggle open={rail.open} onToggle={rail.toggle} />
       <h1 className="sr-only">Enso · pi runtime</h1>
       <div className="grid min-w-0 flex-1">
         <ThreadTitle {...props} started={started} rename={rename} />
       </div>
       {isFixtureMode ? <span className={BADGE}>fixture</span> : null}
-      {shown === undefined ? null : <RunStatusChip thread={shown} onView={onView} />}
+      {shown === undefined ? null : <RunStatusChip thread={shown} onView={onView} narrow={narrow} />}
       {notFound ? null : (
-        <ViewTabs view={view} onView={onView} threadId={active?.threadId} draft={active !== undefined && !started} />
+        <ViewTabs
+          view={view}
+          onView={onView}
+          threadId={active?.threadId}
+          draft={active !== undefined && !started}
+          narrow={narrow}
+        />
       )}
+      {panes === undefined || notFound ? null : <SplitButton offer={panes.split} />}
       <HeaderPromptManager active={shown} />
       {shown === undefined ? null : (
         <ThreadMenu key={shown.threadId} {...props} active={shown} started={started} onRename={rename.start} />
+      )}
+      {panes?.onClose === undefined ? null : (
+        <ClosePane number={panes.number} onClose={panes.onClose} className={ICON_BUTTON} />
       )}
     </header>
   )
@@ -201,7 +234,11 @@ function ThreadTitle({
   notFound,
   started,
   rename,
+  panes,
 }: AppHeaderProps & { started: boolean; rename: TitleRename }): React.ReactNode {
+  // With several panes open, the focused one says so in words as well as with its top border (#938).
+  const paneLabel =
+    panes?.number === undefined ? undefined : { text: `Pane ${panes.number} · typing here`, focused: true }
   if (notFound) return <span className={TITLE}>Thread not found</span>
   if (active === undefined)
     return (
@@ -219,7 +256,7 @@ function ThreadTitle({
           </span>
           <span className={BADGE}>not started</span>
         </span>
-        <ThreadSubtitle threadId={active.threadId} />
+        <ThreadSubtitle threadId={active.threadId} paneLabel={paneLabel} />
       </>
     )
   if (rename.on)
@@ -249,7 +286,7 @@ function ThreadTitle({
         />
         <span className="sr-only">, rename</span>
       </button>
-      <ThreadSubtitle threadId={active.threadId} />
+      <ThreadSubtitle threadId={active.threadId} paneLabel={paneLabel} />
     </>
   )
 }
@@ -262,23 +299,53 @@ const TITLE = 'truncate font-heading text-base leading-snug font-semibold'
  */
 export const HEADER = 'flex min-h-15 shrink-0 items-center gap-4 border-b px-6 py-2 max-md:gap-2 max-md:px-3'
 
+/** The header at a pane's width, side by side with others (#938): the prototype's split header, tighter. */
+const NARROW_HEADER = 'flex min-h-15 shrink-0 items-center gap-2 border-b px-4 py-2'
+
 /** A small mono pill: a draft's "not started", fixture mode's mark. */
 const BADGE =
   'inline-flex shrink-0 items-center rounded-full border border-border-strong px-2 py-px font-mono text-meta font-medium text-muted-foreground'
 
+/** A pane's place among several (#938), in the prototype's `.pane-label`: the focused pane's in the primary colour. */
+export interface PaneLabel {
+  readonly text: string
+  readonly focused: boolean
+}
+
 /**
- * What the thread runs with, under its title (#879): its project · model · effort. The model and
- * effort are the live session's; a cold thread's are what its branch recorded (#434), marked so; a
- * half nothing has said is left out, never guessed.
+ * What the thread runs with, under its title (#879): its project · model · effort — after its pane's
+ * place, with several open (#938). The model and effort are the live session's; a cold thread's are
+ * what its branch recorded (#434), marked so; a half nothing has said is left out, never guessed.
  */
-function ThreadSubtitle({ threadId }: { threadId: string }): React.ReactNode {
+export function ThreadSubtitle({
+  threadId,
+  paneLabel,
+}: {
+  threadId: string
+  paneLabel?: PaneLabel | undefined
+}): React.ReactNode {
   const stores = getThreadStores(threadId)
   const project = useThreadProject(stores.projectId)
   const live = useStore(stores.model)
   const recorded = useStore(stores.model.recorded)
   const parts = [...(project === undefined ? [] : [project.title]), ...runsWith(live, recorded)]
-  if (parts.length === 0) return null
-  return <span className="truncate text-xs text-muted-foreground">{parts.join(' · ')}</span>
+  if (parts.length === 0 && paneLabel === undefined) return null
+  return (
+    <span className="truncate text-xs text-muted-foreground">
+      {paneLabel === undefined ? null : (
+        <span
+          className={cn(
+            'font-mono text-meta font-semibold tracking-wider uppercase',
+            paneLabel.focused ? 'text-primary' : 'text-muted-foreground',
+          )}
+        >
+          {paneLabel.text}
+        </span>
+      )}
+      {paneLabel === undefined || parts.length === 0 ? '' : ' · '}
+      {parts.join(' · ')}
+    </span>
+  )
 }
 
 /** The model and effort a subtitle names: the live state's, else the recorded ones, else none. */
@@ -448,13 +515,17 @@ function ViewTabs({
   onView,
   threadId,
   draft,
+  narrow,
 }: {
   view: ThreadView
   onView: (view: ThreadView) => void
   /** The thread on screen, whose waiting question the Chat tab shows; none while resuming. */
   threadId: string | undefined
   draft: boolean
+  /** A pane's width (#938): icons only, as under 1024px. */
+  narrow: boolean
 }): React.ReactNode {
+  const labelClass = narrow ? 'sr-only' : 'max-lg:sr-only'
   // Only the shown view's panel is in the page, so only its tab names one (#362): a
   // reference to a panel that is not there is one a screen reader cannot follow.
   const controls = (tab: ThreadView): string | undefined => (tab === view ? `thread-view-${tab}` : undefined)
@@ -477,7 +548,7 @@ function ViewTabs({
           className={VIEW_TAB}
         >
           <MessagesSquareIcon aria-hidden="true" />
-          <span className="max-lg:sr-only">Chat</span>
+          <span className={labelClass}>Chat</span>
           {view === 'chat' || threadId === undefined ? null : <QuestionWaiting threadId={threadId} />}
         </TabsPrimitive.Trigger>
         {RUN_VIEWS.map(({ view: tab, label, hover, Icon }) => (
@@ -491,7 +562,7 @@ function ViewTabs({
             className={VIEW_TAB}
           >
             <Icon aria-hidden="true" />
-            <span className="max-lg:sr-only">{label}</span>
+            <span className={labelClass}>{label}</span>
           </TabsPrimitive.Trigger>
         ))}
       </TabsPrimitive.List>
@@ -520,3 +591,124 @@ const RUN_VIEWS = [
     Icon: FileDiffIcon,
   },
 ] as const satisfies readonly { view: ThreadView; label: string; hover: string; Icon: typeof LayersIcon }[]
+
+/**
+ * What the header's split button offers (#938): a new thread in the focused pane's project, and
+ * threads from any project, to open in a pane beside the focused one.
+ */
+export interface SplitOffer {
+  /** Every pane is taken: the button says so and opens nothing. */
+  readonly full: boolean
+  /** The threads it offers, read as the menu opens: the listing is not walked per render. */
+  readonly rows: () => readonly BesideRow[]
+  /** The project a new thread beside starts in; undefined when none can start there (its folder gone). */
+  readonly newIn: { readonly projectId: string; readonly title: string } | undefined
+  readonly onOpen: (row: BesideRow) => void
+  readonly onNew: (projectId: string) => void
+}
+
+/** Said when every pane is taken (#938), on the split button and wherever a thread is asked to open beside. */
+export const PANES_FULL = `${MAX_PANES} threads are open — close one to open another beside them`
+
+const SPLIT_LABEL = 'open a thread beside this one'
+
+/** The split menu's threads (#938): each with its state, title, project and age — or that every one is open. */
+function BesideItems({ offer }: { offer: SplitOffer }): React.ReactNode {
+  const rows = offer.rows()
+  if (rows.length === 0) return <p className="px-3 py-2 text-sm text-muted-foreground">Every thread is already open.</p>
+  return rows.map((row) => (
+    <DropdownMenuItem key={row.threadId} className={MENU_ITEM} onSelect={(): void => offer.onOpen(row)}>
+      <LiveDot state={row.state} />
+      <span className="grid min-w-0 flex-1">
+        <span className="truncate">{row.title ?? UNTITLED_THREAD}</span>
+        <span className="truncate text-xs text-muted-foreground">
+          {row.projectTitle === undefined ? '' : `${row.projectTitle} · `}
+          <Age from={new Date(row.at)} />
+        </span>
+      </span>
+    </DropdownMenuItem>
+  ))
+}
+
+/**
+ * The header's split button (#938, the prototype's): a new thread in this project, or a thread from
+ * any project — each project's latest first — opened in a pane beside the focused one.
+ */
+function SplitButton({ offer }: { offer: SplitOffer }): React.ReactNode {
+  if (offer.full) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        disabled
+        aria-label={SPLIT_LABEL}
+        title={PANES_FULL}
+        className={ICON_BUTTON}
+      >
+        <Columns2Icon />
+      </Button>
+    )
+  }
+  const { newIn } = offer
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={SPLIT_LABEL}
+          title={SPLIT_LABEL}
+          className={ICON_BUTTON}
+        >
+          <Columns2Icon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className={cn(MENU_CONTENT, 'w-80')}>
+        {newIn === undefined ? null : (
+          <>
+            <DropdownMenuItem className={MENU_ITEM} onSelect={(): void => offer.onNew(newIn.projectId)}>
+              <PlusIcon />
+              <span className="truncate">New thread in {newIn.title}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuLabel className="font-mono text-meta font-normal tracking-wider text-muted-foreground uppercase">
+          Open beside
+        </DropdownMenuLabel>
+        <BesideItems offer={offer} />
+        <p className="mt-1 border-t px-3 py-2 text-xs text-muted-foreground">
+          Or Ctrl- or ⌘-click a thread in the rail.
+        </p>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** A pane's close (#938): its header's ×, the focused pane's and one beside it. */
+export function ClosePane({
+  number,
+  onClose,
+  className,
+}: {
+  number: number | undefined
+  onClose: () => void
+  className: string
+}): React.ReactNode {
+  const label = number === undefined ? 'close this pane' : `close pane ${number}`
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={label}
+      title={label}
+      className={className}
+      onClick={onClose}
+    >
+      <XIcon />
+    </Button>
+  )
+}

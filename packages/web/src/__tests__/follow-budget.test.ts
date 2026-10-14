@@ -138,6 +138,28 @@ test('⚠ the thread on screen is never evicted, even when it is the least recen
   expect(probe.releasedThreads()).toContain(read.threadId)
 })
 
+// Threads side by side (#938): every pane on screen keeps its follow, not only the focused one.
+// Three panes stay inside the budget of four, so the page drops a thread no pane shows.
+test('⚠ panes beside the focused one are never evicted either, however long they sat idle (#938)', async () => {
+  const probe = followProbe()
+  const beside = [mintThread(probe.fetch), mintThread(probe.fetch)]
+  for (const stores of beside) mount(stores)
+  await probe.untilOpened(2)
+  const focused = mintThread(probe.fetch)
+  mount(focused)
+  await probe.untilOpened(3)
+  markThreadActive(
+    focused.threadId,
+    beside.map((stores) => stores.threadId),
+  )
+  for (let index = 0; index < MAX_LIVE_THREADS; index += 1) {
+    mount(mintThread(probe.fetch))
+    await probe.untilOpened(index + 4)
+  }
+  for (const stores of [...beside, focused]) expect(probe.releasedThreads()).not.toContain(stores.threadId)
+  expect(probe.live()).toBe(MAX_LIVE_THREADS)
+})
+
 test('a thread the page stops holding releases its follow', async () => {
   const probe = followProbe()
   const stores = mintThread(probe.fetch)

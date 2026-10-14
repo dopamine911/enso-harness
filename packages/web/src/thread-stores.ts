@@ -50,8 +50,8 @@ import { fetchThreadHistory } from './stored-threads.ts'
  * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
  * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
  * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
- * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
- * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * thread, which closes its follow. Neither a thread with a run in flight nor one ON
+ * SCREEN — the focused pane, or one beside it (#938) — is ever the victim: a follow the page is showing or streaming is not spare
  * capacity — so a page made only of those goes over budget and records it. The session is
  * the server's, not the page's, so a dropped thread comes back through the rail's earlier threads —
  * the rail and `popstate` already resume a thread this page does not hold.
@@ -195,6 +195,11 @@ export interface ThreadStores {
    * nothing is discarded when the page leaves it (`discardEmptyDraft`).
    */
   readonly typed: WritableStore<boolean>
+  /**
+   * The words the composer holds, as typed (#938): a pane beside the focused one shows them where its
+   * composer is, so what you were writing there is in sight while you type in another.
+   */
+  readonly draft: WritableStore<string>
   /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has
@@ -342,6 +347,7 @@ function createThreadStores(
     toolResultDescriptors,
     launch: createStore(false),
     typed: createStore(false),
+    draft: createStore(''),
     branchCompacted: createStore(0),
     runStops: createStore(0),
     login: createStore<EnsoLoginInProgress | undefined>(undefined),
@@ -497,29 +503,38 @@ function publishThreadList(): void {
 export const MAX_LIVE_THREADS = 4
 
 /**
- * The pane the user is looking at. Undefined only while a URL-named thread is being adopted
- * and nothing is on screen (`chat-screen.tsx`).
+ * The pane the user is looking at — the focused one of several (#938). Undefined only while a
+ * URL-named thread is being adopted and nothing is on screen (`chat-screen.tsx`).
  */
 let activeThreadId: string | undefined
 
+/** The panes on screen beside the focused one (#938): each is shown, so none is spare capacity either. */
+let besideThreadIds: ReadonlySet<string> = new Set()
+
 /**
- * The active pane changed.
+ * The panes on screen changed: `threadId` is the focused one, `beside` the others shown with it
+ * (#938) — at most two, so the page's three panes stay inside the budget of four.
  *
- * Two effects, and the first is the load-bearing one: the visible thread stops
- * being a drop candidate, and its clock restarts so it is not the first to go the moment the
+ * Two effects, and the first is the load-bearing one: the visible threads stop
+ * being drop candidates, and their clocks restart so none is the first to go the moment the
  * user switches away.
  *
  * ⚠ Reading a thread is activity. `updateThreadSummary` only fires on a title or a busy
  * transition, so without this a thread the user is READING — finished reply, idle, not busy —
  * ages like an abandoned one.
  */
-export function markThreadActive(threadId: string | undefined): void {
+export function markThreadActive(threadId: string | undefined, beside: readonly string[] = []): void {
   activeThreadId = threadId
-  if (threadId === undefined) return
-  const current = summaries.get(threadId)
-  if (current === undefined) return
-  summaries.set(threadId, { ...current, lastActivityAt: new Date() })
-  publishThreadList()
+  besideThreadIds = new Set(beside)
+  const now = new Date()
+  let changed = false
+  for (const shown of [...(threadId === undefined ? [] : [threadId]), ...beside]) {
+    const current = summaries.get(shown)
+    if (current === undefined) continue
+    summaries.set(shown, { ...current, lastActivityAt: now })
+    changed = true
+  }
+  if (changed) publishThreadList()
 }
 
 /** The thread on screen, as `markThreadActive` last set it — what a page-wide error names (#919). */
@@ -530,7 +545,8 @@ export function threadOnScreen(): string | undefined {
 /**
  * The drop candidate: the least recently active thread that is neither running nor on screen.
  *
- * ⚠ THE ACTIVE PANE IS NEVER A CANDIDATE. Recency alone does not protect it:
+ * ⚠ NO PANE ON SCREEN IS EVER A CANDIDATE — the focused one, nor one beside it (#938). Recency alone
+ * does not protect them:
  * open a thread, read its finished reply, then open four more, and the one being read was the
  * least recently active of them. Dropping it unmounts the pane under the user — `active`
  * resolves to undefined, the header falls back to the untitled label, the content area goes
@@ -540,7 +556,7 @@ export function threadOnScreen(): string | undefined {
 function leastRecentlyActiveIdle(): ThreadSummary | undefined {
   let oldest: ThreadSummary | undefined
   for (const summary of summaries.values()) {
-    if (summary.busy || summary.threadId === activeThreadId) continue
+    if (summary.busy || summary.threadId === activeThreadId || besideThreadIds.has(summary.threadId)) continue
     if (oldest === undefined || summary.lastActivityAt < oldest.lastActivityAt) oldest = summary
   }
   return oldest
@@ -881,5 +897,6 @@ export function clearThreadsForTest(): void {
   threads.clear()
   summaries.clear()
   activeThreadId = undefined
+  besideThreadIds = new Set()
   publishThreadList()
 }

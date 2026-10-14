@@ -141,6 +141,11 @@ export interface ThreadStatusViewProps {
   readonly onRiskSignals?: (() => void) | undefined
   /** The session's incidents (#466): said while one is open, or once a resolution ended the thread. */
   readonly incidents?: EnsoSessionIncidents | undefined
+  /**
+   * A pane side by side with others (#938): the strip is a pane's width, so the counts and the
+   * branch's state go — the run's state, the tree and the cost stay.
+   */
+  readonly narrow?: boolean | undefined
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -535,6 +540,28 @@ function SpendWords({ usage }: { readonly usage: ThreadStatusViewProps['usage'] 
   )
 }
 
+/** The strip's tallies, at a full width only (#938): a pane side by side with others drops them. */
+function TallyWords({
+  counts,
+  narrow,
+}: {
+  readonly counts: ThreadStatusViewProps['counts']
+  readonly narrow: boolean | undefined
+}): React.ReactNode {
+  return narrow === true ? null : <CountWords counts={counts} />
+}
+
+/** The branch's state against its push, at a full width only (#938), and once it has been read. */
+function BranchWord({
+  git,
+  narrow,
+}: {
+  readonly git: GitOutcome | undefined
+  readonly narrow: boolean | undefined
+}): React.ReactNode {
+  return git === undefined || narrow === true ? null : <GitIndicator outcome={git} />
+}
+
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
 export function ThreadStatusView({
   status,
@@ -553,15 +580,18 @@ export function ThreadStatusView({
   risk,
   onRiskSignals,
   incidents,
+  narrow,
 }: ThreadStatusViewProps): React.ReactNode {
   return (
     // One line, the prototype's (#417), when it fits — and a second when it doesn't: a cut would hide
     // what the bar must say (the tree's "own tree, not your checkout", #576 review; a refusal; a
-    // question waiting). The meter and the cost keep their place at the bar's right end.
+    // question waiting). The meter and the cost keep their place at the bar's right end. A pane's
+    // width (#938) takes the narrow screen's gutters.
     <footer
       id="thread-status"
       aria-label={THREAD_STATUS_WORDS.region}
-      className="flex min-h-8 shrink-0 items-center gap-4 border-t px-6 font-mono text-xs whitespace-nowrap text-muted-foreground max-md:gap-3 max-md:px-4"
+      data-narrow={narrow === true ? '' : undefined}
+      className="flex min-h-8 shrink-0 items-center gap-4 border-t px-6 font-mono text-xs whitespace-nowrap text-muted-foreground data-narrow:gap-3 data-narrow:px-4 max-md:gap-3 max-md:px-4"
     >
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-0.5 py-0.5 max-md:gap-x-3">
         <RunWords status={status} now={now} onRevealQuestion={onRevealQuestion} onStop={onStop} />
@@ -572,9 +602,9 @@ export function ThreadStatusView({
         <RefusalWord refusal={refusal} source={refusalSource} />
         <IncidentWord incidents={incidents} />
         <RiskWord risk={risk} onShow={onRiskSignals} />
-        <CountWords counts={counts} />
+        <TallyWords counts={counts} narrow={narrow} />
         <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} treeControl={treeControl} />
-        {git === undefined ? null : <GitIndicator outcome={git} />}
+        <BranchWord git={git} narrow={narrow} />
       </div>
       <div className="flex shrink-0 items-center gap-4 max-md:gap-3">
         <SpendWords usage={usage} />
@@ -590,8 +620,10 @@ export interface ThreadStatusBarProps {
   readonly projectTitle?: string | undefined
   /** Asks the page for a view (#361) — the risk word asks for Stats (#727), the question's line for the Chat (#914). */
   readonly openView: (view: 'stats' | 'chat') => void
-  /** Whether this bar's pane is the one on screen (#737): every mounted pane keeps its bar (#472). */
+  /** Whether this bar's pane is on screen (#737, #938): every mounted pane keeps its bar (#472). */
   readonly shown: boolean
+  /** Its pane is side by side with others (#938): `ThreadStatusViewProps.narrow`. */
+  readonly narrow?: boolean | undefined
 }
 
 /**
@@ -726,6 +758,7 @@ export function ThreadStatusBar({
   projectTitle,
   openView,
   shown,
+  narrow,
 }: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
   const usage = useStore(stores.usage)
@@ -767,6 +800,7 @@ export function ThreadStatusBar({
         openView('stats')
       }}
       incidents={incidents}
+      narrow={narrow}
     />
   )
 }
