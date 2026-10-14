@@ -412,6 +412,7 @@ export {
   type EnsoJudgeQuestion,
   type EnsoJudgeState,
   EnsoThreadJudgeCases,
+  localJudgeUrlProblem,
   readEnsoCommandJudgement,
   readEnsoThreadJudgeCases,
 } from './command-judge.ts'

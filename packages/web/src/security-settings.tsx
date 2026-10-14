@@ -5,6 +5,8 @@ import {
   type EnsoRiskThresholds,
   type EnsoSecurityConfig,
   type EnsoSecuritySettingsRead,
+  incidentPolicyOf,
+  localJudgeUrlProblem,
 } from '@enso/core'
 import { LockIcon, TriangleAlertIcon } from 'lucide-react'
 import { useCallback, useEffect, useId, useState } from 'react'
@@ -126,6 +128,9 @@ function localJudgeProblem(draft: Draft, field: 'baseUrl' | 'model'): string | u
   const what = field === 'baseUrl' ? 'address' : 'model name'
   if (value === '') return `The local judge needs its ${what}. Fill it in, or set the judge to off.`
   if (field === 'baseUrl' && !HTTP_URL.test(value)) return 'Start the address with http:// or https://.'
+  if (field === 'baseUrl' && localJudgeUrlProblem(value) !== undefined) {
+    return 'The local judge only talks to this machine: use 127.0.0.1, [::1] or localhost.'
+  }
   return undefined
 }
 
@@ -173,23 +178,13 @@ function securityOf(draft: Draft): EnsoSecurityConfig {
   }
 }
 
-/** The values in force for a section: each key's, or its default. */
+/** The values in force for a section: the incident policy the guard reads, and the judge's backend. */
 function effectiveOf(security: EnsoSecurityConfig): {
   halt: boolean
   thresholds: EnsoRiskThresholds
   backend: EnsoJudgeBackend
 } {
-  const incidents = security.incidents ?? {}
-  return {
-    halt: incidents.halt ?? false,
-    thresholds: {
-      windowCalls: incidents.windowCalls ?? DEFAULT_RISK_THRESHOLDS.windowCalls,
-      highAtSignals: incidents.highAtSignals ?? DEFAULT_RISK_THRESHOLDS.highAtSignals,
-      highAtKinds: incidents.highAtKinds ?? DEFAULT_RISK_THRESHOLDS.highAtKinds,
-      incidentAtSignals: incidents.incidentAtSignals ?? DEFAULT_RISK_THRESHOLDS.incidentAtSignals,
-    },
-    backend: security.judge?.backend ?? 'off',
-  }
+  return { ...incidentPolicyOf(security), backend: security.judge?.backend ?? 'off' }
 }
 
 /** Every way `next` protects less than `saved`, said plainly — what the reader confirms before Save. */
@@ -216,6 +211,9 @@ export function looseningsOf(saved: EnsoSecurityConfig, next: EnsoSecurityConfig
   }
   return said
 }
+
+/** Said before a save that newly chooses Jev while no key is stored: such a judge judges nothing. */
+const JEV_WITHOUT_KEY = 'The judge is Jev, but no TypeSafe key is stored: every command goes unjudged.'
 
 type SaveProblem =
   | { readonly kind: 'fields'; readonly fields: ReadonlyArray<readonly [FieldName, string]> }
@@ -569,13 +567,20 @@ function SecurityForm({
   const [draft, setDraft] = useState<Draft>(saved)
   const [checked, setChecked] = useState<ReadonlySet<FieldName>>(new Set())
   const [problem, setProblem] = useState<SaveProblem | undefined>(undefined)
-  const [confirming, setConfirming] = useState<readonly string[] | undefined>(undefined)
+  // What Save anyway writes is the section the reader was shown the loosenings of; an edit closes
+  // the confirm, so its list is never stale (#969 review).
+  const [confirming, setConfirming] = useState<
+    { readonly loosenings: readonly string[]; readonly security: EnsoSecurityConfig } | undefined
+  >(undefined)
   const [working, setWorking] = useState(false)
   const next = securityOf(draft)
   const dirty = JSON.stringify(next) !== JSON.stringify(securityOf(saved))
-  const write = (): void => {
+  // A `judge.local` the file keeps while the judge is not local is not in the draft; the next save
+  // drops it, so the unsaved list names it.
+  const dropsLocal = settings.security.judge?.local !== undefined && next.judge?.local === undefined
+  const write = (security: EnsoSecurityConfig): void => {
     setWorking(true)
-    void saveSecuritySettings({ security: next }, settings.etag, fetchImpl).then((outcome) => {
+    void saveSecuritySettings({ security }, settings.etag, fetchImpl).then((outcome) => {
       setWorking(false)
       setConfirming(undefined)
       if (outcome.kind === 'saved') {
@@ -597,12 +602,14 @@ function SecurityForm({
       return
     }
     setProblem(undefined)
-    const loosenings = looseningsOf(settings.security, next)
+    const jevWithoutKey =
+      next.judge?.backend === 'jev' && settings.security.judge?.backend !== 'jev' && !settings.judgeKeySet
+    const loosenings = [...looseningsOf(settings.security, next), ...(jevWithoutKey ? [JEV_WITHOUT_KEY] : [])]
     if (loosenings.length > 0) {
-      setConfirming(loosenings)
+      setConfirming({ loosenings, security: next })
       return
     }
-    write()
+    write(next)
   }
   const discard = (): void => {
     setDraft(saved)
@@ -610,11 +617,15 @@ function SecurityForm({
     setProblem(undefined)
     setConfirming(undefined)
   }
-  const unsaved = (field: FieldName): boolean => unsavedField(draft, saved, field)
+  const unsaved = (field: FieldName): boolean =>
+    unsavedField(draft, saved, field) || (dropsLocal && (field === 'baseUrl' || field === 'model'))
   const dirtyKeys = ALL_FIELDS.filter(unsaved)
   const fields: GroupFields = {
     draft,
-    setDraft,
+    setDraft: (changed) => {
+      setDraft(changed)
+      setConfirming(undefined)
+    },
     path: settings.path,
     unsaved,
     shownProblem: (field) => (checked.has(field) ? problemOf(draft, field) : undefined),
@@ -636,9 +647,9 @@ function SecurityForm({
       </JudgeRows>
       {confirming === undefined ? null : (
         <LooseningConfirm
-          loosenings={confirming}
+          loosenings={confirming.loosenings}
           working={working}
-          onConfirm={write}
+          onConfirm={() => write(confirming.security)}
           onCancel={() => setConfirming(undefined)}
         />
       )}

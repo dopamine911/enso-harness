@@ -26,3 +26,12 @@ test('tightening, or writing the default out, is not a loosening', () => {
     looseningsOf({}, { incidents: { halt: true, windowCalls: 12, highAtSignals: 3, incidentAtSignals: 2 } }),
   ).toEqual([])
 })
+
+test('more kinds, or more signals for an incident, is a loosening too', () => {
+  expect(
+    looseningsOf({ incidents: { highAtKinds: 2 } }, { incidents: { highAtKinds: 3, incidentAtSignals: 6 } }),
+  ).toEqual([
+    'Kinds of signal for high risk: 2 → 3 kinds. More is needed before it acts, so it acts less often.',
+    'Signals for an incident: 5 → 6 signals. More is needed before it acts, so it acts less often.',
+  ])
+})
