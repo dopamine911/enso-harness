@@ -19,7 +19,7 @@ import { createThreadReadRoutes } from './thread-read-routes.ts'
 import type { ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry } from './thread-registry.ts'
 import { createThreadRoutes } from './thread-routes.ts'
-import { createWebToolsRoutes, type HostCheckFetch } from './web-tools-routes.ts'
+import { createWebToolsRoutes, type HostCheckNetwork } from './web-tools-routes.ts'
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -77,8 +77,8 @@ export interface EnsoServerOptions {
   threadSettings?: ProjectThreadSettingsSource
   /** The user's config file (`ENSO_HOME/config.json`), which Settings › Web tools edits (#924); absent, those routes refuse. */
   userConfigPath?: string
-  /** The Web tools host check's one request (#924). ⓘ Injectable for `server-handler.test.ts`; absent, `fetch`. */
-  hostCheckFetch?: HostCheckFetch
+  /** The Web tools host check's lookup and request (#924). ⓘ Injectable for `server-handler.test.ts`; absent, DNS and `fetch`. */
+  hostCheck?: HostCheckNetwork
   /**
    * The risk fold's thresholds, from the user's config (`security.incidents`, #466) — user-only, like
    * `projectRoots`. Absent, the defaults: what the guard measures with when the config sets none.
@@ -258,7 +258,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     projects,
     threads,
     agentDir: options.agentDir,
-    ...(options.hostCheckFetch === undefined ? {} : { checkFetch: options.hostCheckFetch }),
+    ...options.hostCheck,
   })
   const { dispatchThreadRoute } = createThreadRoutes({
     reads,
@@ -328,7 +328,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom
   // shape is the #27/#34 teardown ordering (#82). What is left in the callback is the one check
-  // every request is admitted by, then the two dispatchers and the miss.
+  // every request is admitted by, then the route dispatchers, in order, and the miss.
   const server = createServer((request, response) => {
     if (!fromTrustedOrigin(request)) {
       log.warn('request refused: {method} {url} from host {host} origin {origin}', {

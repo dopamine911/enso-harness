@@ -15,9 +15,9 @@ import { PAGE_INPUT, PAGE_OUTLINE_BUTTON, PAGE_PRIMARY_BUTTON, SUB_TITLE } from 
 import { describeFailedResponse } from './stored-threads.ts'
 
 /**
- * Settings › Web tools (#924, #930): what `web_fetch` and `web_search` may reach, for every project.
- * This holds **Fetching pages**, the `web_fetch` allowlist; the section's other group, Searching,
- * sits beside it (#932). Written through the server (`/api/settings/web-fetch`), which changes only
+ * Settings › Web tools (#924, #930): what the web tools may reach, for every project. This holds
+ * **Fetching pages**, the `web_fetch` allowlist; the section's other group, Searching (`web_search`),
+ * will sit beside it (#932). Written through the server (`/api/settings/web-fetch`), which changes only
  * `webFetch.allowedHosts` in `ENSO_HOME/config.json`; a trusted project's own hosts are shown, read only.
  */
 
@@ -54,10 +54,13 @@ type CheckState =
   | { readonly kind: 'checked'; readonly host: string; readonly check: WebFetchHostCheck }
   | { readonly kind: 'failed'; readonly host: string; readonly reason: string }
 
+/** What the section reads of a stored thread: its id, and the title it is named by. */
+type StoredTitle = Pick<EnsoStoredThread, 'threadId' | 'title'>
+
 export interface WebToolsSectionProps {
   readonly fetch?: FetchLike | undefined
   /** The stored listing: a thread still on the old list is named by its title. */
-  readonly stored: readonly EnsoStoredThread[]
+  readonly stored: readonly StoredTitle[]
   /** Open a project's page, from the group of hosts it adds. */
   readonly onOpenProject: (projectId: string) => void
 }
@@ -66,9 +69,8 @@ export function WebToolsSection(props: WebToolsSectionProps): React.ReactNode {
   return (
     <div className="grid gap-6">
       <p className="max-w-prose text-muted-foreground">
-        What <code className="font-mono text-sm">web_fetch</code> and{' '}
-        <code className="font-mono text-sm">web_search</code> may reach, for every project. A trusted project can add
-        hosts of its own on its page.
+        The hosts <code className="font-mono text-sm">web_fetch</code> may read, for every project. A trusted project
+        can add hosts of its own on its page.
       </p>
       <section aria-labelledby="settings-web-fetch-label" className="grid gap-3">
         <h3 id="settings-web-fetch-label" className={SUB_TITLE}>
@@ -291,7 +293,7 @@ function AllowlistNotes({ path, unreadable }: { path: string; unreadable: string
 /** When a change applies — the list is read at session start — and the live threads still on the old one, by title. */
 interface WhenItAppliesProps {
   readonly staleThreads: readonly string[]
-  readonly stored: readonly EnsoStoredThread[]
+  readonly stored: readonly StoredTitle[]
 }
 
 function WhenItApplies({ staleThreads, stored }: WhenItAppliesProps): React.ReactNode {
@@ -460,7 +462,9 @@ function CheckResult({
     return (
       <p role="status" className="text-sm">
         https://{host}/ answered <strong className="font-semibold">{found.status}</strong>.
-        {found.status < 400 ? ' web_fetch can read it once it is allowed.' : ' The host answers, but not with a page.'}
+        {found.status < 400
+          ? ' web_fetch can reach it once it is allowed; it still reads only pages sent as text.'
+          : ' The host answers, but not with a page.'}
       </p>
     )
   const suggested = found.suggestedHost

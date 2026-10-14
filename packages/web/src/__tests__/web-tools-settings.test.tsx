@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, test } from 'bun:test'
-import type { EnsoStoredThread, WebFetchAllowlist, WebFetchHostCheck } from '@enso/core'
+import type { WebFetchAllowlist, WebFetchHostCheck } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import type { FetchLike } from '../browser-logging.ts'
@@ -54,13 +54,15 @@ async function mountSection(options: {
   readonly hosts?: string[]
   readonly staleThreads?: string[]
   readonly check?: WebFetchHostCheck
-  readonly stored?: EnsoStoredThread[]
+  readonly stored?: WebToolsModule.WebToolsSectionProps['stored']
+  readonly unreadable?: string
 }): Promise<Mounted> {
   let hosts = options.hosts ?? []
   const posted: string[] = []
   const listed = (): WebFetchAllowlist => ({
     path: PATH,
     hosts,
+    ...(options.unreadable === undefined ? {} : { unreadable: options.unreadable }),
     projects: [{ projectId: 'p1', title: 'docs-site', path: '/srv/docs/.enso/config.json', hosts: ['docs.p.example'] }],
     staleThreads: options.staleThreads ?? [],
   })
@@ -179,10 +181,17 @@ test('Check reports a host that answers, and one that does not', async () => {
 })
 
 test('a thread still on the old list is named by its title; a project’s hosts are shown with no Remove', async () => {
-  const stored = [{ threadId: 'aaaaaaaa-1111', title: 'Read the bun docs' } as EnsoStoredThread]
+  const stored = [{ threadId: 'aaaaaaaa-1111', title: 'Read the bun docs' }]
   const mounted = await mountSection({ staleThreads: ['aaaaaaaa-1111', 'bbbbbbbb-2222'], stored })
   expect(mounted.root.textContent).toContain('Still running on the old list: Read the bun docs, new thread bbbbbbbb.')
   const group = mounted.root.querySelector('[aria-label="hosts from docs-site"]')
   expect(group?.textContent).toContain('docs.p.example')
   expect(group?.querySelector('button[aria-label^="remove"]')).toBeNull()
+})
+
+test('a user file that can’t be read is said so, with its path and the reason (#924 review)', async () => {
+  const mounted = await mountSection({ unreadable: 'config.json is not valid JSON' })
+  expect(mounted.root.querySelector('[role="alert"]')?.textContent).toContain(
+    `${PATH} can't be read (config.json is not valid JSON), so nothing is fetchable and nothing is written here`,
+  )
 })

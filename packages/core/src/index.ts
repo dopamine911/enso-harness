@@ -549,11 +549,13 @@ export {
 export { contentToText, customEntriesOf, shellExitCodeOf, transcriptEntryOf, transcriptOf } from './runtime-entries.ts'
 export {
   EXTERNAL_WEB_CONTENT_NOTICE,
+  isPublicIpAddress,
   readWebFetchHostInput,
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_MAX_URL_LENGTH,
   WEB_FETCH_TIMEOUT_MS,
   WEB_FETCH_TOOL_NAME,
+  WEB_FETCH_USER_AGENT,
   WebFetchAllowlist,
   WebFetchAllowlistChange,
   WebFetchConfig,

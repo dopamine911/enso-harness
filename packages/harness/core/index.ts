@@ -37,13 +37,7 @@ export {
   userJudgeConfig,
 } from './session-config.ts'
 export { readableTextOfHtml } from './html-text.ts'
-export {
-  isFetchableContentType,
-  isHostAllowed,
-  isHtmlContentType,
-  isPublicIpAddress,
-  parseWebFetchUrl,
-} from './web-fetch-policy.ts'
+export { isFetchableContentType, isHostAllowed, isHtmlContentType, parseWebFetchUrl } from './web-fetch-policy.ts'
 export { resolveModelAuth } from './web-search/auth.ts'
 export { runAnthropicProviderSearch } from './web-search/providers/anthropic.ts'
 export {

@@ -59,7 +59,7 @@ import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'
 import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
 import { HISTORY_PAGE_MESSAGES } from '../thread-read.ts'
-import type { HostCheckFetch } from '../web-tools-routes.ts'
+import type { HostCheckFetch, HostCheckNetwork } from '../web-tools-routes.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -232,12 +232,12 @@ async function startWith(
     agentDir = mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     threadSettings,
     userConfigPath,
-    hostCheckFetch,
+    hostCheck,
   }: {
     /** The user's config Settings › Web tools edits (#924); absent, those routes refuse. */
     readonly userConfigPath?: string
-    /** The Web tools host check's one request (#924); absent, the real `fetch`. */
-    readonly hostCheckFetch?: HostCheckFetch
+    /** The Web tools host check's lookup and request (#924); absent, real DNS and `fetch`. */
+    readonly hostCheck?: HostCheckNetwork
     readonly projectRoots?: readonly string[]
     readonly promptsDir?: string
     readonly permissionRulesPath?: string
@@ -260,7 +260,7 @@ async function startWith(
     ...(promptsDir === undefined ? {} : { promptsDir }),
     ...(threadSettings === undefined ? {} : { threadSettings }),
     ...(userConfigPath === undefined ? {} : { userConfigPath }),
-    ...(hostCheckFetch === undefined ? {} : { hostCheckFetch }),
+    ...(hostCheck === undefined ? {} : { hostCheck }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir,
     permissionRulesPath,
@@ -1122,14 +1122,20 @@ test('a trusted project’s own hosts are listed under it, apart from the user�
   ])
 })
 
-test('the host check: one request, redirects reported, the target’s host offered (#924)', async () => {
-  const asked: { url: string; redirect: string }[] = []
-  const hostCheckFetch: HostCheckFetch = async (asking, init) => {
-    asked.push({ url: asking, redirect: init.redirect })
+/** A lookup that answers every host with one public address — the check's DNS, without the network. */
+const resolvesPublic = async (): Promise<string[]> => ['93.184.216.34']
+
+test('the host check: one request as web_fetch makes it, redirects reported, the target’s host offered (#924)', async () => {
+  const asked: { url: string; redirect: string; userAgent: string }[] = []
+  const checkFetch: HostCheckFetch = async (asking, init) => {
+    asked.push({ url: asking, redirect: init.redirect, userAgent: init.headers['user-agent'] })
     return new Response(null, { status: 301, headers: { location: 'https://www.enso.engineer/' } })
   }
   const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
-  const { url } = await startWith(settlesAtOnce, {}, undefined, { userConfigPath: userPath, hostCheckFetch })
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    hostCheck: { checkFetch, checkResolve: resolvesPublic },
+  })
   const checked: unknown = await (await postAllowlist(url, '/check', { host: 'enso.engineer' })).json()
   expect(checked).toEqual({
     kind: 'redirect',
@@ -1137,10 +1143,72 @@ test('the host check: one request, redirects reported, the target’s host offer
     target: 'https://www.enso.engineer/',
     suggestedHost: 'www.enso.engineer',
   })
-  expect(asked).toEqual([{ url: 'https://enso.engineer/', redirect: 'manual' }])
+  // web_fetch's own User-Agent, so a host that answers by it answers the check as it answers the tool.
+  expect(asked).toEqual([{ url: 'https://enso.engineer/', redirect: 'manual', userAgent: 'enso-web-fetch' }])
   // Only a host is asked about: never a URL a page chose.
   expect((await postAllowlist(url, '/check', { host: 'https://evil.example/x' })).status).toBe(422)
   expect(asked).toHaveLength(1)
+})
+
+test('⚠ the host check never asks a host web_fetch would refuse by its address, and says why (#924 review)', async () => {
+  const asked: string[] = []
+  const checkFetch: HostCheckFetch = async (asking) => {
+    asked.push(asking)
+    return new Response(null, { status: 200 })
+  }
+  const addresses: Record<string, string[]> = { localhost: ['127.0.0.1', '::1'], 'intranet.example': ['10.1.2.3'] }
+  const checkResolve = async (host: string): Promise<string[]> => {
+    const found = addresses[host]
+    if (found === undefined) throw new Error(`queryA ENOTFOUND ${host}`)
+    return found
+  }
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    hostCheck: { checkFetch, checkResolve },
+  })
+  const checked = async (host: string): Promise<unknown> => (await postAllowlist(url, '/check', { host })).json()
+  for (const [host, address] of [
+    ['localhost', '127.0.0.1'],
+    ['intranet.example', '10.1.2.3'],
+    ['127.0.0.1', '127.0.0.1'],
+    ['169.254.169.254', '169.254.169.254'],
+  ] as const) {
+    expect(await checked(host)).toEqual({
+      kind: 'failed',
+      reason: `${host} resolves to a non-public address (${address}), so web_fetch would refuse it: it reaches the public web only`,
+    })
+  }
+  expect(await checked('nowhere.example')).toEqual({
+    kind: 'failed',
+    reason: expect.stringContaining('nowhere.example did not resolve: Error: queryA ENOTFOUND nowhere.example'),
+  })
+  expect(asked).toEqual([])
+})
+
+test('the host check: a request that throws is a failure that says so, never a hang (#924 review)', async () => {
+  const checkFetch: HostCheckFetch = async () => {
+    throw new Error('The operation timed out.')
+  }
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    hostCheck: { checkFetch, checkResolve: resolvesPublic },
+  })
+  expect(await (await postAllowlist(url, '/check', { host: 'slow.example' })).json()).toEqual({
+    kind: 'failed',
+    reason: 'https://slow.example/ did not answer: Error: The operation timed out.',
+  })
+})
+
+test('a server that reads no user config refuses to show or change an allowlist (#924 review)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  const read = await fetch(`${url}/api/settings/web-fetch`)
+  expect([read.status, await read.text()]).toEqual([
+    422,
+    'this server reads no user config, so it has no allowlist to show',
+  ])
+  expect((await postAllowlist(url, '', { add: 'a.example' })).status).toBe(422)
 })
 
 test('⚠ a foreign page can neither change the allowlist nor read it (#924, #717)', async () => {

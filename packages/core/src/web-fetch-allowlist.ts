@@ -1,7 +1,6 @@
-import { renameSync, writeFileSync } from 'node:fs'
 import { applyEdits, type Edit, modify } from 'jsonc-parser'
 import { type EnsoConfigParseResult, parseEnsoConfig } from './config.ts'
-import { readTextIfPresent } from './paths.ts'
+import { readTextIfPresent, replaceFileText } from './paths.ts'
 import { readWebFetchHostInput, type WebFetchAllowlistChange } from './web-fetch.ts'
 
 /**
@@ -9,7 +8,7 @@ import { readWebFetchHostInput, type WebFetchAllowlistChange } from './web-fetch
  *
  * ⚠ ONLY THAT KEY CHANGES. The edit is made on the file's text (`jsonc-parser`'s `modify`), so every
  * other key keeps its place and its formatting (the list itself is written on one line); the result must pass `parseEnsoConfig` before it
- * replaces the file (written beside it, then renamed over it), and a result that does not changes
+ * replaces the file (`replaceFileText`: a symlinked file stays a link, the file keeps its mode), and a result that does not changes
  * nothing. A file that is there and unreadable is NEVER overwritten: the reason comes back.
  */
 
@@ -88,9 +87,7 @@ export function changeUserAllowedHosts(path: string, change: WebFetchAllowlistCh
       kind: 'refused',
       reason: `the change would not be a config Enso reads (${checked.reason}); nothing was changed`,
     }
-  const staged = `${path}.${process.pid}.tmp`
-  writeFileSync(staged, after)
-  renameSync(staged, path)
+  replaceFileText(path, after)
   return { kind: 'written', hosts: next }
 }
 
