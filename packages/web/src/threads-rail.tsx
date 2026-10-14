@@ -36,6 +36,7 @@ import {
   sectionLayout,
   startOfLocalDay,
 } from './rail-layout.ts'
+import { RUN_DOT } from './run-status.ts'
 import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
 import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } from './thread-url.ts'
@@ -432,6 +433,23 @@ const ROW =
 /** A row's age: mono, at the meta size. */
 const ROW_TIME = 'shrink-0 font-mono text-meta text-muted-foreground tabular-nums'
 
+/**
+ * A page thread's dot (#914): what its status bar says — working, waiting on you, possibly stuck,
+ * finished, stopped by you, failed, live view lost — so a thread off screen says what it needs. A
+ * thread never asked anything is the page's draft (#879): its ring is dashed.
+ */
+function PageThreadDot({ thread }: { thread: ThreadSummary }): React.ReactNode {
+  if (thread.title === undefined && thread.name === undefined && !thread.busy) return <LiveDot state="draft" />
+  const { headline } = thread
+  // Before its bar has said anything, or at rest: the pane's summary, what every row said before #914.
+  if (headline === undefined || headline.state === 'idle') return <LiveDot state={liveState(thread)} />
+  return (
+    <span className={RUN_DOT[headline.state]}>
+      <span className="sr-only">{headline.word}</span>
+    </span>
+  )
+}
+
 function ThreadRow({
   thread,
   label,
@@ -444,19 +462,23 @@ function ThreadRow({
   active: boolean
   onSelect: (threadId: string) => void
 }): React.ReactNode {
+  const { headline } = thread
   return (
     <li>
       <button
         type="button"
         data-thread-id={thread.threadId}
+        data-run-state={headline?.state}
         aria-current={active ? 'true' : undefined}
+        title={
+          headline === undefined || headline.state === 'idle'
+            ? undefined
+            : [headline.word, ...(headline.detail === undefined ? [] : [headline.detail])].join(' — ')
+        }
         onClick={() => onSelect(thread.threadId)}
         className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : '')}
       >
-        {/* A thread never asked anything is the page's draft (#879): its ring is dashed. */}
-        <LiveDot
-          state={thread.title === undefined && thread.name === undefined && !thread.busy ? 'draft' : liveState(thread)}
-        />
+        <PageThreadDot thread={thread} />
         <RowTitle threadId={thread.threadId} title={label} full={thread.name ?? thread.title} />
         <span className={ROW_TIME} title={thread.lastActivityAt.toLocaleString()}>
           <Age from={thread.lastActivityAt} />

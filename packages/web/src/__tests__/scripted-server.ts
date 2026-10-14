@@ -34,6 +34,13 @@ export interface ScriptedFetch {
   readonly frame: (frame: EnsoFollowFrame) => void
   /** End the follow body — the server went away. */
   readonly closeFollow: () => void
+  /** Write the server's `: keepalive` comment onto the open follow (#914): bytes, and no event. */
+  readonly keepalive: () => void
+  /**
+   * Take the server down, or bring it back (#914): while down every request fails as a refused
+   * connection does — the page's `fetch` rejects — and the open follow is cut.
+   */
+  readonly setDown: (down: boolean) => void
   readonly prompts: Array<{ message: string; admission?: string; images?: unknown[] }>
   /** Every body `POST …/dialog` received — a second answer for the same id included (#275). */
   readonly dialogs: unknown[]
@@ -353,7 +360,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     storedThreads = storedThreads.filter((stored) => stored.threadId !== threadId)
     return new Response(null, { status: 204 })
   }
-  const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  const route = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     // Relative URLs, as the browser issues them; the base only makes `pathname` parse.
     const url = new URL(requestedUrl(input), 'http://localhost')
     const path = url.pathname
@@ -378,11 +385,27 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     if (respond !== undefined) return respond(init, path)
     if (action !== undefined) countedReads[action]?.push(path)
     return Promise.resolve(pageRead(path, url.searchParams.get('before')) ?? new Response('not found', { status: 404 }))
-  }) as typeof fetch
+  }
+  /** Taken down (#914), the server answers nothing: every request fails as a refused connection does. */
+  let down = false
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+    down ? Promise.reject(new TypeError('Failed to fetch')) : route(input, init)) as typeof fetch
   return {
     fetch: fetchImpl,
     frame: (frame: EnsoFollowFrame) => write(`data: ${JSON.stringify(frame)}\n\n`),
     closeFollow: () => close(),
+    keepalive: () => write(': keepalive\n\n'),
+    setDown: (next: boolean) => {
+      // The follow a server going down drops; one already closed stays closed.
+      if (next && !down) {
+        try {
+          close()
+        } catch {
+          // Closed before the server went down.
+        }
+      }
+      down = next
+    },
     prompts,
     dialogs,
     modeChanges,

@@ -133,6 +133,21 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * What the page's server check compares the server's listing against (`page-behind-check.ts`).
    */
   readonly appliedAt: () => number | undefined
+  /** Whether this page is receiving the thread's updates (#914) — see {@link LiveView}. */
+  readonly liveView: Store<LiveView>
+  /**
+   * When the follow last carried a frame (#914), `Date.now()` — an event, never a keepalive.
+   * Undefined before the first. What "no output for 3 min" is measured from.
+   */
+  readonly outputAt: () => number | undefined
+  /** What the follow says of the run now (#914) — see {@link RunPulse}. */
+  readonly pulse: () => RunPulse
+  /**
+   * Give up on a SILENT follow (#914): its socket closes and it ends as one the server closed
+   * would — the run's error, `follow-ended`, `disconnected`. The page's live-view check calls it
+   * once it knows a reload is the way back. Nothing while the follow is live or already ended.
+   */
+  readonly abandon: () => void
 }
 ```
 
@@ -269,7 +284,7 @@ export interface ThreadStores {
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
    * moment. Set by `follow-ended`; cleared by the next `status` or `snapshot` frame, which only a live
-   * follow delivers. While true the status bar says `disconnected` and no stop is offered,
+   * follow delivers. While true the status bar says `live view lost` (#914) and no stop is offered,
    * whatever the run flag still holds: the page cannot know what the server is doing.
    */
   readonly disconnected: WritableStore<boolean>

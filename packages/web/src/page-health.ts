@@ -9,7 +9,7 @@ import { createStore, type Store } from './store.ts'
  * #915's tab froze its transcript and status at a `write` for 20 minutes and 23 tool calls, a
  * permission question open behind it, while the composer, the queue and the rail kept working —
  * and nothing said so: the follow was alive (keepalives kept arriving), the stall was AFTER the
- * stream, and the page reported none of its own errors. Four triggers now say it, each from
+ * stream, and the page reported none of its own errors. These triggers now say it, each from
  * outside the part it watches:
  *
  *   behind     — the server's listing moved for a thread on this page and the page applied
@@ -17,7 +17,11 @@ import { createStore, type Store } from './store.ts'
  *   stalled    — a chunk handed to the chat client and not taken back for `stallMs`, or a
  *                client that stopped taking them (`follow-connection.ts`);
  *   render     — a pane's error boundary caught a throw (`page-fault-boundary.tsx`);
- *   error / rejection — `window`'s `error` and `unhandledrejection` ({@link watchPageFaults}).
+ *   error / rejection — `window`'s `error` and `unhandledrejection` ({@link watchPageFaults});
+ *   lost       — a thread's follow went silent (no byte, keepalives included, for `silentMs`) or
+ *                ended, and the page could not get it back (#914, `follow-connection.ts`): the
+ *                server answers again but the follow has no cursor to catch up from, or the
+ *                server did not answer for `reconnectMs`.
  *
  * Every one is LOGGED, through the page's logger — the shipper puts the page id on it and the
  * server's line carries it (`logs-route.ts`) — with the thread it concerns. The FIRST one is kept
@@ -27,7 +31,7 @@ import { createStore, type Store } from './store.ts'
  */
 
 /** What made this page say it may be out of date. */
-export type PageFaultTrigger = 'behind' | 'stalled' | 'render' | 'error' | 'rejection'
+export type PageFaultTrigger = 'behind' | 'stalled' | 'render' | 'error' | 'rejection' | 'lost'
 
 export interface PageFault {
   readonly trigger: PageFaultTrigger
@@ -56,6 +60,15 @@ export const PAGE_HEALTH_TIMING = {
   staleMs: 10_000,
   /** How long one chunk may sit with the chat client before the page calls it stalled. */
   stallMs: 10_000,
+  /**
+   * How long a follow may go without a single byte — the server's 5 s keepalive included — before
+   * the page says it lost its live view (#914): three keepalives missed.
+   */
+  silentMs: 15_000,
+  /** How often, while the live view is lost, the page asks whether the server answers again. */
+  probeMs: 3000,
+  /** How long the page tries to get a lost live view back before it asks for a Reload. */
+  reconnectMs: 30_000,
 }
 
 const DEFAULT_TIMING = { ...PAGE_HEALTH_TIMING }
@@ -74,6 +87,8 @@ export const pageFault: Store<PageFault | undefined> = fault
 /** The banner's words (#919), one place for the page and its tests. */
 export const PAGE_FAULT_WORDS = {
   banner: 'This page has fallen behind the server (or part of it failed). What you see may be out of date.',
+  /** The banner once a thread's live view is lost (#914): the page is not receiving its updates. */
+  lost: 'This page stopped receiving updates from the server. What you see is as of then — reload to catch up.',
   reload: 'Reload',
 } as const
 
@@ -92,6 +107,20 @@ export function reportPageFault(reported: PageFault): void {
 /** Test seam: the page healthy again. Never called from production code. */
 export function clearPageFaultForTest(): void {
   fault.set(undefined)
+}
+
+/**
+ * Whether the server answers at all (#914): any response is an answer, a failed fetch is none. The
+ * live-view check's probe (`live-view-check.ts`): the cheapest route, its body never read.
+ */
+export async function serverAnswers(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/about', { cache: 'no-store' })
+    await response.body?.cancel()
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** An error, a rejection's reason, anything thrown, as one line and its stack. */

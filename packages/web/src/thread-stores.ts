@@ -25,6 +25,7 @@ import { createModeLines, type ModeLines } from './mode-lines.ts'
 import { createModelStore, type ModelStore } from './model-state.tsx'
 import { createNotificationsStore, type NotificationAction, type NotificationsStore } from './notifications.tsx'
 import { createPermissionModeStore, type PermissionModeStore } from './permission-mode.tsx'
+import type { RunHeadline } from './run-status.ts'
 import { createStore, type Store, type WritableStore } from './store.ts'
 import { fetchThreadHistory } from './stored-threads.ts'
 
@@ -127,7 +128,7 @@ export interface ThreadStores {
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
    * moment. Set by `follow-ended`; cleared by the next `status` or `snapshot` frame, which only a live
-   * follow delivers. While true the status bar says `disconnected` and no stop is offered,
+   * follow delivers. While true the status bar says `live view lost` (#914) and no stop is offered,
    * whatever the run flag still holds: the page cannot know what the server is doing.
    */
   readonly disconnected: WritableStore<boolean>
@@ -455,6 +456,12 @@ export interface ThreadSummary {
   readonly waiting: boolean
   /** Which project's group the rail lists it under — `ThreadStores.projectId`. */
   readonly projectId: string | undefined
+  /**
+   * The thread's status as its bar last said it (#914) — the state, its word and one detail, no
+   * clock — for the rail's row and the page header. Written by the thread's status bar, which every
+   * mounted pane keeps (#472), so a thread off screen says it too; absent until the bar has said one.
+   */
+  readonly headline?: RunHeadline
 }
 
 /**
@@ -781,6 +788,19 @@ export function updateThreadSummary(threadId: string, patch: Pick<ThreadSummary,
   if (current === undefined) return
   if (current.title === patch.title && current.busy === patch.busy && current.waiting === patch.waiting) return
   summaries.set(threadId, { ...current, ...patch, lastActivityAt: new Date() })
+  publishThreadList()
+}
+
+/**
+ * Called by a thread's status bar when what it says changed (#914). Not activity: a step that
+ * changes is the run going on, which `busy` already marks, and the rail's age stays the thread's.
+ */
+export function updateThreadHeadline(threadId: string, headline: RunHeadline): void {
+  const current = summaries.get(threadId)
+  if (current === undefined) return
+  const { headline: said } = current
+  if (said?.state === headline.state && said.word === headline.word && said.detail === headline.detail) return
+  summaries.set(threadId, { ...current, headline })
   publishThreadList()
 }
 

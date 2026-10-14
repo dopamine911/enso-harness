@@ -30,6 +30,7 @@ import { isFixtureMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
 import { InlineRename } from './rename-thread.tsx'
+import { revealQuestion, RUN_DOT, RUN_WORD_COLOUR } from './run-status.ts'
 import { useStore } from './store.ts'
 import { getThreadStores, nameThreadSummary, type ThreadSummary, threadStarted } from './thread-stores.ts'
 import { UNTITLED_THREAD } from './threads-rail.tsx'
@@ -62,6 +63,54 @@ function QuestionWaiting({ threadId }: { threadId: string }): React.ReactNode {
       <span aria-hidden="true" className="size-2 rounded-full bg-human signal:shadow-glow-human" />
       <span className="sr-only">, a question is waiting</span>
     </>
+  )
+}
+
+/**
+ * The thread's status in the header (#914): the same word its status bar says — working, waiting
+ * on you, possibly stuck, finished, stopped by you, failed, live view lost — with its one detail,
+ * so it is seen without looking down. Nothing at rest. Waiting on you is a button to the question.
+ */
+function RunStatusChip({
+  thread,
+  onView,
+}: {
+  thread: ThreadSummary
+  onView: (view: ThreadView) => void
+}): React.ReactNode {
+  const dialog = useStore(getThreadStores(thread.threadId).dialog)
+  if (thread.headline === undefined || thread.headline.state === 'idle') return null
+  const { state, word, detail } = thread.headline
+  const said = (
+    <>
+      <span aria-hidden="true" className={RUN_DOT[state]} />
+      <span className={cn('font-semibold', RUN_WORD_COLOUR[state])}>{word}</span>
+      {detail === undefined ? null : (
+        <span className="min-w-0 truncate text-muted-foreground max-md:hidden">{detail}</span>
+      )}
+    </>
+  )
+  const chip = 'flex max-w-sm min-w-0 shrink items-center gap-2 font-mono text-xs'
+  if (state === 'waiting' && dialog !== undefined) {
+    return (
+      <button
+        type="button"
+        data-run-status={state}
+        title={`go to the question: ${detail ?? ''}`}
+        className={cn(chip, 'rounded-xs px-1 hover:bg-card focus-visible:outline-2 focus-visible:outline-ring')}
+        onClick={(): void => {
+          onView('chat')
+          requestAnimationFrame(() => revealQuestion(dialog.id))
+        }}
+      >
+        {said}
+      </button>
+    )
+  }
+  return (
+    <span data-run-status={state} className={chip} title={detail === undefined ? word : `${word} — ${detail}`}>
+      {said}
+    </span>
   )
 }
 
@@ -122,6 +171,7 @@ export function AppHeader(props: AppHeaderProps): React.ReactNode {
         <ThreadTitle {...props} started={started} rename={rename} />
       </div>
       {isFixtureMode ? <span className={BADGE}>fixture</span> : null}
+      {shown === undefined ? null : <RunStatusChip thread={shown} onView={onView} />}
       {notFound ? null : (
         <ViewTabs view={view} onView={onView} threadId={active?.threadId} draft={active !== undefined && !started} />
       )}

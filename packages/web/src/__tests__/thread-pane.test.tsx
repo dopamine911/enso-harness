@@ -666,7 +666,7 @@ test("every request a pane makes goes through its thread's fetch, never the page
 
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────
 
-test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode chip still offered (#618); settled → idle, all back', async () => {
+test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode chip still offered (#618); settled → finished, all back', async () => {
   const pane = await mountPane()
   expect(pane.status()).toContain('idle')
   expect(pane.stopButton()).toBeNull()
@@ -689,7 +689,7 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode ch
     { type: 'status', live: true, busy: false, generation: 3 },
   )
   await eventually(() => {
-    expect(pane.status()).toContain('idle')
+    expect(pane.status()).toContain('finished')
     expect(pane.stopButton()).toBeNull()
     expect(pane.chip('Mode').disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(false)
@@ -1752,7 +1752,7 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
   await pane.unmount()
 })
 
-test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no stop, and Enter sends nothing', async () => {
+test('⚠ the follow closing mid-run: the notice, the live view lost on the bar, no stop, and Enter sends nothing', async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 })
   await eventually(() => expect(pane.stopButton()).not.toBeNull())
@@ -1768,7 +1768,7 @@ test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no st
   })
   await eventually(() => {
     expect(pane.container.textContent).toContain('the connection to the server ended')
-    expect(pane.status()).toContain('disconnected')
+    expect(pane.status()).toContain('live view lost')
     expect(pane.stopButton()).toBeNull()
     expect(pane.sendButton().disabled).toBe(true)
     expect(pane.composer().placeholder).toContain('disconnected')
@@ -1828,7 +1828,7 @@ test('⚠ a tool call reads running… while its run is open and aborted once th
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   await eventually(() => {
-    expect(pane.status()).toContain('idle')
+    expect(pane.status()).toContain('finished')
     expect(step()).toBe('aborted')
     expect(pane.container.textContent).toContain('aborted')
     expect(pane.container.textContent).not.toContain('running…')
@@ -2734,7 +2734,7 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
     },
   })
   await eventually(() => {
-    expect(alpha.status()).toContain('working')
+    expect(alpha.status()).toContain('waiting on you')
     expect(alpha.status()).toContain('$0.0123')
     expect(alpha.container.textContent).toContain('Only alpha asks')
     expect(bravo.status()).toContain('idle')

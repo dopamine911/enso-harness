@@ -29,7 +29,8 @@ import type { FetchLike } from './browser-logging.ts'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
 import { PAGE_HEALTH_TIMING, reportPageFault } from './page-health.ts'
 import { pageLeaving } from './page-leaving.ts'
-import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
+import { createStore, type Store } from './store.ts'
+import { type AguiIdentifiers, extensionErrorMessage, observationToAguiEvents } from './to-agui.ts'
 
 /**
  * The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over
@@ -145,6 +146,12 @@ interface OpenRun {
    * said about it (`refused: …`, `retrying in …`) read between the two, not after the reply.
    */
   refused: boolean
+  /** When this page opened it (`Date.now()`): the run's elapsed time on the status bar (#914). */
+  readonly startedAt: number
+  /** pi's settle said a Stop ended it (#766) — set as the settle closes it. */
+  aborted: boolean
+  /** What failed in it while it ran (#914): an extension's error. The run's ending carries it. */
+  error: string | undefined
 }
 /** The parts of the last user message, whichever shape TanStack hands over — `UIMessage.parts` or `ModelMessage.content`. */
 function latestUserParts(messages: Array<UIMessage> | Array<ModelMessage>): readonly MessagePart[] {
@@ -210,7 +217,11 @@ function dataUrlOf(value: string): [string, string] | undefined {
  * the server kept the stream open (all of a run, keepalives every 5 s), so a subscription that had
  * to stop could not, whatever the `fetch` underneath did with the same signal.
  */
-async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<unknown> {
+async function* readSseFrames(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  heard: () => void,
+): AsyncGenerator<unknown> {
   const reader = body.getReader()
   const cancel = (): void => {
     // A body the fetch already failed rejects the cancel too: the read it ends is what matters.
@@ -223,6 +234,8 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
     while (!signal.aborted) {
       const { value, done } = await reader.read()
       if (done) return
+      // Any byte is the server heard from (#914) — a keepalive comment as much as a frame.
+      heard()
       buffered += decoder.decode(value, { stream: true })
       const lines = buffered.split('\n')
       buffered = lines.pop() ?? ''
@@ -257,6 +270,54 @@ export type DialogAnswerOutcome = 'answered' | 'gone' | 'refused' | 'unreachable
  * `unreachable` the request never got an answer (network). The run is still in flight.
  */
 export type AbortOutcome = 'aborted' | 'idle' | 'gone' | 'unreachable'
+
+/**
+ * Whether this page is receiving the thread's updates (#914), from the follow's BYTES — the
+ * server's `: keepalive` every 5 s included — not from the events they carry, which a quiet run
+ * may go minutes without.
+ *
+ *   live    the follow is open and the server is heard from;
+ *   silent  the follow is open and not one byte has arrived for `silentMs` (three keepalives
+ *           missed): a dead connection the browser has not noticed, or a server that hung;
+ *   ended   the follow closed, failed, never opened, or was abandoned after going silent.
+ *
+ * `since` is when the page last heard from the server. A silent follow that is heard from again is
+ * live again, and missed nothing: the bytes were held, not lost. An ended one stays ended — the
+ * follow has no cursor to resume from (`server/follow.ts`, `resume/cold-then-live`), so what the
+ * thread did meanwhile reaches this page only through a reload (`live-view-check.ts`).
+ */
+export type LiveView = { readonly state: 'live' } | { readonly state: 'silent' | 'ended'; readonly since: number }
+
+/** A tool call the model is writing now (#914): pi's `toolcall_start` until its `toolcall_end`. */
+export interface ComposingCall {
+  readonly toolCallId: string
+  readonly toolName: string
+  /** The arguments' opening, up to {@link COMPOSING_HEAD_CHARS}: where a path or a command is. */
+  readonly head: string
+  /** How much of the arguments has streamed, in characters. */
+  readonly size: number
+}
+
+/** How the last run on this page ended (#914). */
+export interface RunEnding {
+  /** A Stop ended it: pi's settle said `aborted` (#766). */
+  readonly aborted: boolean
+  /** It ended on an error — a refused prompt, an extension's failure — with the error's words. */
+  readonly error: string | undefined
+}
+
+/** What the follow says of the run, for the status bar (#914) — read when the bar renders. */
+export interface RunPulse {
+  /** When the oldest run open on this page opened (`Date.now()`); undefined while none is. */
+  readonly runStartedAt: number | undefined
+  /** The tool call the model is writing now; undefined while it writes none. */
+  readonly composing: ComposingCall | undefined
+  /** How the last run ended; undefined before one has, and once the next opens. */
+  readonly ended: RunEnding | undefined
+}
+
+/** Enough of a composing call's arguments to find its subject: pi's tools name it first. */
+const COMPOSING_HEAD_CHARS = 2048
 
 /** What `abort()` returns: the outcome, and the prompts pi had waiting — handed back to the composer (#75). Empty unless `aborted`. */
 export interface AbortResult {
@@ -360,6 +421,21 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * What the page's server check compares the server's listing against (`page-behind-check.ts`).
    */
   readonly appliedAt: () => number | undefined
+  /** Whether this page is receiving the thread's updates (#914) — see {@link LiveView}. */
+  readonly liveView: Store<LiveView>
+  /**
+   * When the follow last carried a frame (#914), `Date.now()` — an event, never a keepalive.
+   * Undefined before the first. What "no output for 3 min" is measured from.
+   */
+  readonly outputAt: () => number | undefined
+  /** What the follow says of the run now (#914) — see {@link RunPulse}. */
+  readonly pulse: () => RunPulse
+  /**
+   * Give up on a SILENT follow (#914): its socket closes and it ends as one the server closed
+   * would — the run's error, `follow-ended`, `disconnected`. The page's live-view check calls it
+   * once it knows a reload is the way back. Nothing while the follow is live or already ended.
+   */
+  readonly abandon: () => void
 }
 
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
@@ -417,6 +493,16 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   let appliedAt: number | undefined
   let wake: (() => void) | undefined
   const runs = new Map<string, OpenRun>()
+  /** `liveView`'s value: live until the follow goes silent or ends (#914). */
+  const liveView = createStore<LiveView>({ state: 'live' })
+  /** `outputAt`'s answer: when the follow last carried a frame. */
+  let outputAt: number | undefined
+  /** The tool call the model is writing now — mutated per delta, copied out by `pulse` (#914). */
+  let composing: { toolCallId: string; toolName: string; head: string; size: number } | undefined
+  /** How the last run on this page ended; cleared when the next opens (#914). */
+  let lastEnding: RunEnding | undefined
+  /** Ends the open follow as the server closing it would (`abandon`); undefined while none is open. */
+  let cutFollow: (() => void) | undefined
   /**
    * A frame that fails the wire schema has been reported on this connection.
    * Once, not per frame: the usual cause is a version mismatch — a tab from an earlier bundle
@@ -471,9 +557,14 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       generation,
       assistantMessages: 0,
       refused: false,
+      startedAt: Date.now(),
+      aborted: false,
+      error: undefined,
     }
     runs.set(runId, run)
     current = run
+    // The status bar says how the last run ended until the next prompt (#914): this is the next.
+    lastEnding = undefined
     push(
       { type: EventType.RUN_STARTED, threadId, runId },
       { type: EventType.TEXT_MESSAGE_START, messageId: run.messageId, role: 'assistant' },
@@ -481,10 +572,59 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return run
   }
 
-  function closeRun(run: OpenRun, chunk: StreamChunk): void {
+  /**
+   * The run is over for the client. `known` is false when this page cannot tell HOW it ended — the
+   * follow closed under it — so no ending is recorded, and the bar says the live view is lost instead.
+   */
+  function closeRun(run: OpenRun, chunk: StreamChunk, known = true): void {
     runs.delete(run.runId)
     if (current === run) current = undefined
+    if (runs.size === 0) composing = undefined
+    if (known) {
+      const error = chunk.type === EventType.RUN_ERROR ? chunk.message : run.error
+      lastEnding = { aborted: run.aborted, error }
+    }
     push(chunk)
+  }
+
+  /**
+   * A tool call the model is writing (#914), off pi's own `message_update` events, which cross as
+   * `unmapped` (`host/map-events.ts`): `toolcall_start` names the tool, each `toolcall_delta` adds to
+   * its arguments, `toolcall_end` ends it. Only the arguments' opening is kept — a 68 KB `write`
+   * needs its size, not its content, here.
+   */
+  function observeComposing(event: unknown): void {
+    if (typeof event !== 'object' || event === null) return
+    const { type, assistantMessageEvent: update } = event as {
+      type?: unknown
+      assistantMessageEvent?: { type?: unknown; id?: unknown; toolName?: unknown; delta?: unknown }
+    }
+    if (type !== 'message_update' || update === undefined) return
+    if (update.type === 'toolcall_start') {
+      composing = {
+        toolCallId: typeof update.id === 'string' ? update.id : '',
+        toolName: typeof update.toolName === 'string' ? update.toolName : 'a tool call',
+        head: '',
+        size: 0,
+      }
+      return
+    }
+    if (update.type === 'toolcall_delta' && composing !== undefined && typeof update.delta === 'string') {
+      composing.size += update.delta.length
+      if (composing.head.length < COMPOSING_HEAD_CHARS) {
+        composing.head = (composing.head + update.delta).slice(0, COMPOSING_HEAD_CHARS)
+      }
+      return
+    }
+    if (update.type === 'toolcall_end') composing = undefined
+  }
+
+  function pulse(): RunPulse {
+    let runStartedAt: number | undefined
+    for (const run of runs.values()) {
+      if (runStartedAt === undefined || run.startedAt < runStartedAt) runStartedAt = run.startedAt
+    }
+    return { runStartedAt, composing: composing === undefined ? undefined : { ...composing }, ended: lastEnding }
   }
 
   /** End the run's assistant bubble and open a new one after it: everything that follows lands there. */
@@ -568,10 +708,12 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    * A run whose generation is still unknown (its receipt has not come back) or newer than the
    * server's is NOT closed: the frames ending an EARLIER run can arrive after this tab has
    * already opened the next one, and closing that one here would end it before it started.
+   * `aborted`: pi's settle said a Stop ended them (#766), which their ending carries (#914).
    */
-  function finishRunsThrough(generation: number): void {
+  function finishRunsThrough(generation: number, aborted = false): void {
     for (const run of runs.values()) {
       if (run.generation === undefined || run.generation > generation) continue
+      run.aborted = aborted
       closeRun(run, { type: EventType.RUN_FINISHED, threadId, runId: run.runId })
     }
   }
@@ -640,6 +782,21 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       options.onToolResultDescriptor?.(observation.toolCallId, observation.descriptor)
     }
     if (observation.kind === 'turn-start') options.onTurnStart?.()
+    observeRun(observation)
+  }
+
+  /**
+   * What the status bar says of the run (#914): a call the model is writing — ended once pi runs it,
+   * and a new message starts none — and an extension's failure, which ends the client's run now
+   * (`to-agui.ts`); pi's run settles later, and its ending says it too.
+   */
+  function observeRun(observation: EnsoObservation): void {
+    if (observation.kind === 'unmapped') observeComposing(observation.event)
+    if (observation.kind === 'tool-call' || observation.kind === 'message-start') composing = undefined
+    if (observation.kind !== 'extension-error') return
+    const error = extensionErrorMessage(observation)
+    if (current !== undefined) current.error = error
+    lastEnding = { aborted: false, error }
   }
 
   function observe(frame: EnsoFollowFrame): void {
@@ -656,7 +813,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       // Nothing queued behind a settled run can be refused any more: pi claimed it (it ran
       // inside this run) or a stop cleared it (the receipt said so). Forget the ids.
       queuedPrompts.clear()
-      finishRunsThrough(serverGeneration)
+      finishRunsThrough(serverGeneration, observation.aborted)
       return
     }
     if (observation.kind === 'prompt-rejected') {
@@ -740,15 +897,44 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       current = undefined
     }
     for (const run of runs.values()) {
-      closeRun(run, {
-        type: EventType.RUN_ERROR,
-        runId: run.runId,
-        message: 'the follow closed before the run settled',
-      })
+      closeRun(
+        run,
+        { type: EventType.RUN_ERROR, runId: run.runId, message: 'the follow closed before the run settled' },
+        false,
+      )
     }
-    if (!follow.aborted) push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
+    if (!follow.aborted) {
+      followLost()
+      push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
+    }
     wake?.()
     wake = undefined
+  }
+
+  /** The follow is gone (#914): the live view ends as of when the server was last heard from. */
+  function followLost(heardAt = Date.now()): void {
+    const view = liveView.get()
+    if (view.state === 'ended') return
+    liveView.set({ state: 'ended', since: view.state === 'silent' ? view.since : heardAt })
+  }
+
+  /**
+   * The watchdog on hearing from the server (#914): no byte for `silentMs` — the 5 s keepalive
+   * missed three times — and the live view is silent until one arrives. Not a fault by itself: the
+   * page's live-view check decides whether to wait or to ask for a reload (`live-view-check.ts`).
+   */
+  function watchSilence(state: Following): () => void {
+    const { silentMs } = PAGE_HEALTH_TIMING
+    const timer = setInterval(
+      () => {
+        if (state.ended || liveView.get().state !== 'live' || Date.now() - state.heardAt < silentMs) return
+        const seconds = Math.round((Date.now() - state.heardAt) / 1000)
+        log.warn('the follow has been silent for {seconds}s: no event and no keepalive', { seconds })
+        liveView.set({ state: 'silent', since: state.heardAt })
+      },
+      Math.max(silentMs / 4, 10),
+    )
+    return () => clearInterval(timer)
   }
 
   /**
@@ -822,22 +1008,32 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     handedAt: number
     /** The watchdog has said this subscription stalled (`watchHandOver`). */
     stalled: boolean
+    /** When the follow last carried a byte, a keepalive included (`watchSilence`, #914). */
+    heardAt: number
   }
 
   /**
    * Frames off the follow, observed into the queue, on their own loop so `send` can interleave
    * chunks. Ends when the server closes the follow, the wire fails, or `follow` aborts.
    */
-  async function pumpFrames(frames: AsyncGenerator<unknown>, follow: AbortSignal, state: Following): Promise<void> {
+  async function pumpFrames(
+    frames: AsyncGenerator<unknown>,
+    follow: AbortSignal,
+    state: Following,
+    cut: AbortSignal,
+  ): Promise<void> {
     try {
       for await (const raw of frames) {
         if (follow.aborted) break
+        outputAt = Date.now()
         if (admitted(raw)) observe(raw)
         // A frame that queued nothing for the client is applied once it is observed.
         if (queue.length === 0 && state.handing === undefined) appliedAt = Date.now()
       }
-      // The server closed it: `followClosed` says so on the page; this is the record of why.
-      if (!follow.aborted && !leaving()) log.warn('the follow ended: the server closed it')
+      // The server closed it, or this page gave up on it in silence (`abandon`): `followClosed`
+      // says so on the page; this is the record of why.
+      const why = cut.aborted ? 'abandoned after it went silent' : 'the server closed it'
+      if (!follow.aborted && !leaving()) log.warn('the follow ended: {why}', { why })
     } catch (error) {
       // ⚠ #664: a stream the browser cut because the page is leaving is not a failure — every
       // reload logged "the follow failed: TypeError: network error" for each followed thread.
@@ -845,6 +1041,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     } finally {
       state.ended = true
       appliedAt = undefined
+      cutFollow = undefined
       followClosed(follow, state.consumerGone)
     }
   }
@@ -875,14 +1072,41 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (opening.kind === 'refused') {
       // A throwing fetch is the same fact as a refusing one (#274) — unless the CALLER is the
       // one leaving, in which case there is nothing to report and the cancel is theirs to see.
-      if (!abort.aborted) yield* followNeverOpened(opening.detail)
+      if (!abort.aborted) {
+        followLost()
+        yield* followNeverOpened(opening.detail)
+      }
       throw opening.failure
     }
     // The pump fills the queue; this loop hands it over, waiting when nothing is queued.
-    const state: Following = { ended: false, consumerGone: false, handing: undefined, handedAt: 0, stalled: false }
+    const state: Following = {
+      ended: false,
+      consumerGone: false,
+      handing: undefined,
+      handedAt: 0,
+      stalled: false,
+      heardAt: Date.now(),
+    }
     appliedAt = Date.now()
-    const pump = pumpFrames(readSseFrames(opening.body, follow), follow, state)
+    if (liveView.get().state !== 'live') liveView.set({ state: 'live' })
+    // `abandon`'s cut ends the read the way the server closing the stream would: not `follow`, which
+    // is this page's own end and says nothing.
+    const cut = new AbortController()
+    cutFollow = (): void => cut.abort()
+    const heard = (): void => {
+      state.heardAt = Date.now()
+      if (liveView.get().state !== 'silent') return
+      log.info('the follow is heard from again')
+      liveView.set({ state: 'live' })
+    }
+    const pump = pumpFrames(
+      readSseFrames(opening.body, AbortSignal.any([follow, cut.signal]), heard),
+      follow,
+      state,
+      cut.signal,
+    )
     const unwatch = watchHandOver(state)
+    const unwatchSilence = watchSilence(state)
     try {
       while (!abort.aborted) {
         const next = takeQueued()
@@ -901,6 +1125,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       }
     } finally {
       unwatch()
+      unwatchSilence()
       consumerStopped(state, abort)
       stop.abort()
       await pump
@@ -1090,6 +1315,12 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return 'queued'
   }
 
+  function abandon(): void {
+    if (liveView.get().state !== 'silent') return
+    log.warn('abandoning the silent follow: a reload is the way back')
+    cutFollow?.()
+  }
+
   function close(): void {
     if (released.signal.aborted) return
     log.info('follow released')
@@ -1172,5 +1403,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     close,
     streamMessageId: () => streamMessageId,
     appliedAt: () => appliedAt,
+    liveView,
+    outputAt: () => outputAt,
+    pulse,
+    abandon,
   }
 }

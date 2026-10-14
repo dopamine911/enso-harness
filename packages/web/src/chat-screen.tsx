@@ -1,6 +1,6 @@
 import { ENSO_NOTICE_SOURCE, type EnsoForkReceipt } from '@enso/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { usePageBehindCheck } from './page-behind-check.ts'
+import { usePageChecks } from './live-view-check.ts'
 import { PageFaultBanner, PaneBoundary } from './page-fault.tsx'
 import { AppHeader } from './page-header.tsx'
 import { type PageListings, projectList, storedThreads, usePageListings } from './page-listings.ts'
@@ -522,8 +522,9 @@ export function ChatScreen(): React.ReactNode {
   const rail = useNarrowRail()
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   const newThread = (projectId: string | undefined): void => navigate(mintPageThread(projectId).threadId, 'push')
-  // The page against the server's listing (#919): a thread the server moved on and this page did not.
-  usePageBehindCheck()
+  // The page against the server (#919, #914): a thread it moved on and this page did not, and a
+  // thread's live view lost — when the server answers again, or gives up answering, Reload.
+  usePageChecks()
   return (
     // The rail runs the window's full height, its brand at its top; the header sits over the main
     // column only (#417) — a thread's, or a page's (#869) in its place.

@@ -10,15 +10,31 @@ import {
   THREAD_STATUS_WORDS,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
-import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
-import { useEffect } from 'react'
-import { toolResultState } from './EnsoToolResult.tsx'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { STATUS_BUTTON } from './menu-chrome.ts'
 import { useThreadReadable } from './model-state.tsx'
-import { pageFault } from './page-health.ts'
+import { PAGE_FAULT_WORDS, pageFault } from './page-health.ts'
+import { reloadKeepingDrafts } from './page-reload.ts'
+import {
+  describeRunStatus,
+  describeStep,
+  formatElapsed,
+  headlineOf,
+  lostDetail,
+  paneStopOf,
+  revealQuestion,
+  RUN_DOT,
+  RUN_STATUS_TIMING,
+  RUN_WORD_COLOUR,
+  type RunHeadlineState,
+  type RunStatus,
+  stepLabel,
+  stuckDetail,
+  thinkingTail,
+} from './run-status.ts'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
-import { type EnsoPendingDialog } from './thread-stores.ts'
+import { type EnsoPendingDialog, type ThreadStores, updateThreadHeadline } from './thread-stores.ts'
 import { ThreadTreeButton } from './thread-tree-pages.tsx'
 import { announceUiEvent } from './ui-events.ts'
 
@@ -36,11 +52,12 @@ import { announceUiEvent } from './ui-events.ts'
  * before the first prompt (#84 round 2). A bar that appears only after the first request is
  * a bar you never learn to look at.
  *
- * ⚠ ACTIVITY AND COUNTS ARE DERIVED FROM STATE THE PAGE ALREADY HOLDS. Activity from
- * `chat.sessionGenerating` (the shared run flag — `isLoading` is request-local and the follow
- * adapter never raises it, #103 receipt) and the shape of the last message; counts from the
- * message list. Timing — LLM time, TTFT, tok/s — is NOT on the wire and is not invented here;
- * the host would have to stamp events. That is a later slice of #90, named there.
+ * ⚠ THE RUN'S STATUS AND THE COUNTS ARE DERIVED FROM STATE THE PAGE ALREADY HOLDS. The status
+ * (#914, `run-status.ts`) from `chat.sessionGenerating` (the shared run flag — `isLoading` is
+ * request-local and the follow adapter never raises it, #103 receipt), the shape of the last
+ * message, and what the follow says of itself and the run; counts from the message list. Its
+ * elapsed times are this page's clock, from when it saw the run open and the step begin: the host
+ * stamps no events, and a page that joined a run mid-way counts from when it joined.
  *
  * ⚠ COST AND CONTEXT ARE PI'S, NOT SUMMED HERE (#45). The page used to add up each
  * `message-end` it saw, so a reload, a resume from the rail or a second tab started again at
@@ -54,85 +71,6 @@ import { announceUiEvent } from './ui-events.ts'
  * screen reader continuously. The numbers stay poll-able, never announced; the send/stop
  * button already carries the in-flight state to assistive tech.
  */
-
-/** What the run is doing right now, as far as the page can tell from the transcript. */
-export type Activity =
-  | { readonly kind: 'idle' }
-  /** A run is in flight but nothing has streamed yet, or the model is between steps. */
-  | { readonly kind: 'working' }
-  | { readonly kind: 'thinking' }
-  | { readonly kind: 'running'; readonly tool: string }
-  | { readonly kind: 'responding' }
-  /**
-   * The follow ended under this page (#119): whatever the run flag holds is as of that
-   * moment, so it is not reported — a run that was in flight may have finished, been
-   * aborted, or died with the server, and the page cannot tell which.
-   */
-  | { readonly kind: 'disconnected' }
-  /**
-   * This page may be out of date (#919): it fell behind the server or part of it failed, and the
-   * banner offers Reload. Nothing it shows is claimed as working or live until then.
-   */
-  | { readonly kind: 'behind' }
-
-/**
- * Read the activity off the transcript's tail.
- *
- * The last AUTOMATIC part of the last message (TanStack's own selection, matched results folded
- * into their calls) is the step in progress: a call with no result yet is a tool running; a
- * call WITH its result means the model has the output and is composing — `working`, not
- * `running`, because the tool is done. Thinking and text are what they say. Anything else — no
- * assistant message yet, a user message as the tail, an image — is `working`: in flight,
- * nothing more specific known.
- *
- * "The last message" skips assistant messages with NO parts at the tail (#418). Joining a run that
- * is already going (a reload) opens a new assistant message for what streams next, after the stored
- * one holding the step in progress; until something streams into it, that step is still the one in
- * progress. The skip stops at the first message with a part, or at a user message.
- *
- * ⓘ The catch-all DIVERGES from `selected-message-part.tsx` on purpose.
- * The transcript renders every part kind it has no handler for visibly, because there a
- * silently skipped part is indistinguishable from one never sent. This is a one-word
- * summary with no room for per-kind detail, and `working` is TRUE of an image, a document,
- * or an unmatched result at the tail — the run is in flight. The part itself is still on
- * screen in the transcript; nothing is hidden by summarising it.
- *
- * ⚠ `selectMessageUI` HERE, `selectChatUI` in `transcript-selection.ts` (#282) — the opposite of
- * that module's choice, and deliberately. The transcript renderer needs the whole-list
- * selection because it renders EVERY message, so a call in an earlier message whose result
- * the server stamped onto a later one must still pair or it reads `running…` for ever
- * (`message-row.tsx#ChatMessageRow` says so). This function reads only the LAST
- * message, where that shape cannot arise: a result is normalised into the message holding
- * its call, and a result whose call is absent from the transcript is unmatched under BOTH
- * selections. The pairing this loses is pairing across messages, which the tail read never
- * consults. What it buys: the whole-transcript selection allocated a selected part per part
- * plus two Maps and a Set on every streamed token to use one element — 76.4 µs per delta at
- * 600 messages and rising for the life of the thread, against 0.32 µs here (#282's
- * measurement, reproduced). `thread-status.test.tsx` pins the cross-message shapes.
- */
-export function describeActivity(
-  messages: ReadonlyArray<UIMessage>,
-  generating: boolean,
-  disconnected = false,
-  behind = false,
-): Activity {
-  if (disconnected) return { kind: 'disconnected' }
-  if (behind) return { kind: 'behind' }
-  if (!generating) return { kind: 'idle' }
-  const message = messages.findLast((candidate) => candidate.role !== 'assistant' || candidate.parts.length > 0)
-  const last = message === undefined ? undefined : selectMessageUI(message, {})
-  if (last === undefined || last.message.role !== 'assistant') return { kind: 'working' }
-  const tail = automaticPartsForMessage(last).at(-1)
-  if (tail === undefined) return { kind: 'working' }
-  if (tail.key === 'toolCall') {
-    // `generating` is true here, so the tail's run is open: no result is pending, never aborted.
-    const pending = toolResultState(tail.result, true).status === 'pending'
-    return pending ? { kind: 'running', tool: tail.part.name } : { kind: 'working' }
-  }
-  if (tail.key === 'thinking') return { kind: 'thinking' }
-  if (tail.key === 'text') return { kind: 'responding' }
-  return { kind: 'working' }
-}
 
 export interface ThreadCounts {
   /** User messages — one per thing the human asked. */
@@ -170,19 +108,15 @@ export function countThread(
   return { prompts, toolCalls, refused, failed }
 }
 
-/**
- * `running read` — the tool named as pi names it, so it matches the transcript's step row. The
- * resting words are core's (#648): the arena's attention wait reads them back off the page.
- */
-function activityLabel(activity: Activity): string {
-  if (activity.kind === 'idle') return THREAD_STATUS_WORDS.idle
-  if (activity.kind === 'disconnected') return THREAD_STATUS_WORDS.disconnected
-  if (activity.kind === 'behind') return THREAD_STATUS_WORDS.behind
-  return activity.kind === 'running' ? `running ${activity.tool}` : activity.kind
-}
-
 export interface ThreadStatusViewProps {
-  readonly activity: Activity
+  /** What the run and the page are doing (#914). */
+  readonly status: RunStatus
+  /** The moment the elapsed times are read at (`Date.now()`), so a static render is deterministic. */
+  readonly now: number
+  /** Brings the open question's card into view (#914); the question is words alone when absent. */
+  readonly onRevealQuestion?: ((dialogId: string) => void) | undefined
+  /** Stops the run — the composer's Stop (#914); "possibly stuck" offers it. Words alone when absent. */
+  readonly onStop?: (() => void) | undefined
   readonly counts: ThreadCounts
   /** pi's session totals and context (#45); undefined until the follow's first snapshot. */
   readonly usage?: EnsoSessionUsage | undefined
@@ -194,8 +128,6 @@ export interface ThreadStatusViewProps {
   readonly onTree?: boolean | undefined
   /** What stands for "own tree" on the bar: the wired bar's button that opens the tree's panel (#619); the words alone when absent. */
   readonly treeControl?: React.ReactNode
-  /** A question from pi is open for this thread — said here too, since only the transcript shows it. */
-  readonly questionWaiting?: boolean
   /** The provider's last refusal while no reply has got through since (#340) — its class word. */
   readonly refusal?: ProviderRefusalClass | undefined
   /** Who refused (#387): `Anthropic: rate-limited`, never a bare word that reads as Enso's policy. */
@@ -245,20 +177,6 @@ function ContextMeter({ context }: { readonly context: EnsoContextUsage }): Reac
 /** The project as a reader names it: the directory's own name; the full path rides in the tooltip. */
 function projectName(cwd: string): string {
   return cwd.split(/[\\/]/).findLast((segment) => segment.length > 0) ?? cwd
-}
-
-const DOT_DISCONNECTED = 'size-2 shrink-0 rotate-45 rounded-xs bg-refuse'
-const DOT_IDLE = 'size-2 shrink-0 rounded-full border-dot border-muted-foreground'
-// ⚠ Static, not pulsing (#739): any CSS animation here, even a stepped or `motion-safe:` one, keeps
-// the compositor ticking for as long as pi works — 40–55% of a GPU process in the live run. The
-// colour and the word beside the dot already say the thread is in flight.
-const DOT_IN_FLIGHT = 'size-2 shrink-0 rounded-full bg-evidence signal:shadow-glow-evidence'
-
-/** The dot beside the word: solid in the running colour while in flight, hollow when idle, a refusal-coloured diamond once the follow ended (#119) or the page fell behind (#919). */
-function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof DOT_IDLE | typeof DOT_IN_FLIGHT {
-  if (activity.kind === 'disconnected' || activity.kind === 'behind') return DOT_DISCONNECTED
-  if (activity.kind === 'idle') return DOT_IDLE
-  return DOT_IN_FLIGHT
 }
 
 /**
@@ -405,48 +323,168 @@ function IncidentWord({ incidents }: { readonly incidents: EnsoSessionIncidents 
 }
 
 /**
- * "a question is waiting", said in the bar while pi waits on an answer (#362).
+ * "a question is waiting", said to a screen reader while pi waits on an answer (#362) — the bar's
+ * run word says `waiting on you` and the question for the eye (#914).
  *
  * ⚠ THE LIVE REGION IS ALWAYS MOUNTED (#371): a screen reader announces a change inside a region
- * that exists, not a region that appears already filled. Only its words change; the visible line
- * is `aria-hidden` so they are read once, and `sr-only` is absolutely placed, so while empty the
- * region takes no item or gap in the bar's row.
+ * that exists, not a region that appears already filled. Only its words change, and `sr-only` is
+ * absolutely placed, so while empty the region takes no item or gap in the bar's row.
  */
-function QuestionWaiting({ waiting }: { waiting: boolean | undefined }): React.ReactNode {
+function QuestionWaiting({ waiting }: { waiting: boolean }): React.ReactNode {
+  return (
+    <span role="status" className="sr-only">
+      {waiting ? THREAD_STATUS_WORDS.questionWaiting : ''}
+    </span>
+  )
+}
+
+/** What each state's word means, on hover. */
+const RUN_TITLE: Readonly<Record<RunHeadlineState, string>> = {
+  idle: 'nothing has run on this page yet',
+  working: 'what pi is doing now, and for how long: this step, then the whole run',
+  waiting: 'pi is waiting for your answer — the question is in the Chat view',
+  stuck: 'pi is working, and nothing has come from it for a while — an observation, not a verdict; Stop ends the run',
+  finished: 'the last run finished on its own',
+  stopped: 'a Stop ended the last run',
+  failed: 'the last run ended on an error',
+  lost: "this page is not receiving the thread's updates: what it shows is as of then",
+  behind: 'this page has fallen behind the server or part of it failed — Reload to catch up',
+}
+
+/** A line of detail that may be long: cut with an ellipsis, whole on hover. */
+const DETAIL = 'min-w-0 max-w-md truncate'
+
+/** A control in the run's detail: a word that acts, underlined like the risk word. */
+const DETAIL_BUTTON = `${STATUS_BUTTON} underline decoration-dotted underline-offset-2 hover:decoration-solid`
+
+/**
+ * What pi is doing and for how long (#914): the step, its elapsed time, the run's; while it thinks,
+ * the last line of its thinking, live — which opens to the thinking's latest stretch.
+ */
+function WorkingDetail({
+  status,
+  now,
+}: {
+  readonly status: Extract<RunStatus, { kind: 'working' }>
+  readonly now: number
+}): React.ReactNode {
+  const [open, setOpen] = useState(false)
+  const { step } = status
+  const thinking = step.kind === 'thinking' ? step.text : undefined
+  const tail = thinking === undefined ? '' : thinkingTail(thinking)
   return (
     <>
-      <span role="status" className="sr-only">
-        {waiting ? THREAD_STATUS_WORDS.questionWaiting : ''}
+      <span className={`${DETAIL} text-foreground`} title={stepLabel(step)}>
+        {stepLabel(step)}
       </span>
-      {waiting ? (
-        <span
-          aria-hidden="true"
-          className="flex items-center gap-2 font-medium text-human"
-          title="pi is waiting for your answer — it is in the Chat view"
+      <span title="how long this step has run">{formatElapsed(now - status.stepSince)}</span>
+      {status.runSince === undefined ? null : (
+        <span title="how long the run has run, since this page saw it start">
+          run {formatElapsed(now - status.runSince)}
+        </span>
+      )}
+      {tail.length === 0 ? null : (
+        <button
+          type="button"
+          aria-expanded={open}
+          title={open ? 'hide the thinking' : 'show more of the thinking'}
+          className={`${STATUS_BUTTON} ${DETAIL} italic`}
+          onClick={(): void => setOpen(!open)}
         >
-          <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />
-          {THREAD_STATUS_WORDS.questionWaiting}
+          {tail}
+        </button>
+      )}
+      {open && thinking !== undefined ? (
+        <span
+          data-thinking-tail=""
+          className="max-h-32 basis-full overflow-y-auto font-sans whitespace-pre-wrap text-muted-foreground italic"
+        >
+          {thinking.length > THINKING_OPEN_CHARS ? `…${thinking.slice(-THINKING_OPEN_CHARS)}` : thinking}
         </span>
       ) : null}
     </>
   )
 }
 
-/** What the run is doing now: the activity's dot and word, first in the bar — bold, in the running colour while in flight. */
-function ActivityWord({ activity }: { readonly activity: ThreadStatusViewProps['activity'] }): React.ReactNode {
-  const inFlight = activity.kind !== 'idle' && activity.kind !== 'disconnected' && activity.kind !== 'behind'
-  let title = "what the run is doing right now, read off the transcript's tail"
-  if (activity.kind === 'disconnected') title = 'the connection to the server ended — reload and resume from the rail'
-  if (activity.kind === 'behind')
-    title = 'this page has fallen behind the server or part of it failed — Reload to catch up'
+/** How much of the thinking the opened tail shows: its latest stretch, not the whole. */
+const THINKING_OPEN_CHARS = 1500
+
+/** The detail after the run's word: what it is doing, what it waits on, why it ended, how to get back. */
+function RunDetail({
+  status,
+  now,
+  onRevealQuestion,
+  onStop,
+}: Pick<ThreadStatusViewProps, 'status' | 'now' | 'onRevealQuestion' | 'onStop'>): React.ReactNode {
+  switch (status.kind) {
+    case 'lost':
+      return (
+        <>
+          <span className="text-foreground">{lostDetail(status.reload)}</span>
+          {status.reload ? (
+            <button
+              type="button"
+              className={`${DETAIL_BUTTON} text-refuse`}
+              onClick={(): void => void reloadKeepingDrafts()}
+            >
+              {PAGE_FAULT_WORDS.reload}
+            </button>
+          ) : null}
+        </>
+      )
+    case 'waiting':
+      return onRevealQuestion === undefined ? (
+        <span className={`${DETAIL} text-foreground`}>{status.question}</span>
+      ) : (
+        <button
+          type="button"
+          title={`go to the question: ${status.question}`}
+          className={`${DETAIL_BUTTON} ${DETAIL} text-foreground`}
+          onClick={(): void => onRevealQuestion(status.dialogId)}
+        >
+          {status.question}
+        </button>
+      )
+    case 'working':
+      return <WorkingDetail status={status} now={now} />
+    case 'stuck':
+      return (
+        <>
+          <span className={`${DETAIL} text-foreground`}>{stuckDetail(status, now)}</span>
+          {onStop === undefined ? null : (
+            <button type="button" className={`${DETAIL_BUTTON} text-refuse`} onClick={onStop}>
+              Stop
+            </button>
+          )}
+        </>
+      )
+    case 'stopped':
+      return status.reason === undefined ? null : (
+        <span className={`${DETAIL} text-refuse`} title={status.reason}>
+          {status.reason}
+        </span>
+      )
+    default:
+      return null
+  }
+}
+
+/** The run's dot and word, first in the bar — bold, in its state's colour — then its detail. */
+function RunWords(
+  props: Pick<ThreadStatusViewProps, 'status' | 'now' | 'onRevealQuestion' | 'onStop'>,
+): React.ReactNode {
+  const { state, word } = headlineOf(props.status)
   return (
-    <span
-      className={`flex shrink-0 items-center gap-2 font-semibold ${inFlight ? 'text-evidence' : 'text-foreground'}`}
-      title={title}
-    >
-      <span aria-hidden="true" className={activityDotClass(activity)} />
-      {activityLabel(activity)}
-    </span>
+    <>
+      <span
+        className={`flex shrink-0 items-center gap-2 font-semibold ${RUN_WORD_COLOUR[state]}`}
+        title={RUN_TITLE[state]}
+      >
+        <span aria-hidden="true" className={RUN_DOT[state]} />
+        {word}
+      </span>
+      <RunDetail {...props} />
+    </>
   )
 }
 
@@ -493,14 +531,16 @@ function SpendWords({ usage }: { readonly usage: ThreadStatusViewProps['usage'] 
 
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
 export function ThreadStatusView({
-  activity,
+  status,
+  now,
+  onRevealQuestion,
+  onStop,
   counts,
   usage,
   cwd,
   projectTitle,
   onTree,
   treeControl,
-  questionWaiting,
   refusal,
   refusalSource,
   git,
@@ -518,9 +558,9 @@ export function ThreadStatusView({
       className="flex min-h-8 shrink-0 items-center gap-4 border-t px-6 font-mono text-xs whitespace-nowrap text-muted-foreground max-md:gap-3 max-md:px-4"
     >
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-0.5 py-0.5 max-md:gap-x-3">
-        <ActivityWord activity={activity} />
-        {/* Seen from every view: the question itself is in the transcript (#362 review). */}
-        <QuestionWaiting waiting={questionWaiting} />
+        <RunWords status={status} now={now} onRevealQuestion={onRevealQuestion} onStop={onStop} />
+        {/* Heard from every view: the question itself is in the transcript (#362 review). */}
+        <QuestionWaiting waiting={status.kind === 'waiting'} />
         {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
 			    transcript says who refused and why. */}
         <RefusalWord refusal={refusal} source={refusalSource} />
@@ -542,22 +582,22 @@ export interface ThreadStatusBarProps {
   readonly generating: boolean
   /** The thread's project's title as the page lists it (#551); the bar falls back to the cwd's name. */
   readonly projectTitle?: string | undefined
-  /** Asks the page for a view (#361) — the risk word asks for Stats (#727). */
-  readonly openView: (view: 'stats') => void
+  /** Asks the page for a view (#361) — the risk word asks for Stats (#727), the question's line for the Chat (#914). */
+  readonly openView: (view: 'stats' | 'chat') => void
   /** Whether this bar's pane is the one on screen (#737): every mounted pane keeps its bar (#472). */
   readonly shown: boolean
 }
 
 /**
  * What the bar says to a listener (#737, core's `EnsoThreadStatusKind`), from what it shows: the
- * follow ended or the page fell behind (#919: a listener must not wait on a page that is not
- * applying the thread), else a question waiting, else at rest or not. The bar's finer activity words
- * (working, thinking, running a tool, responding) are all `running` to something that waits on it.
+ * live view lost or the page fallen behind (#919: a listener must not wait on a page that is not
+ * applying the thread), else a question waiting, else pi working (possibly stuck included) or not —
+ * a stopped run, however it ended, is at rest to something that waits on it.
  */
-function threadStatusKind(activity: Activity, questionWaiting: boolean): EnsoThreadStatusKind {
-  if (activity.kind === 'disconnected' || activity.kind === 'behind') return 'disconnected'
-  if (questionWaiting) return 'question'
-  return activity.kind === 'idle' ? 'idle' : 'running'
+function threadStatusKind(status: RunStatus): EnsoThreadStatusKind {
+  if (status.kind === 'lost' || status.kind === 'behind') return 'disconnected'
+  if (status.kind === 'waiting') return 'question'
+  return status.kind === 'working' || status.kind === 'stuck' ? 'running' : 'idle'
 }
 
 /**
@@ -587,10 +627,92 @@ function useThreadStatusAnnouncement(
 }
 
 /**
+ * The page's clock while a run is in flight (#914), every `tickMs`: the elapsed times and "possibly
+ * stuck" move with it, not with events — the moment nothing arrives is the moment that matters. No
+ * timer at rest.
+ */
+function useRunClock(running: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!running) return undefined
+    const tick = (): void => setNow(Date.now())
+    tick()
+    const timer = setInterval(tick, RUN_STATUS_TIMING.tickMs)
+    return () => clearInterval(timer)
+  }, [running])
+  return now
+}
+
+/**
+ * When this page first saw the step in progress (#914): kept per step, so a delta into the same
+ * thinking keeps its clock and a new step starts one. The moment is read in a layout effect, before
+ * the new step is painted; the render that first meets it reads `now` in its place.
+ */
+function useStepSince(key: string, now: number): number {
+  const [step, setStep] = useState(() => ({ key, since: now }))
+  useLayoutEffect(() => {
+    setStep((seen) => (seen.key === key ? seen : { key, since: Date.now() }))
+  }, [key])
+  return step.key === key ? step.since : now
+}
+
+/**
+ * Publish the headline (#914) for the rail's row and the header — `updateThreadHeadline` drops one
+ * that says nothing new, so a tick that moves nothing they show re-renders neither.
+ */
+function usePublishedHeadline(threadId: string, status: RunStatus): void {
+  const { state, word, detail } = headlineOf(status)
+  useEffect(() => updateThreadHeadline(threadId, { state, word, detail }), [threadId, state, word, detail])
+}
+
+/**
+ * The thread's run status as of now (#914), from its stores, its follow and the transcript —
+ * announced to listeners (#737) and published for the rail and the header. `now` is the clock the
+ * bar's elapsed times are read at.
+ */
+function useRunStatus(
+  stores: ThreadStores,
+  messages: ReadonlyArray<UIMessage>,
+  generating: boolean,
+  shown: boolean,
+): { readonly status: RunStatus; readonly now: number } {
+  const { connection } = stores
+  const disconnected = useStore(stores.disconnected)
+  const liveView = useStore(connection.liveView)
+  const dialog = useStore(stores.dialog)
+  const refusal = useStore(stores.refusal)
+  const incidents = useStore(stores.incidents)
+  // While the page says it may be out of date (#919), the bar claims nothing is working.
+  const fault = useStore(pageFault)
+  const pulse = connection.pulse()
+  const step = describeStep(messages, pulse.composing)
+  const clock = useRunClock(generating)
+  const stepSince = useStepSince(step.key, clock)
+  const now = Math.max(clock, stepSince)
+  const status = describeRunStatus({
+    generating,
+    step,
+    stepSince,
+    liveView,
+    disconnected,
+    fault,
+    dialog,
+    pulse,
+    outputAt: connection.outputAt(),
+    refusal,
+    incidents,
+    now,
+  })
+  useThreadStatusAnnouncement(stores.threadId, shown, threadStatusKind(status), dialog)
+  usePublishedHeadline(stores.threadId, status)
+  return { status, now }
+}
+
+/**
  * The bar wired to its thread: the chat's messages and in-flight flag come in as props
  * (the chat hook is bound inside thread-pane.tsx, and this module stays free of it), the
- * thread's usage store and its disconnected flag (#119) are read from context. It announces
- * what it shows (`useThreadStatusAnnouncement`, #737).
+ * thread's stores and its follow's word on itself and the run (#914) are read from context. It
+ * announces what it shows (`useThreadStatusAnnouncement`, #737) and publishes its headline.
  */
 export function ThreadStatusBar({
   messages,
@@ -601,11 +723,8 @@ export function ThreadStatusBar({
 }: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
   const usage = useStore(stores.usage)
-  const disconnected = useStore(stores.disconnected)
   const cwd = useStore(stores.cwd)
   const onTree = useStore(stores.tree)
-  const dialog = useStore(stores.dialog)
-  const questionWaiting = dialog !== undefined
   const refusal = useStore(stores.refusal)
   const refusals = useStore(stores.refusals)
   const risk = useStore(stores.sessionRisk)
@@ -617,20 +736,22 @@ export function ThreadStatusBar({
   // When the tree may have moved: a settled tool result, the run starting or ending.
   const moment = `${settledToolResults(messages)}:${generating}`
   const git = useThreadGit(moment, readable)
-  // While the page says it may be out of date (#919), the bar claims nothing is working.
-  const behind = useStore(pageFault) !== undefined
-  const activity = describeActivity(messages, generating, disconnected, behind)
-  useThreadStatusAnnouncement(stores.threadId, shown, threadStatusKind(activity, questionWaiting), dialog)
+  const { status, now } = useRunStatus(stores, messages, generating, shown)
   return (
     <ThreadStatusView
-      activity={activity}
+      status={status}
+      now={now}
+      onRevealQuestion={(dialogId): void => {
+        openView('chat')
+        requestAnimationFrame(() => revealQuestion(dialogId))
+      }}
+      onStop={(): void => paneStopOf(stores)?.()}
       counts={countThread(messages, refusals)}
       usage={usage}
       cwd={cwd}
       projectTitle={projectTitle}
       onTree={onTree}
       treeControl={<ThreadTreeButton moment={moment} readable={readable} />}
-      questionWaiting={questionWaiting}
       refusal={refusal?.refusalClass}
       refusalSource={refusal?.provider}
       git={git}

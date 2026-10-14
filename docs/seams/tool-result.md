@@ -240,7 +240,7 @@ textual fallback, and a `kind` with no renderer is the textual fallback WITH the
 it, because the truncation is data, not the renderer's. *The fallback
 is the point, not a courtesy* (the header of `EnsoToolResult.tsx`): a type-tag design's characteristic failure is an unrenderable
 payload showing as nothing, indistinguishable from a successful empty result. `toolResultState` is also
-what the status bar's `running <tool>` reads (`thread-status.tsx#describeActivity`).
+what the status bar's `running <tool>` reads (`run-status.ts#describeStep`).
 
 **The renderer map is empty** (`message-row.tsx#descriptorRenderers`): every result falls through to the text form,
 which is exactly what the contract promises for an unknown kind, so empty is the honest default. A

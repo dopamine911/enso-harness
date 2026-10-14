@@ -27,7 +27,7 @@ export function PageFaultBanner(): React.ReactNode {
       className="flex shrink-0 items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
     >
       <TriangleAlertIcon aria-hidden="true" className="size-4 shrink-0" />
-      <p className="min-w-0 flex-1">{PAGE_FAULT_WORDS.banner}</p>
+      <p className="min-w-0 flex-1">{fault.trigger === 'lost' ? PAGE_FAULT_WORDS.lost : PAGE_FAULT_WORDS.banner}</p>
       <Button
         size="sm"
         variant="destructive"

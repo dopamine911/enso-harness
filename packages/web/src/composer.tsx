@@ -11,7 +11,7 @@ import {
 } from '@enso/core'
 import type { ContentPart } from '@tanstack/ai'
 import { ArrowUpIcon, PaperclipIcon, SquareIcon, TriangleAlertIcon } from 'lucide-react'
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRereadAfterCompaction } from './branch-reread.ts'
 import { type ChoiceHandlers, CommandPalette, runTypedHostCommand, typedCommandName } from './command-palette.tsx'
 import { fetchThreadCommands } from './commands-connection.ts'
@@ -61,6 +61,7 @@ import { useRecentModels } from './page-listings.ts'
 import { useComposerOpening, useDraftKeptForReload } from './page-reload.ts'
 import { useChatContext, PaneViewContext } from './pane-context.ts'
 import { ModeChip, usePermissionMode } from './permission-mode.tsx'
+import { offerPaneStop } from './run-status.ts'
 import { COMPOSER_ICON_BUTTON, LockedChip } from './setting-chip.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { systemPromptName } from './thread-context-analysis.ts'
@@ -815,12 +816,14 @@ export function ChatPromptInput(): React.ReactNode {
     setDraft((current) => joinDrafts(current, ...texts))
   }
   // Stop (#116) hands back what was queued behind the run (#75, clear-and-restore): the
-  // abort receipt's texts become the draft, in order, after anything already typed.
-  const stopRun = (): void => {
+  // abort receipt's texts become the draft, in order, after anything already typed. The same Stop
+  // stands beside "possibly stuck" on the status bar (#914).
+  const stopRun = useCallback((): void => {
     void stores.connection.abort().then(({ restored }) => {
-      if (restored.length > 0) takeBack(restored)
+      if (restored.length > 0) setDraft((current) => joinDrafts(current, ...restored))
     })
-  }
+  }, [stores])
+  useEffect(() => offerPaneStop(stores, stopRun), [stores, stopRun])
   // The `/` palette's two outcomes (#338; the rule is in `command-palette.tsx`'s header).
   // ⚠ NEITHER TOUCHES WHAT THE USER HAS TYPED. An extension command is a prompt like any
   // other — the same `send` the button uses, so it queues through pi mid-run (#75) and is
