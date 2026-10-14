@@ -9,8 +9,8 @@ import {
   ensoLogger,
 } from '@enso/core'
 import type { Static, TSchema } from 'typebox'
+import type { WriteCondition } from '../host/atomic-file.ts'
 import type { ConfigSectionWrite } from '../host/config-file.ts'
-import type { WriteCondition } from '../host/permission-policy-file.ts'
 import { writeDefaultProjectTrust } from '../host/project-trust.ts'
 import { readProjectsSettings, writeProjectsSettings } from '../host/projects-config-file.ts'
 import { readSecuritySettings, writeJudgeKey, writeSecuritySettings } from '../host/security-config-file.ts'

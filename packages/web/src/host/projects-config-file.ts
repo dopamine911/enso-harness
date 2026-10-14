@@ -1,7 +1,7 @@
 import { isAbsolute } from 'node:path'
 import { type EnsoProjectsSettingsRead, type EnsoProjectsSettingsWrite, type EnsoThreadsConfig } from '@enso/core'
+import type { WriteCondition } from './atomic-file.ts'
 import { type ConfigSectionWrite, readConfigFile, writeConfigSections } from './config-file.ts'
-import type { WriteCondition } from './permission-policy-file.ts'
 import { readDefaultProjectTrust } from './project-trust.ts'
 
 /**

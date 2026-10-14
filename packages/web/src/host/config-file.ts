@@ -1,6 +1,6 @@
 import { type EnsoConfig, type EnsoConfigParseResult, parseEnsoConfig } from '@enso/core'
 import { ensoConfigPath } from '@enso/core/paths'
-import { bytesOf, conflictOf, etagOf, type WriteCondition, writeAtomically } from './permission-policy-file.ts'
+import { bytesOf, conflictOf, etagOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
 
 /**
  * The user's `config.json` as Settings' sections read and save it (Security #933, Projects & threads

@@ -318,7 +318,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom
   // shape is the #27/#34 teardown ordering (#82). What is left in the callback is the one check
-  // every request is admitted by, then the two dispatchers and the miss.
+  // every request is admitted by, then one dispatcher per route family, in order, and the miss.
   const server = createServer((request, response) => {
     if (!fromTrustedOrigin(request)) {
       log.warn('request refused: {method} {url} from host {host} origin {origin}', {

@@ -104,6 +104,69 @@ test('a bad value saves nothing and is listed; a loosening is said first; the sa
   await page.unmount()
 })
 
+// #969 review, issue 1: the confirm lists what the draft loosened when Save was pressed; an edit
+// made while it is open must not ride along on "Save anyway" unlisted.
+test('an edit while the loosening confirm is open closes it, and nothing unconfirmed is sent', async () => {
+  const page = await mounted(read({ incidents: { halt: true } }))
+  const { container, sent } = page
+  await flush(() => field(container, 'halt').click())
+  await flush(() => button(container, 'Save').click())
+  expect(container.textContent).toContain('Halting goes off')
+  await flush(() => type(field(container, 'highAtSignals'), '50'))
+  expect(container.textContent).not.toContain('Save anyway')
+  expect(sent.filter((each) => each.method === 'PUT')).toEqual([])
+
+  await flush(() => button(container, 'Save').click())
+  expect(container.textContent).toContain('Signals for high risk: 3 → 50 signals')
+  await flush(() => button(container, 'Save anyway').click())
+  expect(sent.find((each) => each.method === 'PUT')?.body).toEqual({
+    security: { incidents: { halt: false, highAtSignals: 50 } },
+  })
+  await page.unmount()
+})
+
+// #969 review, issue 2: a local judge that is not on this machine is never asked, so the page
+// refuses the address instead of saving a judge that judges nothing.
+test('a local judge address off this machine is a field error, and nothing is saved', async () => {
+  const page = await mounted(read({}))
+  const { container, sent } = page
+  await flush(() => type(container.querySelector('#security-backend') as HTMLSelectElement, 'local'))
+  await flush(() => type(field(container, 'baseUrl'), 'http://10.0.0.2:8080'))
+  await flush(() => type(field(container, 'model'), 'm'))
+  await flush(() => button(container, 'Save').click())
+  expect(container.textContent).toContain('The local judge only talks to this machine')
+  expect(sent.filter((each) => each.method === 'PUT')).toEqual([])
+
+  await flush(() => type(field(container, 'baseUrl'), 'http://[::1]:8080/v1'))
+  await flush(() => button(container, 'Save').click())
+  expect(sent.find((each) => each.method === 'PUT')?.body).toEqual({
+    security: { judge: { backend: 'local', local: { baseUrl: 'http://[::1]:8080/v1', model: 'm' } } },
+  })
+  await page.unmount()
+})
+
+// #969 review, issue 5: a `judge.local` kept while the judge is not local is dropped by the next
+// save, so the unsaved list names it rather than claiming only the edited field changes.
+test('a hidden local judge the next save drops is listed as unsaved', async () => {
+  const page = await mounted(read({ judge: { backend: 'off', local: { baseUrl: 'http://127.0.0.1:1', model: 'm' } } }))
+  const { container } = page
+  expect(container.textContent).not.toContain('Local judge address')
+  await flush(() => type(field(container, 'windowCalls'), '12'))
+  expect(container.textContent).toContain('Calls in the risk window · Local judge address · Local judge model →')
+  await page.unmount()
+})
+
+// #969 review, issue 6: Jev with no key stored judges nothing, so it is said before Save.
+test('choosing Jev with no key stored is said before the save', async () => {
+  const page = await mounted(read({}))
+  const { container, sent } = page
+  await flush(() => type(container.querySelector('#security-backend') as HTMLSelectElement, 'jev'))
+  await flush(() => button(container, 'Save').click())
+  expect(container.textContent).toContain('no TypeSafe key is stored: every command goes unjudged')
+  expect(sent.filter((each) => each.method === 'PUT')).toEqual([])
+  await page.unmount()
+})
+
 test('an unreadable file is said, and no form is offered', async () => {
   const page = await mounted({
     kind: 'unreadable',

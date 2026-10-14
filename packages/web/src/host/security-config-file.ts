@@ -1,8 +1,8 @@
 import { ENSO_JUDGE_KEY_NAME, type EnsoSecurityConfig, type EnsoSecuritySettingsRead } from '@enso/core'
 import { ensoSecretsPath } from '@enso/core/paths'
 import { parseDotenv, readSecret } from '@enso/core/secrets'
+import { bytesOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
 import { type ConfigSectionWrite, readConfigFile, writeConfigSections } from './config-file.ts'
-import { bytesOf, type WriteCondition, writeAtomically } from './permission-policy-file.ts'
 
 /**
  * Settings › Security's files (#933): the `security` section of the user's `config.json`, and the
@@ -30,14 +30,13 @@ export function readSecuritySettings(home: string): EnsoSecuritySettingsRead {
 /** @group Security settings */
 export type SecuritySettingsWrite = ConfigSectionWrite<EnsoSecuritySettingsRead>
 
-/** `security` with its empty objects dropped: a page that clears every field leaves no `{}` behind. */
+/**
+ * `security` with its empty objects dropped: a page that clears every field leaves no `{}` behind.
+ * Every key is kept otherwise, so one added to `EnsoSecurityConfig` is never lost by a save.
+ */
 function pruned(security: EnsoSecurityConfig): EnsoSecurityConfig | undefined {
-  const { incidents, judge } = security
-  const next: EnsoSecurityConfig = {
-    ...(incidents === undefined || Object.keys(incidents).length === 0 ? {} : { incidents }),
-    ...(judge === undefined || Object.keys(judge).length === 0 ? {} : { judge }),
-  }
-  return Object.keys(next).length === 0 ? undefined : next
+  const kept = Object.entries(security).filter(([, value]) => value !== undefined && Object.keys(value).length > 0)
+  return kept.length === 0 ? undefined : Object.fromEntries(kept)
 }
 
 /**
@@ -63,6 +62,9 @@ export function writeSecuritySettings(
 /** A value `parseDotenv` reads back exactly, unquoted: no whitespace, quote or `#`. */
 const PLAIN_SECRET = /^[^\s'"#]+$/
 
+/** `secrets.env`'s permission bits: read and written by its owner only. */
+const OWNER_ONLY_FILE_MODE = 0o600
+
 /** @group Security settings */
 export type JudgeKeyWrite =
   | { readonly kind: 'written'; readonly judgeKeySet: boolean }
@@ -81,6 +83,6 @@ export function writeJudgeKey(home: string, value: string | null): JudgeKeyWrite
   const lines = text.split(/\r?\n/).filter((line) => !parseDotenv(line).has(ENSO_JUDGE_KEY_NAME))
   while (lines.length > 0 && lines.at(-1) === '') lines.pop()
   if (value !== null) lines.push(`${ENSO_JUDGE_KEY_NAME}=${value}`)
-  writeAtomically(secretsPath, lines.length === 0 ? '' : `${lines.join('\n')}\n`, 0o600)
+  writeAtomically(secretsPath, lines.length === 0 ? '' : `${lines.join('\n')}\n`, OWNER_ONLY_FILE_MODE)
   return { kind: 'written', judgeKeySet: (readSecret(home, ENSO_JUDGE_KEY_NAME) ?? '').length > 0 }
 }

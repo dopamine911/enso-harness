@@ -332,7 +332,9 @@ function SectionBody({
 
 /**
  * Where a section is kept, beside its title (the prototype's pill): this browser for Appearance, the
- * server's file for Permissions — its real path once read — and Storage measured on the server.
+ * server's file for Permissions — its real path once read — and for Security (`config.json`, by name:
+ * the section reads its file itself, so its real path is beside each field), and Storage measured on
+ * the server.
  */
 function savedWhere(section: SettingsSection, permissions: PolicyEditor): string {
   if (section === 'appearance') return 'Saved in this browser'

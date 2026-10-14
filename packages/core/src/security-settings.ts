@@ -70,5 +70,10 @@ export const EnsoJudgeKeyWrite = Type.Object(
 /** @group Security settings */
 export type EnsoJudgeKeyWrite = Static<typeof EnsoJudgeKeyWrite>
 
-/** @group Security settings */
+/**
+ * `PUT /api/settings/security/judge-key`'s answer: whether `secrets.env` now holds the judge's key,
+ * never the key itself.
+ *
+ * @group Security settings
+ */
 export const EnsoJudgeKeyState = Type.Object({ judgeKeySet: Type.Boolean() }, { additionalProperties: false })
