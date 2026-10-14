@@ -45,7 +45,10 @@
     "@earendil-works/pi-classifier": "npm:@earendil-works/pi-ai@1.1.0",
     "@enso/core": "*",
     "@gotgenes/pi-permission-system": "40.0.2",
+    "@logtape/file": "2.3.7",
     "@logtape/logtape": "2.3.7",
+    "@logtape/pretty": "2.3.7",
+    "@logtape/redaction": "2.3.7",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
     "cc-safety-net": "2.4.6",
     "pi-multi-account": "1.24.0"
@@ -57,8 +60,8 @@
     "pi-multi-account"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-ai": "~1.1.0",
-    "@earendil-works/pi-coding-agent": "~1.1.0"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "~1.1.0",

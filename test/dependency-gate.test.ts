@@ -354,7 +354,7 @@ test('⚠ the harness bundles exactly the packages pi reads by path and the work
 })
 
 /**
- * ⚠ EVERY PACKAGE THE HARNESS'S RUNTIME IMPORTS IS DECLARED, AND EVERY PEER STATES ONE RANGE (#952).
+ * ⚠ EVERY PACKAGE THE HARNESS'S RUNTIME IMPORTS IS DECLARED, AND EVERY PEER IS pi's `"*"` (#952).
  *
  * pi supplies its own packages to an extension and maps their imports onto itself; a physical copy
  * "can bypass Pi's extension module mapping … and create duplicate classes" (`docs/packages.md`,
@@ -362,15 +362,14 @@ test('⚠ the harness bundles exactly the packages pi reads by path and the work
  * fetches or a `peerDependency` the host provides. An import declared nowhere worked only because the
  * workspace hoisted a copy beside it: before #952 one of pi's own libraries was imported that way.
  *
- * ⚠ THE RANGE IS THE TESTED ONE, NOT pi's `"*"`. pi's guide asks for `"*"`, but its installer never
- * reads a peer range (`--legacy-peer-deps` under npm, `--omit=peer` under bun, measured in pi 1.1.0's
- * `package-manager.js`), and pi warns only about host packages in `dependencies`. So the range
- * changes nothing at install, and it keeps the job #217 gave it: stating the bound the guard's corpus
- * was run against (`scripts/__tests__/pi-version-parity.test.ts` pins one peer to the launcher's
- * range; this pins the rest to that one). The bound is enforced at load by #953, not here.
+ * ⚠ THE PEERS ARE `"*"`, AS pi's GUIDE ASKS. pi's installer never reads a peer range
+ * (`--legacy-peer-deps` under npm, `--omit=peer` under bun, measured in pi 1.1.0's
+ * `package-manager.js`), so a tested bound there was a contract nothing enforced. The bound is the
+ * guard's, at load (#953); the manifest states it on the workspace devDependency
+ * (`scripts/__tests__/pi-version-parity.test.ts`).
  * Tests are not the runtime and are not read.
  */
-test('⚠ every package the harness runtime imports is a dependency or a peer, and the peers share one range (#952)', () => {
+test('⚠ every package the harness runtime imports is a dependency or a peer, and every peer is "*" (#952)', () => {
   const declared = new Set([...Object.keys(harness.dependencies ?? {}), ...Object.keys(harness.peerDependencies ?? {})])
   const runtimeImports = new Set<string>()
   for (const line of codeLinesUnder(['packages/harness'])) {
@@ -380,9 +379,26 @@ test('⚠ every package the harness runtime imports is a dependency or a peer, a
     }
   }
   expect([...runtimeImports].filter((name) => !declared.has(name)).toSorted()).toEqual([])
-  expect(new Set(Object.values(harness.peerDependencies ?? {})).size).toBe(1)
+  expect(Object.values(harness.peerDependencies ?? {}).filter((range) => range !== '*')).toEqual([])
   // A walk that found no import would pass both.
   expect(runtimeImports.size).toBeGreaterThan(3)
+})
+
+/**
+ * ⚠ EVERY RUNTIME DEPENDENCY OF @ENSO/CORE IS ONE THE HARNESS DECLARES (#949, #952).
+ *
+ * `@enso/core` ships inside the harness as a bundled dependency, and an installer does not install
+ * a bundled package's own `dependencies`: it installs the harness's. Measured by the #949 spike: the
+ * logging extension failed to load on `@logtape/file`, one of core's, which the harness did not
+ * declare. So each of core's runtime dependencies is the harness's too, at core's own range, so that
+ * the copy installed beside the bundle is the one core was tested against.
+ */
+test('⚠ every runtime dependency of @enso/core is one the harness declares, at the same range (#949, #952)', () => {
+  const core = manifest('packages/core/package.json')
+  const coreDependencies = Object.entries(core.dependencies ?? {})
+  expect(coreDependencies.filter(([name, range]) => harness.dependencies?.[name] !== range)).toEqual([])
+  // A core with no dependencies would pass the rule with nothing checked: core has four today.
+  expect(coreDependencies.length).toBeGreaterThan(0)
 })
 
 /** The `files` entry that keeps every test directory out of the tarball, at any depth. */

@@ -174,15 +174,21 @@ written anticipating a tarball built from `bundledDependencies`. Missing today: 
 
 **Done in #952.** `bundledDependencies` lists the three vendored pi packages and `@enso/core`.
 `pi-ai` is now a peer too: the harness imports it at runtime but declared it nowhere, so it resolved
-only because the workspace hoisted a copy. The peers keep the tested range `~1.1.0`, not pi's `"*"`.
-pi's installer never reads a peer range (`--legacy-peer-deps` under npm, `--omit=peer` under bun,
-measured in pi 1.1.0's `package-manager.js`), so the choice changes nothing at install. The range
-keeps the job #217 gave it: stating the bound the guard's corpus was run against. #953 enforces that
-bound when the harness loads.
+only because the workspace hoisted a copy. The peers are pi's `"*"`. pi's installer never reads a
+peer range (`--legacy-peer-deps` under npm, `--omit=peer` under bun, measured in pi 1.1.0's
+`package-manager.js`), so a tested bound there was a contract nothing enforced. The bound a
+`pi install` user gets is the guard's, at load (#953). The manifest states it on the workspace
+devDependency on pi, the copy the guard's corpus is run against.
+
+The harness also declares `@enso/core`'s runtime dependencies (`@logtape/file`, `@logtape/pretty`,
+`@logtape/redaction`, beside `@logtape/logtape`), at core's own ranges. An installer does not install
+a bundled package's own `dependencies`, and #949 measured the logging extension failing on
+`@logtape/file` for that reason.
 
 Tests in `test/dependency-gate.test.ts` hold these rules:
 - the harness bundles exactly the packages pi reads by path, plus the workspace packages it depends on;
-- every package its runtime imports is a dependency or a peer;
+- every package its runtime imports is a dependency or a peer, and every peer is `"*"`;
+- every runtime dependency of `@enso/core` is one the harness declares, at the same range;
 - a `files` allowlist covers every top-level directory and keeps the harness's own tests out of the
   tarball.
 
@@ -190,7 +196,8 @@ Tests in `test/dependency-gate.test.ts` hold these rules:
 - `bun pm pack` bundles the wrong package;
 - `npm pack` writes the bundled packages' own dependencies as `../` entries, which npm refuses on
   install;
-- so `zod`, `@logtape/file` and others never arrive, and 3 of the 11 extensions fail to load.
+- so `zod` and others never arrive, and 3 of the 11 extensions fail to load. (`@logtape/file`, core's,
+  is now declared by the harness itself, above.)
 
 Producing a working tarball needs a packing step of its own, filed separately.
 
