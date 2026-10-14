@@ -197,9 +197,16 @@ test('⚠ a symlink inside the worktree that points out of it is judged where it
   )
 })
 
+/**
+ * Under a broader entry listed first (`Bash(gh pr:*)`), a post must still have the post's shape. The
+ * first assertion is the one that pins the fix: `--body hello` passes the character allowlist, and
+ * before the fix it matched `gh pr` and skipped the post checks. A doubled space must not undo it.
+ */
 test('a broader granted prefix listed first does not skip the post checks', () => {
   const broad: ToolGrant = { allowedTools: ['Bash(gh pr:*)', 'Bash(gh pr comment:*)'] }
   const decide = (command: string): string => decideToolCall(broad, { tool_name: 'Bash', tool_input: { command } }).kind
-  expect(decide('gh pr comment 1 --body-file /etc/passwd')).toBe('block')
-  expect(decide(`gh pr comment 1 --body-file - <<'EOF'\nbody\nEOF`)).toBe('allow')
+  expect(decide('gh pr comment 1 --body hello')).toBe('block')
+  expect(decide('gh pr  comment 1 --body hello')).toBe('block')
+  expect(decide(`gh pr  comment  1 --body-file - <<'EOF'\nbody\nEOF`)).toBe('allow')
+  expect(decide('gh pr view 1')).toBe('allow')
 })

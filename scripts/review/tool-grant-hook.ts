@@ -145,6 +145,15 @@ function startsWithCommand(command: string, prefix: string): boolean {
   return command === prefix || command.startsWith(`${prefix} `)
 }
 
+/**
+ * A first line with each run of spaces as one space, so `gh pr  comment` is judged as the
+ * `gh pr comment` the shell runs: a prefix compare on the raw text read it as not the post, and
+ * under a broader entry (`Bash(gh pr:*)`) skipped the post checks (#989's fourth review).
+ */
+function singleSpaced(line: string): string {
+  return line.trim().replace(/ {2,}/g, ' ')
+}
+
 /** A command split into its first line and, for a heredoc, the body between the operator and the delimiter. */
 interface ShellCommandParts {
   readonly firstLine: string
@@ -159,12 +168,12 @@ interface ShellCommandParts {
 function shellCommandParts(command: string): ShellCommandParts | undefined {
   const lines = command.split('\n')
   const heredoc = HEREDOC_FIRST_LINE.exec(lines[0] ?? '')
-  if (heredoc === null) return { firstLine: command }
+  if (heredoc === null) return { firstLine: singleSpaced(command) }
   const delimiter = heredoc[3]
   const closing = lines.findIndex((line, index) => index > 0 && line.trim() === delimiter)
   if (closing === -1) return undefined
   if (lines.slice(closing + 1).some((line) => line.trim().length > 0)) return undefined
-  return { firstLine: heredoc[1] ?? '', heredocBody: lines.slice(1, closing).join('\n') }
+  return { firstLine: singleSpaced(heredoc[1] ?? ''), heredocBody: lines.slice(1, closing).join('\n') }
 }
 
 function decideBash(grant: ToolGrant, command: string): ToolDecision {
