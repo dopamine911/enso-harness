@@ -216,6 +216,21 @@ test('⚠ replaceLink: a link at the path is replaced by the file, the file it n
   expect(readFileSync(elsewhere, 'utf8')).toBe('{"mine":true}\n')
 })
 
+test('⚠ replaceLink: a link at the file is refused at the read, so the text it names is never copied (#984 review)', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-replace-'))
+  const elsewhere = join(directory, 'user.json')
+  const userText = '{"webFetch":{"allowedHosts":["docs.user.example"]}}\n'
+  writeFileSync(elsewhere, userText)
+  const path = join(directory, 'config.json')
+  symlinkSync(elsewhere, path)
+  expect(changeUserAllowedHosts(path, { add: 'docs.project.example' }, { replaceLink: true })).toEqual({
+    kind: 'refused',
+    reason: `${path} is reached through a link, so it is not written here; edit it by hand`,
+  })
+  expect(lstatSync(path).isSymbolicLink()).toBe(true)
+  expect(readFileSync(elsewhere, 'utf8')).toBe(userText)
+})
+
 test('a chain of two links, the last dangling, makes the file at its end (#978 review)', () => {
   const directory = mkdtempSync(join(tmpdir(), 'enso-replace-'))
   symlinkSync('real.json', join(directory, 'middle.json'))

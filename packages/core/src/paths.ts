@@ -912,13 +912,19 @@ export function projectPromptsDir(projectDirectory: string): string {
 /**
  * A file's text, or `undefined` when there is no file — for a file whose absence means its
  * defaults (the config). Any other failure to read it throws: a file that is there and unreadable
- * is not a missing one.
+ * is not a missing one. `noFollow`: a link at the path is not followed — the open throws ELOOP.
  *
  * @group Workspace paths
  */
-export function readTextIfPresent(path: string): string | undefined {
+export function readTextIfPresent(path: string, options: { readonly noFollow?: boolean } = {}): string | undefined {
   try {
-    return readFileSync(path, 'utf8')
+    if (options.noFollow !== true) return readFileSync(path, 'utf8')
+    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      return readFileSync(descriptor, 'utf8')
+    } finally {
+      closeSync(descriptor)
+    }
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error

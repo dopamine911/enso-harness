@@ -90,8 +90,15 @@ export function editUserConfig(
 ): UserConfigWrite {
   let text: string | undefined
   try {
-    text = readTextIfPresent(path)
+    // `replaceLink` reads without following too: a link swapped in at the file would otherwise copy
+    // the text it names (the user's own config) into the file written here.
+    text = readTextIfPresent(path, { noFollow: write.replaceLink === true })
   } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP' && write.replaceLink === true)
+      return {
+        kind: 'refused',
+        reason: `${path} is reached through a link, so it is not written here; edit it by hand`,
+      }
     return { kind: 'refused', reason: `${path} could not be read (${String(error)}); nothing was changed` }
   }
   const read = parseEnsoConfig(text)
