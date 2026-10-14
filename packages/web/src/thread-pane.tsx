@@ -151,9 +151,11 @@ const followLog = ensoLogger('browser', 'follow')
  *
  * TanStack catches a throw from handling a chunk — its stream processor, a callback of ours, a React
  * update — ends the subscription, says `connectionStatus: 'error'` and keeps the exception as `error`.
- * Caught there, it reaches no page-level error handler, so nothing else would ever log it. The follow
- * adapter has already told the page that updates stopped, and on which chunk
- * (`follow-connection.ts#consumerStopped`); the run alert shows the exception's message.
+ * Caught there, a chunk handler's throw reaches no page-level error handler, so nothing else would
+ * ever log it; the follow adapter has already told the page that updates stopped, and on which chunk
+ * (`follow-connection.ts#consumerStopped`), and the run alert shows the exception's message.
+ * Any other subscription error is recorded here too — a follow that never opened, already logged
+ * by the adapter as "the follow could not be opened" — so that one has two lines.
  */
 function useSubscriptionFailureRecord(
   threadId: string,
