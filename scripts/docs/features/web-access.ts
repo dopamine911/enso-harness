@@ -40,7 +40,7 @@ export const WEB_ACCESS: FeatureSpec = {
   shows: [
     'pi reaches the web through two tools Enso adds, and through nothing else:',
     [
-      `- \`${WEB_FETCH_TOOL_NAME}\` fetches one URL and returns the page as text. It fetches only hosts you have allowed.`,
+      `- \`${WEB_FETCH_TOOL_NAME}\` fetches one URL and returns the page as text. An HTML page comes back as the text a reader sees: headings, paragraphs, lists, links, code and tables, without its scripts, styles, navigation or hidden parts. It fetches only hosts you have allowed.`,
       "- `web_search` searches the web. It uses the current model's own search when the model has one, and can fall back to Tavily.",
     ].join('\n'),
     `\`curl\`, \`wget\` and other network clients in the shell are refused by a guard, and the refusal tells pi to use \`${WEB_FETCH_TOOL_NAME}\` instead.`,
@@ -86,6 +86,7 @@ export const WEB_ACCESS: FeatureSpec = {
     `In the thread above, pi first tried \`curl https://bun.sh/blog\` and the \`network-egress\` guard refused it. pi then used \`${WEB_FETCH_TOOL_NAME}\`, which fetched nothing either, because the allowlist is empty. That is the default, not a mistake: until you add a host, nothing is fetchable. pi's answer passes the fix on to you (\`${answerFix()}\`) instead of trying another way round.`,
     `Note the difference in the chat. The \`curl\` refusal is a guard receipt. The \`${WEB_FETCH_TOOL_NAME}\` refusal is an ordinary result with a check mark: the tool worked, and its answer is "not fetched".`,
     'A host that is not on the list gets its own answer, naming the hosts that are. Matching is exact: allowing `example.com` does not allow `docs.example.com`.',
+    `When \`${WEB_FETCH_TOOL_NAME}\` fetches an HTML page, the first line of the result says so and how much of the page was text, for example \`text/html → text (8.7% of 46,534 chars)\`. Other types, such as plain text, markdown and JSON, come back exactly as the server sent them. A share near zero means the page did not extract well, for example one that builds its content with JavaScript.`,
     'For `web_search`, the first line of every result names the backend that answered and, when it fell back to Tavily, why. When a model answers without searching and Tavily is not set up, the result says `no web search was performed`.',
   ],
   limits: [
@@ -93,6 +94,7 @@ export const WEB_ACCESS: FeatureSpec = {
     `It fetches text only, at most ${WEB_FETCH_MAX_RESPONSE_BYTES / 1024} KB, within ${WEB_FETCH_TIMEOUT_MS / 1000} seconds, over ${PROTOCOL_WORDS}, and never a URL with a password in it.`,
     "pi cannot widen its own allowlist. Writes into `ENSO_HOME` and into a project's `.enso/` are refused by the guards, shell redirects included.",
     "A page's text is marked as untrusted before pi reads it. That is a warning to the model, not a filter: a fetched page can still try to give pi instructions.",
+    "Text a page hides is left out: comments, templates, and elements hidden by an attribute or an inline style. Text hidden by the page's stylesheet is not recognised as hidden, and comes through.",
     'The check that a host resolves to a public address is advisory. It is not a network boundary.',
   ],
   see: [

@@ -13,9 +13,20 @@
  * ⚠ READ-ONLY, AND NOTHING THE REPOSITORY CONFIGURES RUNS. Every command here only reads. The
  * agent works in the same tree and may be running git itself, so no query takes an optional lock
  * (`GIT_OPTIONAL_LOCKS=0` — `status` would otherwise refresh the index under `index.lock`). A
- * repository's own config can name programs git runs on a read: `core.fsmonitor` runs on every
- * `status`, and the agent can write `.git/config`. So `core.fsmonitor` is forced off on the
- * command line, the pager is `cat` and no prompt waits on a terminal.
+ * repository's own config can name programs git runs on a read, and the agent can write
+ * `.git/config`: `core.fsmonitor` runs on every `status`, and a clean or process filter runs on
+ * every worktree file an attribute maps to it, whenever `status` or `diff` hashes that file (#901).
+ * So `core.fsmonitor` is forced off on the command line, every filter driver the config defines is
+ * emptied (`filterDriverOverrides`), the pager is `cat` and no prompt waits on a terminal.
+ *
+ * ⚠ THE COST OF EMPTIED FILTERS: a filtered file is read as its worktree bytes, not as the filter
+ * would store it. A Git LFS file is listed as changed and diffs as its content against its
+ * committed pointer, and a file an `ident`-like or formatting filter rewrites shows the rewrite as
+ * a change. Every other
+ * attribute still applies (`eol`/`text`, `-diff`/`binary`, `diff=<driver>` hunk headers) — the
+ * reason this does not read attributes from an empty tree (`--attr-source`), which also leaves
+ * `.git/info/attributes` in force. ⚠ One window stays open: a driver the agent defines between the
+ * config read and the command it guards is not emptied for that one command.
  *
  * ⚠ BOUNDED. Each query is killed after {@link GIT_TIMEOUT_MS}; a killed or unstartable git is a
  * code of -1, which a reader turns into `unavailable`, never a hang.
@@ -101,7 +112,8 @@ const GIT_READ_ONLY_VARIABLES = { GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: 
 
 /**
  * Config forced on the command line, whatever the repository or the user sets. No program the
- * repository names runs on a read (`core.fsmonitor`), and a diff reads the way its reader parses
+ * repository names runs on a read (`core.fsmonitor` here; filter drivers, whose names the
+ * repository chooses, by {@link filterDriverOverrides}), and a diff reads the way its reader parses
  * it: a blank context line keeps its leading space (`diff.suppressBlankEmpty`), and a submodule is
  * one `diff --git` part like any other file (`diff.submodule`).
  */
@@ -183,7 +195,7 @@ export interface GitPlace {
  *
  * @group Git
  */
-export function runGitIn(
+export async function runGitIn(
   environment: NodeJS.ProcessEnv,
   args: readonly string[],
   cwd: string,
@@ -194,12 +206,49 @@ export function runGitIn(
       ? {}
       : { GIT_DIR: place.gitDirectory, GIT_WORK_TREE: place.workTree, GIT_INDEX_FILE: place.index }
   const env = { ...withoutGitLocalVariables(environment), ...located, ...GIT_READ_ONLY_VARIABLES }
-  return execGit([...GIT_READ_ONLY_CONFIG, ...args], {
-    cwd,
-    env,
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: GIT_MAX_OUTPUT_BYTES,
-  }).result
+  const bounds = { cwd, env, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_MAX_OUTPUT_BYTES }
+  const drivers = await execGit([...GIT_READ_ONLY_CONFIG, ...FILTER_DRIVER_KEYS], bounds).result
+  // 1 is "no key matched": no driver to empty. Anything else that is not an answer fails the read
+  // closed, rather than running the command with a driver left live.
+  if (drivers.code !== 0 && drivers.code !== 1) return drivers
+  const overrides = filterDriverOverrides(drivers.code === 0 ? drivers.stdout : '')
+  return execGit([...GIT_READ_ONLY_CONFIG, ...args], { ...bounds, env: { ...env, ...overrides } }).result
+}
+
+/**
+ * The query naming every filter key the config defines, NUL-separated. A config read runs no
+ * program; `--includes` is git's default outside `--file`, so included files count too.
+ */
+const FILTER_DRIVER_KEYS = ['config', '--null', '--name-only', '--get-regexp', '^filter\\.']
+
+/**
+ * Every filter driver named in `keys` (`filter.<driver>.<key>`, NUL-separated: the output of
+ * {@link FILTER_DRIVER_KEYS}), emptied: no `clean`, `smudge` or `process` program, and not
+ * `required`, so a file its attribute maps to is read as its worktree bytes (#901). ⚠ Passed as
+ * `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>`, not `-c`: a driver name may hold
+ * `=`, which `-c name=value` would split at. An inherited `GIT_CONFIG_COUNT` is already dropped
+ * ({@link withoutGitLocalVariables}).
+ */
+function filterDriverOverrides(keys: string): Record<string, string> {
+  const drivers = new Set<string>()
+  for (const key of keys.split('\0')) {
+    const last = key.lastIndexOf('.')
+    // `filter.<key>` with no driver between is no driver; git ignores it.
+    if (last > 'filter.'.length) drivers.add(key.slice('filter.'.length, last))
+  }
+  const settings: Array<readonly [string, string]> = []
+  for (const driver of drivers) {
+    for (const program of ['clean', 'smudge', 'process']) settings.push([`filter.${driver}.${program}`, ''])
+    settings.push([`filter.${driver}.required`, 'false'])
+  }
+  const overrides: Record<string, string> = {}
+  if (settings.length === 0) return overrides
+  overrides.GIT_CONFIG_COUNT = String(settings.length)
+  for (const [settingIndex, [configKey, configValue]] of settings.entries()) {
+    overrides[`GIT_CONFIG_KEY_${settingIndex}`] = configKey
+    overrides[`GIT_CONFIG_VALUE_${settingIndex}`] = configValue
+  }
+  return overrides
 }
 
 /**

@@ -16,7 +16,7 @@ import {
 
 // ⚠ The BOUNDARIES, which are the whole content of the predicate: the minimum is supported and
 // the patch below it is not; the excluded version is refused and the patch below it is not.
-// These four also pin the `~1.1.0` semantics the harness manifest's peer range states.
+// These four also pin the `~1.1.0` semantics the harness manifest's pi devDependency states.
 // @pins boot-and-launchers/pi-version-gate
 test('the tested pi range includes its minimum and excludes the version it stops below', () => {
   expect(piVersionSupported(piVersionText(SUPPORTED_PI_VERSIONS.minimum))).toBe(true)
