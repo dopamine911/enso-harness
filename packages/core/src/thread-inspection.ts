@@ -549,8 +549,10 @@ export const EnsoThreadHistory = Type.Object(
     /**
      * Present only for a thread never started (#479): live on this server with no message and no
      * session file — built by a control route, or by a Start refused at a later step, and never
-     * prompted. A page opens it on the launch panel, as it opens a thread it mints. A fork is written
-     * by its route before any prompt, so it is never one.
+     * prompted — or not built at all, but named for a project by a page's request (#897); its
+     * `projectId` is then that project's, registered still or not. A page opens it on the launch
+     * panel, as it opens a thread it mints. A fork is written by its route before any prompt, so it
+     * is never one.
      */
     draft: Type.Optional(Type.Literal(true)),
   },
