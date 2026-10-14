@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -1479,6 +1480,37 @@ test('⚠ a project’s .enso/config.json linked to another config is never writ
   ])
   expect(readFileSync(elsewhere, 'utf8')).toBe(elsewhereText)
   expect(lstatSync(sharedPath).isSymbolicLink()).toBe(true)
+})
+
+test('a refused or unchanged change to a project with no .enso/ leaves none behind (#984 review)', async () => {
+  const { url, project, projectId } = await projectToolsServer({ trusted: true })
+  expect((await postProjectTools(url, projectId, { add: 'https://docs.project.example/' })).status).toBe(422)
+  await projectToolsOf(await postProjectTools(url, projectId, { remove: 'docs.project.example' }))
+  expect(existsSync(join(project, '.enso'))).toBe(false)
+})
+
+test('⚠ a project’s .enso/ linked to another directory is never written through (#984 review)', async () => {
+  const { url, project, projectId } = await projectToolsServer({ trusted: true })
+  const elsewhere = mkdtempSync(join(tmpdir(), 'enso-tools-elsewhere-'))
+  const elsewhereText = '{"webFetch":{"allowedHosts":["docs.user.example"]}}'
+  writeFileSync(join(elsewhere, 'config.json'), elsewhereText)
+  symlinkSync(elsewhere, join(project, '.enso'))
+  const refused = await postProjectTools(url, projectId, { add: 'docs.project.example' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('is reached through a link')
+  expect(readFileSync(join(elsewhere, 'config.json'), 'utf8')).toBe(elsewhereText)
+})
+
+test('a trusted project whose folder is gone shows nothing editable, and a change is refused (#984 review)', async () => {
+  const { url, project, projectId } = await projectToolsServer({ trusted: true })
+  rmSync(project, { recursive: true })
+  const read = await projectToolsOf(await fetch(`${url}/api/projects/${projectId}/web-tools`))
+  expect(read).toMatchObject({ trusted: true, yours: { hosts: ['docs.user.example'] } })
+  expect(read.own).toBeUndefined()
+  const refused = await postProjectTools(url, projectId, { add: 'docs.project.example' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('gone')
+  expect(existsSync(project)).toBe(false)
 })
 
 test('⚠ an untrusted project’s .enso/config.json is never read nor written: the tab is read only (#937)', async () => {

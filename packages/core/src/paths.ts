@@ -117,10 +117,15 @@ function fileBehindLinks(path: string): string {
  * keeps its own mode, or takes `mode` whatever it was before (`secrets.env` is owner-only, #932).
  * Nothing staged is left behind when the write or the rename throws: the error is rethrown.
  *
+ * `replaceLink`: a link at `path` itself is replaced by the file instead of written through (a
+ * project's own `.enso/config.json`, #937). `makeDirectory`: the parent is made, only now that
+ * there is something to write.
+ *
  * @group Workspace paths
  */
-export function replaceFileText(path: string, text: string, options: { mode?: number } = {}): void {
-  const target = fileBehindLinks(path)
+export function replaceFileText(path: string, text: string, options: ReplaceFileOptions = {}): void {
+  if (options.makeDirectory === true) mkdirSync(dirname(path), { recursive: true })
+  const target = options.replaceLink === true ? path : fileBehindLinks(path)
   const mode = options.mode ?? (existsSync(target) ? statSync(target).mode & 0o7777 : undefined)
   const staged = `${target}.${process.pid}.tmp`
   try {
@@ -132,6 +137,18 @@ export function replaceFileText(path: string, text: string, options: { mode?: nu
     rmSync(staged, { force: true })
     throw error
   }
+}
+
+/**
+ * How `replaceFileText` writes: `mode` set exactly; `replaceLink` replaces a link at the path rather
+ * than the file behind it; `makeDirectory` makes the parent first.
+ *
+ * @group Workspace paths
+ */
+export interface ReplaceFileOptions {
+  readonly mode?: number
+  readonly replaceLink?: boolean
+  readonly makeDirectory?: boolean
 }
 
 /**

@@ -45,8 +45,8 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * Settings › Web tools (#924, #932): the `web_fetch` allowlist, read, changed and checked from the
  * page instead of by hand in `ENSO_HOME/config.json`; and `web_search`'s backend, its Tavily domain
  * lists, and the `TAVILY_API_KEY` secret in `ENSO_HOME/secrets.env` — set, replaced or removed, its
- * value never answered back or logged. ⚠ `scripts/docs/routes.ts` reads the literal routes
- * off the `request.method === … && url === …` conditions below (#174): keep that spelling.
+ * value never answered back or logged. ⚠ These routes are not yet in `scripts/docs/routes.ts`'s
+ * route groups, so `docs/reference/routes.md` does not list them (#1001).
  *
  * ⚠ The page is the only writer here, guarded like every route (#717, `fromTrustedOrigin`); the
  * agent still cannot write the files (the guards refuse writes into `ENSO_HOME`). Only
@@ -453,8 +453,9 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
     const user = readEnsoConfigFile(userConfigPath)
     const path = projectConfigPath(project.path)
     const trusted = projectTrusted(project.path, agentDir)
-    // ⚠ Untrusted, the file is never read (#502, #873): nothing of it is shown.
-    const read = trusted ? readEnsoConfigFile(path) : undefined
+    // ⚠ Untrusted, the file is never read (#502, #873): nothing of it is shown. A folder that is
+    // gone shows nothing editable either: every change to it is refused (`writableProject`).
+    const read = trusted && project.status !== 'missing-dir' ? readEnsoConfigFile(path) : undefined
     const yours = webToolsOf(user.kind === 'ok' ? user.config : {})
     return {
       projectId,

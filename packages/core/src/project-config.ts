@@ -153,7 +153,8 @@ export function writeProjectThreadSettings(
  * One change to a project's own web tools from its page (#937): a `web_fetch` host or a Searching
  * key, in its shared `.enso/config.json` — the one project tier a session merges, so the only one
  * written for web tools. Only the touched key changes, as in the user's file (`editUserConfig`);
- * `<project>/.enso/` is made if needed, and an unreadable file is never overwritten.
+ * `<project>/.enso/` is made only when there is something to write, and an unreadable file is never
+ * overwritten.
  * ⚠ The caller decides trust first: an untrusted project's file is never read, so never written here.
  *
  * @group Project settings
@@ -163,15 +164,18 @@ export function changeProjectWebTools(
   change: ProjectWebToolsChange,
 ): { readonly kind: 'written' | 'unchanged' } | { readonly kind: 'refused'; readonly reason: string } {
   const path = projectConfigPath(project)
-  mkdirSync(dirname(path), { recursive: true })
-  // ⚠ Never through a link: the write follows one to the file it names (`replaceFileText`), and a
-  // project's own `.enso/config.json` linked to another config — the user's — would change that one.
+  // ⚠ Never through a link: a project's own `.enso/config.json` linked to another config — the
+  // user's — would change that one. A link found now is refused; one put at the file later is
+  // replaced by the write, never followed (`replaceLink`). A `.enso/` swapped for a link between
+  // this check and the write is not caught: the check on the directory is best-effort.
   const linked = lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() === true
-  if (linked || realpathSync(dirname(path)) !== dirname(projectConfigPath(realpathSync(project))))
+  const directoryThere = lstatSync(dirname(path), { throwIfNoEntry: false }) !== undefined
+  if (linked || (directoryThere && realpathSync(dirname(path)) !== dirname(projectConfigPath(realpathSync(project)))))
     return { kind: 'refused', reason: `${path} is reached through a link, so it is not written here; edit it by hand` }
+  const write = { replaceLink: true, makeDirectory: true }
   return 'list' in change || 'backend' in change
-    ? changeUserWebSearch(path, change)
-    : changeUserAllowedHosts(path, change)
+    ? changeUserWebSearch(path, change, write)
+    : changeUserAllowedHosts(path, change, write)
 }
 
 /** The largest tier file the trust confirmation reads; a project's config is a few hundred bytes. */

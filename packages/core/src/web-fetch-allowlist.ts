@@ -1,4 +1,5 @@
 import { isIP } from 'node:net'
+import type { ReplaceFileOptions } from './paths.ts'
 import { editUserConfig, hostListEdit } from './user-config-write.ts'
 import { isPublicIpAddress, type WebFetchAllowlistChange } from './web-fetch.ts'
 
@@ -29,9 +30,15 @@ export type WebFetchAllowlistWrite =
  *
  * @group Web tools
  */
-export function changeUserAllowedHosts(path: string, change: WebFetchAllowlistChange): WebFetchAllowlistWrite {
-  const written = editUserConfig(path, (config) =>
-    hostListEdit(['webFetch', 'allowedHosts'], config.webFetch?.allowedHosts ?? [], change, 'host'),
+export function changeUserAllowedHosts(
+  path: string,
+  change: WebFetchAllowlistChange,
+  write: Omit<ReplaceFileOptions, 'mode'> = {},
+): WebFetchAllowlistWrite {
+  const written = editUserConfig(
+    path,
+    (config) => hostListEdit(['webFetch', 'allowedHosts'], config.webFetch?.allowedHosts ?? [], change, 'host'),
+    write,
   )
   if (written.kind === 'refused') return written
   return { kind: written.kind, hosts: written.config.webFetch?.allowedHosts ?? [] }

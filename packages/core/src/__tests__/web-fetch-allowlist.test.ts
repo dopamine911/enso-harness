@@ -203,6 +203,19 @@ test('⚠ a link loop throws ELOOP and the link is never replaced by a file (#97
   expect(readdirSync(directory).toSorted()).toEqual(['a.json', 'b.json', 'config.json'])
 })
 
+test('⚠ replaceLink: a link at the path is replaced by the file, the file it named untouched (#984 review)', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-replace-'))
+  const elsewhere = join(directory, 'user.json')
+  writeFileSync(elsewhere, '{"mine":true}\n')
+  const path = join(directory, 'nested', 'config.json')
+  mkdirSync(join(directory, 'nested'))
+  symlinkSync(elsewhere, path)
+  replaceFileText(path, '{}\n', { replaceLink: true })
+  expect(lstatSync(path).isFile()).toBe(true)
+  expect(readFileSync(path, 'utf8')).toBe('{}\n')
+  expect(readFileSync(elsewhere, 'utf8')).toBe('{"mine":true}\n')
+})
+
 test('a chain of two links, the last dangling, makes the file at its end (#978 review)', () => {
   const directory = mkdtempSync(join(tmpdir(), 'enso-replace-'))
   symlinkSync('real.json', join(directory, 'middle.json'))

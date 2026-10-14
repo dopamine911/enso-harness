@@ -1,6 +1,6 @@
 import { applyEdits, type Edit, modify } from 'jsonc-parser'
 import { type EnsoConfig, type EnsoConfigParseResult, parseEnsoConfig } from './config.ts'
-import { readTextIfPresent, replaceFileText } from './paths.ts'
+import { type ReplaceFileOptions, readTextIfPresent, replaceFileText } from './paths.ts'
 import { readWebFetchHostInput } from './web-fetch.ts'
 
 /**
@@ -78,11 +78,16 @@ function nested(path: readonly string[], value: unknown): unknown {
 
 /**
  * Change one key of the user's file at `path`: `plan` reads the config as the file holds it and
- * names the edit. A missing file is written whole; an unreadable one is refused.
+ * names the edit. A missing file is written whole; an unreadable one is refused. `write` is how
+ * the file is replaced (`replaceFileText`): only a write happens through it.
  *
  * @group Configuration
  */
-export function editUserConfig(path: string, plan: (config: EnsoConfig) => UserConfigEdit): UserConfigWrite {
+export function editUserConfig(
+  path: string,
+  plan: (config: EnsoConfig) => UserConfigEdit,
+  write: Omit<ReplaceFileOptions, 'mode'> = {},
+): UserConfigWrite {
   let text: string | undefined
   try {
     text = readTextIfPresent(path)
@@ -117,7 +122,7 @@ export function editUserConfig(path: string, plan: (config: EnsoConfig) => UserC
       kind: 'refused',
       reason: `the change would not be a config Enso reads (${checked.reason}); nothing was changed`,
     }
-  replaceFileText(path, after)
+  replaceFileText(path, after, write)
   return { kind: 'written', config: checked.config }
 }
 

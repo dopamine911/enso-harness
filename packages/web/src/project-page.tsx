@@ -482,8 +482,8 @@ function ProjectBanners({
 
 /**
  * The tabs, at the route's: each a navigation of its own, so back returns to the tab before.
- * `trustRevision` moves when the trust changes: the Worktrees tab reads its settings again, since
- * what they resolve to depends on it.
+ * `trustRevision` moves when the trust changes: the Worktrees and Web tools tabs read their settings
+ * again, since what they show depends on it.
  */
 function ProjectTabs({
   project,

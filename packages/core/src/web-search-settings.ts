@@ -1,4 +1,5 @@
 import type { EnsoConfig } from './config.ts'
+import type { ReplaceFileOptions } from './paths.ts'
 import { editUserConfig, hostListEdit, type UserConfigEdit, type UserConfigWrite } from './user-config-write.ts'
 import type { WebSearchConfig, WebSearchSettingsChange } from './web-search.ts'
 
@@ -26,6 +27,10 @@ function planWebSearch(search: WebSearchConfig | undefined, change: WebSearchSet
  *
  * @group Web tools
  */
-export function changeUserWebSearch(path: string, change: WebSearchSettingsChange): UserConfigWrite {
-  return editUserConfig(path, (config: EnsoConfig) => planWebSearch(config.webSearch, change))
+export function changeUserWebSearch(
+  path: string,
+  change: WebSearchSettingsChange,
+  write: Omit<ReplaceFileOptions, 'mode'> = {},
+): UserConfigWrite {
+  return editUserConfig(path, (config: EnsoConfig) => planWebSearch(config.webSearch, change), write)
 }
