@@ -101,6 +101,7 @@ const SIGNAL_KEYS = [
   'S1_duplicateToolClusters',
   'S3_retryAfterErrorFires',
   'toolErrors',
+  'nonZeroExits',
   'S5_outputCollapseSpans',
   'S19_timeGaps',
   'S20_rareCommandMatches',

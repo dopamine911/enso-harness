@@ -1,6 +1,9 @@
 import { expect, setSystemTime, test } from 'bun:test'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { type SessionEntry, SessionManager } from '@earendil-works/pi-coding-agent'
+import { join } from 'node:path'
+import type { AgentTool } from '@earendil-works/pi-agent-core'
+import { createBashTool, createEditTool, type SessionEntry, SessionManager } from '@earendil-works/pi-coding-agent'
 import { branchStats } from '../branch-stats.ts'
 
 /**
@@ -139,6 +142,58 @@ test('a turn before the first prompt is prompt 0 — a row only when there is on
   const prompted = SessionManager.inMemory(tmpdir())
   prompted.appendMessage({ role: 'user', content: 'a question', timestamp: Date.now() })
   expect(branchStats(prompted.getBranch()).promptStats.map((prompt) => prompt.prompt)).toEqual([1])
+})
+
+/** A call through pi's own tool, its result as pi's agent loop stores it: a throw is an error result carrying the message. */
+async function ran(tool: AgentTool, toolCallId: string, args: Record<string, unknown>): Promise<StoredResult> {
+  try {
+    const result = await tool.execute(toolCallId, args, undefined)
+    const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('')
+    return { toolCallId, toolName: tool.name, text, isError: result.isError === true }
+  } catch (error) {
+    return {
+      toolCallId,
+      toolName: tool.name,
+      text: error instanceof Error ? error.message : String(error),
+      isError: true,
+    }
+  }
+}
+
+// #928: pi marks a non-zero exit `isError` like a broken call. Run through pi's own tools, so a
+// change to the status pi appends breaks here: `grep` finding nothing is the command answering,
+// with its code; a timed-out command and an `edit` that cannot apply are failures.
+test("⚠ a command's non-zero exit carries its code and is not the prompt's failure; a timeout and an edit error are", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'enso-branch-stats-'))
+  const bash = createBashTool(cwd)
+  const edit = createEditTool(cwd)
+  const results = [
+    await ran(bash, 'g1', { command: 'grep needle /dev/null' }),
+    await ran(bash, 't1', { command: 'sleep 5', timeout: 0.2 }),
+    await ran(edit, 'e1', { path: 'missing.txt', edits: [{ oldText: 'a', newText: 'b' }] }),
+  ]
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage({ role: 'user', content: 'look around', timestamp: Date.now() })
+  session.appendMessage(
+    assistant(
+      [
+        call('g1', 'bash', { command: 'grep needle /dev/null' }),
+        call('t1', 'bash', { command: 'sleep 5', timeout: 0.2 }),
+        call('e1', 'edit', { path: 'missing.txt' }),
+      ],
+      0.1,
+    ),
+  )
+  for (const result of results) session.appendMessage(toolResult(result))
+
+  const stats = branchStats(session.getBranch())
+
+  expect(stats.callStats.map((stat) => [stat.toolCallId, stat.isError, stat.exitCode])).toEqual([
+    ['g1', true, 1],
+    ['t1', true, undefined],
+    ['e1', true, undefined],
+  ])
+  expect(stats.promptStats).toMatchObject([{ prompt: 1, toolCalls: 3, failedToolCalls: 2 }])
 })
 
 // #359: a prompt's own duration, off the stamps pi puts on each entry as it appends it — so a
