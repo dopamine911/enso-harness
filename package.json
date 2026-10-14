@@ -30,6 +30,7 @@
     "incidents": "bun scripts/enso-incidents.ts",
     "judge": "bun scripts/enso-judge.ts",
     "corpus": "bun scripts/enso-corpus.ts",
+    "review": "bun scripts/review/review-pr.ts",
     "dev:server": "bun run --silent --cwd packages/web dev:server",
     "dev:web": "bun run --silent --cwd packages/web dev:web",
     "e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",
