@@ -31,6 +31,7 @@ import { FieldError } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { PAGE_BUTTON, PAGE_INPUT, PAGE_OUTLINE_BUTTON, SAVE_BAR, SUB_TITLE } from './page-styles.ts'
+import { BehaviourPart, YOLO_ROW_ID } from './permissions-behaviour.tsx'
 import {
   checkPermission,
   fetchPermissionPolicy,
@@ -50,7 +51,9 @@ import {
   surfaceChoices,
   withAction,
   withGroup,
+  type SettingEdits,
   withPatternRenamed,
+  withSettings,
 } from './permissions-draft.ts'
 
 /**
@@ -98,13 +101,19 @@ export type PolicyProblem =
 
 export interface PolicyEditor {
   readonly state: PolicyState
-  /** The edited `permission` block; `undefined` while nothing is edited. */
+  /** The edited `permission` block; `undefined` while no rule is edited. */
   readonly draft: EnsoPermissionMap | undefined
+  /** The Behaviour part's edits to the keys beside `permission` (#935); `undefined` while none is edited. */
+  readonly settings: SettingEdits | undefined
+  /** Anything unsaved: a rule or a setting. Both go in the one save, under the one ETag. */
+  readonly dirty: boolean
   readonly working: boolean
   readonly problem: PolicyProblem | undefined
   /** Where a reset kept the file it replaced. */
   readonly backup: string | undefined
   readonly edit: (change: (permission: EnsoPermissionMap) => EnsoPermissionMap) => void
+  /** Set a key beside the rules; `undefined` takes it off the file, the engine's default in force. */
+  readonly setSetting: (key: string, value: unknown) => void
   readonly discard: () => void
   readonly save: (overwrite: boolean) => void
   readonly reload: () => void
@@ -122,6 +131,7 @@ export interface PolicyEditor {
 export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefined): PolicyEditor {
   const [state, setState] = useState<PolicyState>({ kind: 'loading' })
   const [draft, setDraft] = useState<EnsoPermissionMap | undefined>(undefined)
+  const [settings, setSettings] = useState<SettingEdits | undefined>(undefined)
   const [working, setWorking] = useState(false)
   const [problem, setProblem] = useState<PolicyProblem | undefined>(undefined)
   const [backup, setBackup] = useState<string | undefined>(undefined)
@@ -129,14 +139,19 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
   // Refs beside the state: a save's answer compares against the draft as it is THEN, and a
   // double-click on Save must not send twice.
   const draftNow = useRef<EnsoPermissionMap | undefined>(undefined)
+  const settingsNow = useRef<SettingEdits | undefined>(undefined)
   const inFlight = useRef(false)
   const changeDraft = useCallback((next: EnsoPermissionMap | undefined): void => {
     draftNow.current = next
     setDraft(next)
   }, [])
+  const changeSettings = useCallback((next: SettingEdits | undefined): void => {
+    settingsNow.current = next
+    setSettings(next)
+  }, [])
 
   useEffect(() => {
-    if (!open || draftNow.current !== undefined) return
+    if (!open || draftNow.current !== undefined || settingsNow.current !== undefined) return
     let current = true
     void fetchPermissionPolicy(fetchImpl).then((read) => {
       if (current) setState(read)
@@ -155,12 +170,18 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     changeDraft(change(draftNow.current ?? permissionOf(loaded.file)))
   }
 
+  const setSetting = (key: string, value: unknown): void => {
+    if (loaded?.kind !== 'ok') return
+    setBackup(undefined)
+    changeSettings({ ...settingsNow.current, [key]: value })
+  }
+
   /**
    * What a save writes over, and under which version (#519). A plain save: the file as read, under its
    * ETag. An overwrite after a 412: the file as it is on disk NOW, re-read, under ITS ETag, so only the
-   * draft's `permission` replaces anything and a setting edited by hand in the meantime
-   * (`permissionReviewLog: false`) stays. It used to send the file as first read with `If-Match: *`,
-   * reverting such a setting silently. A file that cannot be read now is overwritten as before.
+   * draft's rules and the settings edited here replace anything, and a setting edited by hand in the
+   * meantime (`permissionReviewLog: false`) stays. It used to send the file as first read with
+   * `If-Match: *`, reverting such a setting silently. A file that cannot be read now is overwritten as before.
    */
   const saveBase = async (
     file: PolicyFile,
@@ -176,13 +197,17 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
 
   const save = async (overwrite: boolean): Promise<void> => {
     const sent = draftNow.current
-    if (loaded?.kind !== 'ok' || sent === undefined || inFlight.current) return
+    const sentSettings = settingsNow.current
+    if (loaded?.kind !== 'ok' || (sent === undefined && sentSettings === undefined) || inFlight.current) return
     inFlight.current = true
     setWorking(true)
     let outcome: PolicySave
     try {
       const base = await saveBase(loaded.file, loaded.etag, overwrite)
-      outcome = await savePermissionPolicy({ file: { ...base.file, permission: sent } }, base.etag, fetchImpl)
+      // One file, one save (#935): the settings edited, then the rules — the file's own where none is edited.
+      const file = withSettings(base.file, sentSettings ?? {})
+      const write = { file: sent === undefined ? file : { ...file, permission: sent } }
+      outcome = await savePermissionPolicy(write, base.etag, fetchImpl)
     } finally {
       inFlight.current = false
       setWorking(false)
@@ -195,6 +220,7 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     setProblem(undefined)
     // Edits made while the save was in flight are still unsaved: they stay the draft.
     if (draftNow.current === sent) changeDraft(undefined)
+    if (settingsNow.current === sentSettings) changeSettings(undefined)
   }
 
   const reset = async (): Promise<void> => {
@@ -216,22 +242,28 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     setBackup(outcome.reset.backup)
     setProblem(undefined)
     changeDraft(undefined)
+    changeSettings(undefined)
   }
 
   return {
     state,
     draft,
+    settings,
+    dirty: draft !== undefined || settings !== undefined,
     working,
     problem,
     backup,
     edit,
+    setSetting,
     discard: (): void => {
       changeDraft(undefined)
+      changeSettings(undefined)
       setProblem(undefined)
     },
     save: (overwrite: boolean): void => void save(overwrite),
     reload: (): void => {
       changeDraft(undefined)
+      changeSettings(undefined)
       setProblem(undefined)
       setState({ kind: 'loading' })
       setGeneration((count) => count + 1)
@@ -592,9 +624,6 @@ function ReplacedSurfaces({
   )
 }
 
-/** Where the yoloMode Behaviour row is, for the callout under the lede to take the reader to. */
-const YOLO_ROW_ID = 'permissions-behaviour-yoloMode'
-
 /**
  * Under the lede, in one quiet line: where every decision is logged, and when a saved change is in
  * force. ⚠ A running thread reads the knobs when a prompt starts (the engine's `before_agent_start`
@@ -640,74 +669,6 @@ function HeadFacts({
         A saved rule is in force at a running thread's next call; the settings beside the rules, at its next prompt.
       </p>
     </>
-  )
-}
-
-/** A setting beside the rules that changes what they do, said as the prototype's Behaviour row (#417). */
-interface BehaviourNote {
-  readonly label: string
-  readonly title: string
-  readonly words: string
-  readonly key: string
-  readonly value: string
-  readonly danger: boolean
-}
-
-/** The notes the file's knobs call for: yoloMode on, and an authorizerChain without Enso's classifier. */
-function behaviourNotes(file: Record<string, unknown>): BehaviourNote[] {
-  const knobs = policyKnobs(file)
-  const notes: BehaviourNote[] = []
-  if (knobs.yoloMode) {
-    notes.push({
-      label: 'yolo mode',
-      title: 'Yolo mode is on',
-      words:
-        'Every ask becomes allow, in every mode: nothing in the rules above that asks will ask. A running thread takes this up at its next prompt.',
-      key: 'yoloMode',
-      value: 'on',
-      danger: true,
-    })
-  }
-  if (!knobs.autoClassifier) {
-    notes.push({
-      label: 'authorizer chain',
-      title: 'auto asks instead of classifying',
-      words: "The file's authorizerChain does not name Enso's classifier, so auto mode asks you.",
-      key: 'authorizerChain',
-      value: "doesn't name Enso's classifier",
-      danger: false,
-    })
-  }
-  return notes
-}
-
-/** The Behaviour rows: read here, changed in the file by hand. Nothing when no knob calls for a note. */
-function BehaviourNotes({ file, path }: { file: Record<string, unknown>; path: string }): React.ReactNode {
-  const notes = behaviourNotes(file)
-  if (notes.length === 0) return null
-  return (
-    <div className="grid gap-3">
-      <h3 className={SUB_TITLE}>Behaviour</h3>
-      <p className={PAGE_NOTE}>Set in the same file, beside the rules; change them there.</p>
-      <div className="rounded-lg border bg-card">
-        {notes.map((note) => (
-          <div
-            key={note.key}
-            id={`permissions-behaviour-${note.key}`}
-            tabIndex={-1}
-            aria-label={note.label}
-            className="grid gap-1 p-4 outline-none not-first:border-t focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-          >
-            <span className={note.danger ? 'font-semibold text-refuse' : 'font-semibold'}>{note.title}</span>
-            <p className={PAGE_NOTE}>{note.words}</p>
-            <p className="text-xs break-all text-muted-foreground">
-              <code className="font-mono text-meta text-foreground">{path}</code> ›{' '}
-              <code className="font-mono text-meta text-foreground">{note.key}</code> · {note.value}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
   )
 }
 
@@ -887,7 +848,7 @@ function RuleGroups({
  * pinned to the bottom of what scrolls only while there is something unsaved.
  */
 function SaveBar({ editor, path }: { editor: PolicyEditor; path: string }): React.ReactNode {
-  const dirty = editor.draft !== undefined
+  const { dirty } = editor
   return (
     <div className={dirty ? SAVE_BAR : 'flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3'}>
       <span className="min-w-50 flex-1 text-sm">
@@ -940,8 +901,8 @@ function ProblemNotice({ editor }: { editor: PolicyEditor }): React.ReactNode {
     >
       <p>
         permissions.json changed on disk since it was read ({problem.detail}). Nothing was written; your changes are
-        still here. Overwrite with mine puts your rules over the file as it is on disk now, and keeps its other settings
-        as they are there.
+        still here. Overwrite with mine puts your changes over the file as it is on disk now, and keeps every setting
+        you did not change as it is there.
       </p>
       <span className="flex flex-wrap gap-2">
         <Button variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={editor.working} onClick={editor.reload}>
@@ -1007,7 +968,7 @@ function ResetPanel({ policy, editor }: { policy: EnsoPermissionPolicyRead; edit
     <div className="grid gap-3 rounded-sm border border-chart-3 bg-card p-4">
       <p className="text-sm">
         Resetting replaces permissions.json with Enso's policy; the current file is kept as a backup.
-        {editor.draft === undefined ? '' : ' Your unsaved changes go too.'}
+        {editor.dirty ? ' Your unsaved changes go too.' : ''}
       </p>
       <ResetDiff changes={changes} />
       <span className="flex flex-wrap gap-2">
@@ -1347,12 +1308,7 @@ export function PermissionsSection({
   const { policy } = state
   const permission = editor.draft ?? (policy.kind === 'ok' ? permissionOf(policy.file) : {})
   const tryCommand = (
-    <TryCommand
-      threadId={threadId}
-      surfaces={checkSurfaces(permission)}
-      unsaved={editor.draft !== undefined}
-      fetch={fetchImpl}
-    />
+    <TryCommand threadId={threadId} surfaces={checkSurfaces(permission)} unsaved={editor.dirty} fetch={fetchImpl} />
   )
   return (
     <div className="flex flex-col gap-8">
@@ -1380,7 +1336,11 @@ export function PermissionsSection({
         <>
           <RulesView permission={permission} editor={editor} />
           {tryCommand}
-          <BehaviourNotes file={policy.file} path={policy.path} />
+          <BehaviourPart
+            file={withSettings(policy.file, editor.settings ?? {})}
+            path={policy.path}
+            onSet={editor.setSetting}
+          />
           <ResetPanel policy={policy} editor={editor} />
           <ProblemNotice editor={editor} />
           <SaveBar editor={editor} path={policy.path} />
