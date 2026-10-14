@@ -10,6 +10,7 @@ import {
   reviewSettings,
   STATUS_MARKER,
   statusCommentBody,
+  statusCommentsOf,
 } from '../review/review-pr.ts'
 
 const HEAD = 'a'.repeat(40)
@@ -122,4 +123,27 @@ test('the command line takes a pull request number and --dry-run', () => {
   expect(parseReviewArguments(['981', '--dry-run'])).toEqual({ number: 981, dryRun: true })
   expect(parseReviewArguments(['981'])).toEqual({ number: 981, dryRun: false })
   expect(() => parseReviewArguments(['--dry-run'])).toThrow()
+})
+
+/**
+ * A run edits only its own status comment (a token cannot edit another's), but reads the last
+ * reviewed head from any status comment, so switching poster (the owner, then the App's bot) does
+ * not forget what was reviewed.
+ */
+test("the status comment a run updates is its own; the last reviewed head comes from its own, else anyone's", () => {
+  const comment = (author: string, body: string, id: number): IssueComment => ({ id, body, created_at: '', author })
+  const owners = comment(
+    'dopamine911',
+    statusCommentBody({ posted: true, headSha: PREVIOUS, scope: 'full', agentExitCode: 0 }),
+    1,
+  )
+  const actions = comment('github-actions[bot]', `${STATUS_MARKER}\n✅ ran`, 2)
+  expect(statusCommentsOf([actions, owners], 'reviewer[bot]')).toEqual({ own: undefined, lastReviewedHead: PREVIOUS })
+  const bots = comment(
+    'reviewer[bot]',
+    statusCommentBody({ posted: true, headSha: HEAD, scope: 'new-commits', agentExitCode: 0 }),
+    3,
+  )
+  expect(statusCommentsOf([actions, owners, bots], 'reviewer[bot]')).toEqual({ own: bots, lastReviewedHead: HEAD })
+  expect(statusCommentsOf([actions], 'reviewer[bot]')).toEqual({ own: undefined, lastReviewedHead: undefined })
 })

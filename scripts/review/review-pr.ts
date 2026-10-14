@@ -34,6 +34,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
+import { readReviewAppConfig, reviewAppIdentity } from './app-token.ts'
 import type { ToolGrant } from './tool-grant-hook.ts'
 import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow } from './workflow-config.ts'
 
@@ -101,6 +102,22 @@ export function planReview(
 /** The head the status comment says this reviewer last reviewed, if any. */
 export function lastReviewedHeadOf(statusCommentBody: string | undefined): string | undefined {
   return statusCommentBody === undefined ? undefined : REVIEWED_HEAD_LINE.exec(statusCommentBody)?.[1]
+}
+
+/**
+ * The status comments on a pull request, as a run needs them: `own`, the one `login` wrote, which it
+ * updates (a token can edit only its own comments); and the last reviewed head, from its own first,
+ * else from any status comment that records one, so a change of poster (the owner's login, then the
+ * review App's bot) does not forget what was reviewed.
+ */
+export function statusCommentsOf(
+  comments: readonly IssueComment[],
+  login: string,
+): { readonly own: IssueComment | undefined; readonly lastReviewedHead: string | undefined } {
+  const statuses = comments.filter((comment) => comment.body.startsWith(STATUS_MARKER))
+  const own = statuses.find((comment) => comment.author === login)
+  const recorded = statuses.map((comment) => lastReviewedHeadOf(comment.body)).find((head) => head !== undefined)
+  return { own, lastReviewedHead: lastReviewedHeadOf(own?.body) ?? recorded }
 }
 
 /**
@@ -188,9 +205,23 @@ function run(command: readonly string[], options: { cwd?: string; env?: Record<s
   return result.stdout.toString()
 }
 
-function readPullRequest(number: number): PullRequestState {
+/**
+ * Who a run reads and posts as: the review App's bot when this machine has its config
+ * (`app-token.ts`), else the owner's own `gh` login. `environment` is the whole environment `gh`
+ * and the reviewer run with; `undefined` means this process's own.
+ */
+interface Poster {
+  readonly login: string
+  readonly environment: Record<string, string> | undefined
+}
+
+function runGh(command: readonly string[], poster: Poster): string {
+  return run(command, poster.environment === undefined ? {} : { env: poster.environment })
+}
+
+function readPullRequest(number: number, poster: Poster): PullRequestState {
   const fields = 'number,headRefOid,baseRefName,baseRefOid,isDraft,author'
-  return JSON.parse(run(['gh', 'pr', 'view', String(number), '--json', fields])) as PullRequestState
+  return JSON.parse(runGh(['gh', 'pr', 'view', String(number), '--json', fields], poster)) as PullRequestState
 }
 
 function repositoryName(): string {
@@ -202,26 +233,21 @@ function repositoryName(): string {
  * filter that builds one array prints one array per page, which is not one JSON document past 30
  * comments (#989's review); a filter that prints one object per comment is.
  */
-function pullRequestComments(repository: string, number: number): IssueComment[] {
+function pullRequestComments(repository: string, number: number, poster: Poster): IssueComment[] {
   const filter = '.[] | {id, body, created_at, author: .user.login}'
-  return run(['gh', 'api', `repos/${repository}/issues/${number}/comments`, '--paginate', '--jq', filter])
+  return runGh(['gh', 'api', `repos/${repository}/issues/${number}/comments`, '--paginate', '--jq', filter], poster)
     .split('\n')
     .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as IssueComment)
 }
 
-/** The status comment, when there is one. */
-function findStatusComment(repository: string, number: number): IssueComment | undefined {
-  return pullRequestComments(repository, number).find((comment) => comment.body.startsWith(STATUS_MARKER))
-}
-
-function upsertStatusComment(repository: string, number: number, body: string): void {
-  const existing = findStatusComment(repository, number)
-  if (existing === undefined) {
-    run(['gh', 'api', '-X', 'POST', `repos/${repository}/issues/${number}/comments`, '-f', `body=${body}`])
+function upsertStatusComment(repository: string, number: number, body: string, poster: Poster): void {
+  const own = statusCommentsOf(pullRequestComments(repository, number, poster), poster.login).own
+  if (own === undefined) {
+    runGh(['gh', 'api', '-X', 'POST', `repos/${repository}/issues/${number}/comments`, '-f', `body=${body}`], poster)
     return
   }
-  run(['gh', 'api', '-X', 'PATCH', `repos/${repository}/issues/comments/${existing.id}`, '-f', `body=${body}`])
+  runGh(['gh', 'api', '-X', 'PATCH', `repos/${repository}/issues/comments/${own.id}`, '-f', `body=${body}`], poster)
 }
 
 /**
@@ -302,13 +328,14 @@ function writeGrant(tree: string, runDirectory: string, grant: ToolGrant): void 
 }
 
 /** Runs the reviewer and answers docker-agent's exit code. Its output goes to `review.log`. */
-function runReviewer(tree: string, runDirectory: string, prompt: string): number {
+function runReviewer(tree: string, runDirectory: string, prompt: string, poster: Poster): number {
   const configuration = join(runDirectory, 'reviewer.yaml')
   writeFileSync(configuration, agentConfiguration())
   const log = Bun.file(join(runDirectory, 'review.log'))
   const reviewer = Bun.spawnSync(['docker', 'agent', 'run', configuration, '--exec', '--working-dir', tree, prompt], {
     stdout: log,
     stderr: log,
+    ...(poster.environment === undefined ? {} : { env: poster.environment }),
   })
   return reviewer.exitCode
 }
@@ -318,13 +345,28 @@ interface ReviewOptions {
   readonly dryRun: boolean
 }
 
-/** Whether this machine's `gh` login posted a review comment after `since`: asked of GitHub, not inferred. */
-function reviewWasPosted(repository: string, number: number, since: string): boolean {
-  const login = run(['gh', 'api', 'user', '--jq', '.login']).trim()
-  return reviewCommentsSince(pullRequestComments(repository, number), since, login).length > 0
+/** Whether the poster put a review comment on the pull request after `since`: asked of GitHub, not inferred. */
+function reviewWasPosted(repository: string, number: number, since: string, poster: Poster): boolean {
+  return reviewCommentsSince(pullRequestComments(repository, number, poster), since, poster.login).length > 0
+}
+
+/**
+ * The review App's bot, with a one-hour token for this repository only, when this machine has the
+ * App's config; else the owner's own login, as before #981's App. ⚠ The token goes into the
+ * reviewer's environment as `GH_TOKEN`, which `gh` prefers over its stored login. The reviewer cannot
+ * print it: the grant hook refuses any `$` in a command, and `Read` cannot reach `/proc`.
+ */
+async function reviewPoster(repository: string): Promise<Poster> {
+  const config = readReviewAppConfig()
+  if (config === undefined) {
+    return { login: run(['gh', 'api', 'user', '--jq', '.login']).trim(), environment: undefined }
+  }
+  const identity = await reviewAppIdentity(config, repository.split('/')[1] ?? repository)
+  return { login: identity.login, environment: { ...process.env, GH_TOKEN: identity.token } }
 }
 
 interface ReviewRun {
+  readonly poster: Poster
   readonly options: ReviewOptions
   readonly pullRequest: PullRequestState
   readonly repository: string
@@ -335,7 +377,7 @@ interface ReviewRun {
 
 /** Everything after the worktree exists: context, settings, the reviewer, the status. */
 function reviewInWorktree(review: ReviewRun): string {
-  const { options, pullRequest, repository, plan, runDirectory, tree } = review
+  const { poster, options, pullRequest, repository, plan, runDirectory, tree } = review
   const startedAt = new Date().toISOString()
   const config = readReviewWorkflow(
     run(['git', 'show', `${pullRequest.baseRefOid}:${REVIEW_WORKFLOW_PATH}`], { cwd: tree }),
@@ -355,26 +397,26 @@ function reviewInWorktree(review: ReviewRun): string {
     scope: plan.scope,
     headSha: pullRequest.headRefOid,
   }
-  const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values))
-  const posted = options.dryRun ? existsSync(capture) : reviewWasPosted(repository, options.number, startedAt)
+  const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values), poster)
+  const posted = options.dryRun ? existsSync(capture) : reviewWasPosted(repository, options.number, startedAt, poster)
   if (!options.dryRun) {
     const body = statusCommentBody({ posted, headSha: pullRequest.headRefOid, scope: plan.scope, agentExitCode })
-    upsertStatusComment(repository, options.number, body)
+    upsertStatusComment(repository, options.number, body, poster)
   }
-  const where = options.dryRun ? `captured to ${capture}` : 'posted to the pull request'
+  const where = options.dryRun ? `captured to ${capture}` : `posted to the pull request as ${poster.login}`
   const outcome = posted ? `reviewed (${plan.scope}); comment ${where}` : 'FAILED: no review comment was posted'
   const listNote = listProblem === undefined ? '' : `; ${listProblem}`
   return `#${options.number}: ${outcome}; docker-agent exited ${agentExitCode}${listNote}; log ${join(runDirectory, 'review.log')}`
 }
 
 /** One review of one pull request, start to finish. Returns what happened, for the terminal. */
-function reviewPullRequest(options: ReviewOptions): string {
-  const pullRequest = readPullRequest(options.number)
+async function reviewPullRequest(options: ReviewOptions): Promise<string> {
   const repository = repositoryName()
-  const status = findStatusComment(repository, options.number)
+  const poster = await reviewPoster(repository)
+  const pullRequest = readPullRequest(options.number, poster)
   const plan = planReview(
     pullRequest,
-    lastReviewedHeadOf(status?.body),
+    statusCommentsOf(pullRequestComments(repository, options.number, poster), poster.login).lastReviewedHead,
     (sha) =>
       Bun.spawnSync(['git', 'merge-base', '--is-ancestor', sha, pullRequest.headRefOid], { cwd: REPOSITORY_ROOT })
         .exitCode === 0,
@@ -388,7 +430,7 @@ function reviewPullRequest(options: ReviewOptions): string {
   const tree = join(runDirectory, 'tree')
   addWorktree(pullRequest, tree)
   try {
-    return reviewInWorktree({ options, pullRequest, repository, plan, runDirectory, tree })
+    return reviewInWorktree({ poster, options, pullRequest, repository, plan, runDirectory, tree })
   } finally {
     run(['git', 'worktree', 'remove', '--force', tree], { cwd: REPOSITORY_ROOT })
   }
@@ -402,5 +444,5 @@ export function parseReviewArguments(argv: readonly string[]): ReviewOptions {
 }
 
 if (import.meta.main) {
-  process.stdout.write(`${reviewPullRequest(parseReviewArguments(process.argv.slice(2)))}\n`)
+  process.stdout.write(`${await reviewPullRequest(parseReviewArguments(process.argv.slice(2)))}\n`)
 }
