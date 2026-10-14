@@ -245,9 +245,15 @@ export interface QuarantineReport {
  */
 export function quarantineSecrets(
   environment: Record<string, string | undefined>,
-  places: { readonly repoRoot: string; readonly home: string },
+  places: {
+    /** The Enso checkout, whose root `.env` is judged; `undefined` when Enso is installed, not checked out (#950). */
+    readonly repoRoot: string | undefined
+    readonly home: string
+  },
 ): QuarantineReport {
-  const rootDotenv = readDotenvFile(rootDotenvPath(places.repoRoot))
+  // No checkout, no root `.env` of Enso's to report on: nothing is misplaced (#950).
+  const rootDotenv =
+    places.repoRoot === undefined ? new Map<string, string>() : readDotenvFile(rootDotenvPath(places.repoRoot))
   const doomed = new Set<string>(readDotenvFile(ensoSecretsPath(places.home)).keys())
   for (const variableName of Object.keys(environment)) if (isSecretShapedName(variableName)) doomed.add(variableName)
   const removed: string[] = []
