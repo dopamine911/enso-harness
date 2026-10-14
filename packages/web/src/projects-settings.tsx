@@ -18,8 +18,8 @@ import { linesOf } from './project-worktrees.tsx'
 import { fetchProjectsSettings, saveDefaultProjectTrust, saveProjectsSettings } from './projects-settings-connection.ts'
 import {
   ConflictNotice,
-  LooseningConfirm,
   SaveBar,
+  SaveConfirm,
   SettingRow,
   SettingsFileSection,
   SourceLine,
@@ -244,7 +244,7 @@ function DefaultTrust(props: {
         </FieldError>
       )}
       {confirming ? (
-        <LooseningConfirm
+        <SaveConfirm
           loosenings={[TRUST_ALWAYS_LOOSENS]}
           working={working}
           onConfirm={set}

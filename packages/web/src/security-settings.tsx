@@ -20,8 +20,8 @@ import { PAGE_BUTTON, PAGE_INPUT, PAGE_OUTLINE_BUTTON, SUB_TITLE } from './page-
 import { fetchSecuritySettings, saveJudgeKey, saveSecuritySettings } from './security-connection.ts'
 import {
   ConflictNotice,
-  LooseningConfirm,
   SaveBar,
+  SaveConfirm,
   SettingRow,
   SettingsFileSection,
   SourceLine,
@@ -220,7 +220,10 @@ export function looseningsOf(saved: EnsoSecurityConfig, next: EnsoSecurityConfig
   return said
 }
 
-/** Said before a save that newly chooses Jev while no key is stored: such a judge judges nothing. */
+/**
+ * Said before a save that newly chooses Jev while no key is stored: such a judge judges nothing. A
+ * loosening only when a local judge was judging before; from no judge, it protects no less.
+ */
 const JEV_WITHOUT_KEY = 'The judge is Jev, but no TypeSafe key is stored: every command goes unjudged.'
 
 type SaveProblem =
@@ -402,10 +405,15 @@ function SecurityForm({
   const [draft, setDraft] = useState<Draft>(saved)
   const [checked, setChecked] = useState<ReadonlySet<FieldName>>(new Set())
   const [problem, setProblem] = useState<SaveProblem | undefined>(undefined)
-  // What Save anyway writes is the section the reader was shown the loosenings of; an edit closes
-  // the confirm, so its list is never stale (#969 review).
+  // What Save anyway writes is the section the reader was shown the confirm of; an edit, or
+  // storing the key, closes the confirm, so its list is never stale (#969 review).
   const [confirming, setConfirming] = useState<
-    { readonly loosenings: readonly string[]; readonly security: EnsoSecurityConfig } | undefined
+    | {
+        readonly loosenings: readonly string[]
+        readonly notWorking: readonly string[]
+        readonly security: EnsoSecurityConfig
+      }
+    | undefined
   >(undefined)
   const [working, setWorking] = useState(false)
   const next = securityOf(draft)
@@ -439,9 +447,14 @@ function SecurityForm({
     setProblem(undefined)
     const jevWithoutKey =
       next.judge?.backend === 'jev' && settings.security.judge?.backend !== 'jev' && !settings.judgeKeySet
-    const loosenings = [...looseningsOf(settings.security, next), ...(jevWithoutKey ? [JEV_WITHOUT_KEY] : [])]
-    if (loosenings.length > 0) {
-      setConfirming({ loosenings, security: next })
+    const judgedBefore = effectiveOf(settings.security).backend !== 'off'
+    const loosenings = [
+      ...looseningsOf(settings.security, next),
+      ...(jevWithoutKey && judgedBefore ? [JEV_WITHOUT_KEY] : []),
+    ]
+    const notWorking = jevWithoutKey && !judgedBefore ? [JEV_WITHOUT_KEY] : []
+    if (loosenings.length > 0 || notWorking.length > 0) {
+      setConfirming({ loosenings, notWorking, security: next })
       return
     }
     write(next)
@@ -476,13 +489,17 @@ function SecurityForm({
             set={settings.judgeKeySet}
             secretsPath={settings.secretsPath}
             fetchImpl={fetchImpl}
-            onSet={onKeySet}
+            onSet={(set) => {
+              setConfirming(undefined)
+              onKeySet(set)
+            }}
           />
         ) : null}
       </JudgeRows>
       {confirming === undefined ? null : (
-        <LooseningConfirm
+        <SaveConfirm
           loosenings={confirming.loosenings}
+          notWorking={confirming.notWorking}
           working={working}
           onConfirm={() => write(confirming.security)}
           onCancel={() => setConfirming(undefined)}

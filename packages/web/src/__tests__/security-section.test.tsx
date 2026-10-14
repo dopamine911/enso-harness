@@ -167,6 +167,49 @@ test('choosing Jev with no key stored is said before the save', async () => {
   await page.unmount()
 })
 
+// #969 re-review, issue 2: storing the key answers the confirm's "no key is stored", so the
+// confirm closes instead of standing over a key that is now set.
+test('storing the key while the Jev-without-key confirm is open closes it; the next Save just saves', async () => {
+  const page = await mounted(read({}))
+  const { container, sent } = page
+  await flush(() => type(container.querySelector('#security-backend') as HTMLSelectElement, 'jev'))
+  await flush(() => button(container, 'Save').click())
+  expect(container.textContent).toContain('no TypeSafe key is stored')
+  await flush(() => type(container.querySelector('input[type="password"]') as HTMLInputElement, 'ts-key-1'))
+  await flush(() => button(container, 'Store key').click())
+  expect(container.textContent).not.toContain('no TypeSafe key is stored')
+  expect(container.textContent).not.toContain('Save anyway')
+
+  await flush(() => button(container, 'Save').click())
+  const saves = sent.filter((each) => each.method === 'PUT' && !each.url.endsWith('/judge-key'))
+  expect(saves.map((each) => each.body)).toEqual([{ security: { judge: { backend: 'jev' } } }])
+  await page.unmount()
+})
+
+// #969 re-review, issue 3: Jev without a key protects no less than no judge, so it is said as a
+// save that will not work yet; from a local judge it is a loosening, and said as one.
+test('Jev without a key is a loosening only when a judge was judging before', async () => {
+  const fromOff = await mounted(read({}))
+  await flush(() => type(fromOff.container.querySelector('#security-backend') as HTMLSelectElement, 'jev'))
+  await flush(() => button(fromOff.container, 'Save').click())
+  expect(fromOff.container.querySelector('[aria-label="this loosens security"]')).toBeNull()
+  expect(fromOff.container.querySelector('[aria-label="this will not work yet"]')?.textContent).toContain(
+    'no TypeSafe key is stored',
+  )
+  expect(fromOff.container.textContent).not.toContain('protects less')
+  await fromOff.unmount()
+
+  const fromLocal = await mounted(
+    read({ judge: { backend: 'local', local: { baseUrl: 'http://127.0.0.1:1', model: 'm' } } }),
+  )
+  await flush(() => type(fromLocal.container.querySelector('#security-backend') as HTMLSelectElement, 'jev'))
+  await flush(() => button(fromLocal.container, 'Save').click())
+  expect(fromLocal.container.querySelector('[aria-label="this loosens security"]')?.textContent).toContain(
+    'no TypeSafe key is stored',
+  )
+  await fromLocal.unmount()
+})
+
 test('an unreadable file is said, and no form is offered', async () => {
   const page = await mounted({
     kind: 'unreadable',
