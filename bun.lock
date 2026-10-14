@@ -69,6 +69,7 @@
         "@enso/core": "*",
         "@logtape/logtape": "2.3.7",
         "@logtape/testing": "2.3.7",
+        "typebox": "^1.3.34",
       },
     },
     "packages/web": {
