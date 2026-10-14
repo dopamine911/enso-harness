@@ -11,10 +11,12 @@
  *   1. RESOLVE: the pull request's head, base, draft and bot status (`gh pr view`), and the head
  *      this reviewer last reviewed, from the status comment's `head=` line. A draft, a bot's pull
  *      request, or a head already reviewed: nothing runs.
- *   2. PREPARE: a fresh worktree at the head, its `.claude/` and `.mcp.json` replaced with the
- *      base branch's (a pull request must not supply the reviewer's settings, hooks or MCP
- *      servers, as `claude-code-action` restores `.claude/` from the base for the same reason),
- *      then `bun install` and the comment list, with no credentials in reach (see `runWithoutCredentials`).
+ *   2. PREPARE: a fresh worktree at the head; `bun install` and the comment list, with no
+ *      credentials in reach (see `runWithoutCredentials`); THEN its `.claude/` and `.mcp.json`
+ *      replaced with the base branch's (a pull request must not supply the reviewer's settings,
+ *      hooks or MCP servers, as `claude-code-action` restores `.claude/` from the base for the same
+ *      reason). ⚠ After, not before: the install's scripts and the comment list are the pull
+ *      request's code, and could rewrite those files after an earlier restore (#989's review).
  *   3. REVIEW: docker-agent's `claude-code` harness, in the worktree, with the workflow's prompt.
  *      The workflow's tool grant is enforced by `tool-grant-hook.ts` (the harness cannot pass one).
  *   4. PUBLISH: the reviewer posts its own comment, as the prompt says. This script then upserts
@@ -24,10 +26,11 @@
  * posted, and the status comment is not touched.
  *
  * The configuration (prompt, grant, comment-list command) is read from the BASE branch's copy of
- * the workflow, `origin/<base>`, which is the copy GitHub would run, never the pull request's.
+ * the workflow, at the base commit `gh pr view` reports (`baseRefOid`), which is the copy GitHub
+ * would run, never the pull request's.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
@@ -44,8 +47,8 @@ const RUNS_DIRECTORY = join(homedir(), '.cache', 'enso-review')
 const SHARED_BUN_CACHE = join(RUNS_DIRECTORY, 'bun-cache')
 /** The directory the prompt and `.claude/pr-review.md` look in for the comment list and the push's diff. */
 const REVIEW_CONTEXT_DIRECTORY = '.review-context'
-/** The command the review posts with, as the workflow's prompt tells the reviewer to. */
-const POST_COMMAND = 'gh pr comment'
+/** How the workflow's review comment begins (its template's heading), which is how a post is found. */
+const REVIEW_COMMENT_HEADING = '## Code Review'
 /** The files the comment-list step writes; the workflow's command writes the list at the tree root. */
 const COMMENT_LIST_FILE = 'touched-comments.md'
 const NEW_COMMITS_DIFF_FILE = 'new-commits.diff'
@@ -102,10 +105,11 @@ export function lastReviewedHeadOf(statusCommentBody: string | undefined): strin
 
 /**
  * The status comment's body after a run: the workflow's marker first, so both reviewers upsert one
- * comment. `posted` is whether the review comment went out, read from the hook's decision log, not
- * from docker-agent's exit code: on #989's first run docker-agent exited 1 (`bufio.Scanner: token
- * too long`, its reader of Claude Code's output) AFTER the review was posted, and an exit-code
- * status said "failed, no verdict" under a posted verdict.
+ * comment. `posted` is whether a review comment is ON THE PULL REQUEST (`reviewCommentsSince`), not
+ * docker-agent's exit code: on #989's first run docker-agent exited 1 (`bufio.Scanner: token too
+ * long`, its reader of Claude Code's output) AFTER the review was posted, and an exit-code status
+ * said "failed, no verdict" under a posted verdict. Nor the hook's "allowed": a hook runs BEFORE
+ * `gh`, so an allowed post that then failed would record a head nobody reviewed (#989's review).
  */
 export function statusCommentBody(run: {
   readonly posted: boolean
@@ -125,18 +129,17 @@ export function statusCommentBody(run: {
   return `${STATUS_MARKER}\n<!-- local-review head=${run.headSha} scope=${run.scope} -->\n✅ **Claude PR review** ran locally on \`${short}\` (${run.scope}), with docker-agent, configured from \`${REVIEW_WORKFLOW_PATH}\`.${exitNote}`
 }
 
-/** Whether the hook's decision log shows the review comment going out: allowed, or captured on a dry run. */
-export function reviewWasPosted(decisionLogText: string): boolean {
-  return decisionLogText
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as { input?: { command?: unknown }; decision?: { kind?: string } })
-    .some(
-      (toolCallRecord) =>
-        (toolCallRecord.decision?.kind === 'allow' || toolCallRecord.decision?.kind === 'capture') &&
-        typeof toolCallRecord.input?.command === 'string' &&
-        toolCallRecord.input.command.startsWith(POST_COMMAND),
-    )
+/** A pull request comment, as much of one as `reviewCommentsSince` reads. */
+export interface IssueComment {
+  readonly body: string
+  readonly created_at: string
+}
+
+/** The review comments posted at or after `since` (ISO time): those that begin with the template's heading. */
+export function reviewCommentsSince(comments: readonly IssueComment[], since: string): IssueComment[] {
+  return comments.filter(
+    (comment) => comment.created_at >= since && comment.body.trimStart().startsWith(REVIEW_COMMENT_HEADING),
+  )
 }
 
 /**
@@ -225,26 +228,29 @@ function runWithoutCredentials(command: string, tree: string, scratchHome: strin
   })
 }
 
-function prepareTree(pullRequest: PullRequestState, runDirectory: string): string {
-  const tree = join(runDirectory, 'tree')
+function addWorktree(pullRequest: PullRequestState, tree: string): void {
   run(['git', 'fetch', '--quiet', 'origin', `pull/${pullRequest.number}/head`, pullRequest.baseRefName], {
     cwd: REPOSITORY_ROOT,
   })
   run(['git', 'worktree', 'add', '--quiet', '--detach', tree, pullRequest.headRefOid], { cwd: REPOSITORY_ROOT })
-  for (const path of BASE_OWNED_PATHS) {
-    rmSync(join(tree, path), { recursive: true, force: true })
-    const onBase = Bun.spawnSync(['git', 'cat-file', '-e', `${pullRequest.baseRefOid}:${path}`], { cwd: tree })
-    if (onBase.exitCode === 0) run(['git', 'checkout', pullRequest.baseRefOid, '--', path], { cwd: tree })
-  }
-  return tree
 }
 
+/** The reviewer's settings, hooks and MCP servers from the base branch, never the pull request's. */
+function restoreBaseOwnedPaths(tree: string, baseSha: string): void {
+  for (const path of BASE_OWNED_PATHS) {
+    rmSync(join(tree, path), { recursive: true, force: true })
+    const onBase = Bun.spawnSync(['git', 'cat-file', '-e', `${baseSha}:${path}`], { cwd: tree })
+    if (onBase.exitCode === 0) run(['git', 'checkout', baseSha, '--', path], { cwd: tree })
+  }
+}
+
+/** Builds `.review-context/`; answers why the comment list is missing, when it is. */
 function buildReviewContext(
   tree: string,
   plan: Extract<ReviewPlan, { kind: 'review' }>,
   listCommand: string,
   scratchHome: string,
-): void {
+): string | undefined {
   const contextDirectory = join(tree, REVIEW_CONTEXT_DIRECTORY)
   mkdirSync(contextDirectory, { recursive: true })
   if (plan.scope === 'new-commits') {
@@ -253,10 +259,17 @@ function buildReviewContext(
       run(['git', 'diff', '--no-color', plan.from, 'HEAD'], { cwd: tree }),
     )
   }
-  runWithoutCredentials('bun install --frozen-lockfile', tree, scratchHome, plan.from)
-  runWithoutCredentials(listCommand, tree, scratchHome, plan.from)
+  // The workflow's rule: "A failed list does not stop the review; it only loses that check." The
+  // prompt then finds no list and says so in Testing.
+  try {
+    runWithoutCredentials('bun install --frozen-lockfile', tree, scratchHome, plan.from)
+    runWithoutCredentials(listCommand, tree, scratchHome, plan.from)
+  } catch (error: unknown) {
+    return `the comment list was not built: ${String(error)}`
+  }
   const list = join(tree, COMMENT_LIST_FILE)
   if (existsSync(list)) run(['mv', list, join(contextDirectory, COMMENT_LIST_FILE)])
+  return undefined
 }
 
 /** Writes the run's grant, and the worktree settings that load the hook with it. */
@@ -284,6 +297,64 @@ interface ReviewOptions {
   readonly dryRun: boolean
 }
 
+/** Whether a review comment reached the pull request after `since`: asked of GitHub, not inferred. */
+function reviewWasPosted(repository: string, number: number, since: string): boolean {
+  const comments = JSON.parse(
+    run([
+      'gh',
+      'api',
+      `repos/${repository}/issues/${number}/comments`,
+      '--paginate',
+      '--jq',
+      '[.[] | {body, created_at}]',
+    ]),
+  ) as IssueComment[]
+  return reviewCommentsSince(comments, since).length > 0
+}
+
+interface ReviewRun {
+  readonly options: ReviewOptions
+  readonly pullRequest: PullRequestState
+  readonly repository: string
+  readonly plan: Extract<ReviewPlan, { kind: 'review' }>
+  readonly runDirectory: string
+  readonly tree: string
+}
+
+/** Everything after the worktree exists: context, settings, the reviewer, the status. */
+function reviewInWorktree(review: ReviewRun): string {
+  const { options, pullRequest, repository, plan, runDirectory, tree } = review
+  const startedAt = new Date().toISOString()
+  const config = readReviewWorkflow(
+    run(['git', 'show', `${pullRequest.baseRefOid}:${REVIEW_WORKFLOW_PATH}`], { cwd: tree }),
+  )
+  const listProblem = buildReviewContext(tree, plan, config.listCommand, join(runDirectory, 'home'))
+  restoreBaseOwnedPaths(tree, pullRequest.baseRefOid)
+  const capture = join(runDirectory, 'review-comment.md')
+  writeGrant(tree, runDirectory, {
+    allowedTools: config.allowedTools,
+    decisionLog: join(runDirectory, 'tool-calls.jsonl'),
+    readRoots: [tree, claudeSessionFolder(tree)],
+    ...(options.dryRun ? { captureCommentTo: capture } : {}),
+  })
+  const values: PromptValues = {
+    repository,
+    pullRequestNumber: options.number,
+    scope: plan.scope,
+    headSha: pullRequest.headRefOid,
+  }
+  const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values))
+  const posted = options.dryRun ? existsSync(capture) : reviewWasPosted(repository, options.number, startedAt)
+  if (!options.dryRun) {
+    const body = statusCommentBody({ posted, headSha: pullRequest.headRefOid, scope: plan.scope, agentExitCode })
+    upsertStatusComment(repository, options.number, body)
+  }
+  const where = options.dryRun ? `captured to ${capture}` : 'posted to the pull request'
+  const outcome = posted ? `reviewed (${plan.scope}); comment ${where}` : 'FAILED: no review comment was posted'
+  const listNote = listProblem === undefined ? '' : `; ${listProblem}`
+  return `#${options.number}: ${outcome}; docker-agent exited ${agentExitCode}${listNote}; log ${join(runDirectory, 'review.log')}`
+}
+
 /** One review of one pull request, start to finish. Returns what happened, for the terminal. */
 function reviewPullRequest(options: ReviewOptions): string {
   const pullRequest = readPullRequest(options.number)
@@ -302,33 +373,10 @@ function reviewPullRequest(options: ReviewOptions): string {
     `pr-${options.number}-${pullRequest.headRefOid.slice(0, SHORT_SHA_LENGTH)}-${Date.now()}`,
   )
   mkdirSync(runDirectory, { recursive: true })
-  const tree = prepareTree(pullRequest, runDirectory)
+  const tree = join(runDirectory, 'tree')
+  addWorktree(pullRequest, tree)
   try {
-    const workflowText = run(['git', 'show', `${pullRequest.baseRefOid}:${REVIEW_WORKFLOW_PATH}`], { cwd: tree })
-    const config = readReviewWorkflow(workflowText)
-    buildReviewContext(tree, plan, config.listCommand, join(runDirectory, 'home'))
-    const capture = join(runDirectory, 'review-comment.md')
-    const decisionLog = join(runDirectory, 'tool-calls.jsonl')
-    writeGrant(tree, runDirectory, {
-      allowedTools: config.allowedTools,
-      decisionLog,
-      readRoots: [tree, claudeSessionFolder(tree)],
-      ...(options.dryRun ? { captureCommentTo: capture } : {}),
-    })
-    const values: PromptValues = {
-      repository,
-      pullRequestNumber: options.number,
-      scope: plan.scope,
-      headSha: pullRequest.headRefOid,
-    }
-    const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values))
-    const posted = existsSync(decisionLog) && reviewWasPosted(readFileSync(decisionLog, 'utf8'))
-    if (!options.dryRun) {
-      const body = statusCommentBody({ posted, headSha: pullRequest.headRefOid, scope: plan.scope, agentExitCode })
-      upsertStatusComment(repository, options.number, body)
-    }
-    const where = options.dryRun ? `captured to ${capture}` : 'posted to the pull request'
-    return `#${options.number}: ${posted ? `reviewed (${plan.scope}); comment ${where}` : 'FAILED: no review comment was posted'}; docker-agent exited ${agentExitCode}; log ${join(runDirectory, 'review.log')}`
+    return reviewInWorktree({ options, pullRequest, repository, plan, runDirectory, tree })
   } finally {
     run(['git', 'worktree', 'remove', '--force', tree], { cwd: REPOSITORY_ROOT })
   }

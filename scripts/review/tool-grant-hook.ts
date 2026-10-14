@@ -27,8 +27,8 @@
  *   bun scripts/review/tool-grant-hook.ts <grant.json>   (Claude Code pipes the tool call on stdin)
  */
 
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve, sep as pathSeparator } from 'node:path'
+import { appendFileSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve, sep as pathSeparator } from 'node:path'
 
 /** The grant file `review-pr.ts` writes for one run. */
 export interface ToolGrant {
@@ -86,8 +86,23 @@ function pathsNamedBy(call: ToolCall, roots: readonly string[]): string[] {
     .map((namedPath) => resolve(base, namedPath))
 }
 
-function isUnderARoot(resolvedPath: string, roots: readonly string[]): boolean {
-  return roots.some((root) => resolvedPath === root || resolvedPath.startsWith(`${root}${pathSeparator}`))
+/**
+ * Where a path really is: symlinks followed. ⚠ `resolve` alone is lexical, so a link the pull request
+ * commits (`docs/x -> ~/.ssh`) would resolve inside the worktree while `Read` follows it out (#989's
+ * review). A path that does not exist yet (a `Glob` pattern) is judged by its nearest real parent.
+ */
+function realLocation(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    const parent = dirname(path)
+    return parent === path ? path : join(realLocation(parent), basename(path))
+  }
+}
+
+function isUnderARoot(namedPath: string, roots: readonly string[]): boolean {
+  const location = realLocation(namedPath)
+  return roots.map(realLocation).some((root) => location === root || location.startsWith(`${root}${pathSeparator}`))
 }
 
 export type ToolDecision =
@@ -97,12 +112,28 @@ export type ToolDecision =
 
 /** `Bash(<prefix>:*)`: the prefix captured. */
 const BASH_PREFIX_ENTRY = /^Bash\((.+):\*\)$/
-/** Shell syntax that makes one command more than one, or sends output somewhere: never allowed. */
-const SHELL_COMPOSITION = /[;&|`<>\n]|\$\(/
-/** A first line ending in a heredoc operator: `… <<'EOF'`, `<< EOF`, `<<-"END"`. Groups: the command, the delimiter. */
-const HEREDOC_FIRST_LINE = /^(.*?)\s*<<-?\s*(['"]?)([A-Za-z_]\w*)\2\s*$/
+/**
+ * The only characters a command's first line may hold: words, numbers, flags, `owner/name`, comma
+ * lists. ⚠ An ALLOWLIST, not a list of dangerous syntax. #989's review found three ways through a
+ * granted prefix that a composition denylist missed: `"$GH_TOKEN"` (expansion), `-F ~/.ssh/id`
+ * (home), and a file path to `--body-file`. So no `$`, `~`, quote, glob, backslash or shell operator
+ * ever reaches a granted command; the prompt gives every value it needs literally.
+ */
+const PLAIN_FIRST_LINE = /^[A-Za-z0-9 ._:/=,@+-]+$/
+/**
+ * A first line ending in a QUOTED heredoc operator: `… <<'EOF'`, `<< "END"`. Groups: the command,
+ * the quote, the delimiter. ⚠ The quote is required: with `<<EOF`, bash expands `$(…)`, backticks
+ * and `$VAR` inside the body, which this hook does not check (#989's review: `<<EOF` +
+ * `$(cat ~/.ssh/id_ed25519)` posted the key). A quoted delimiter makes the body literal text.
+ */
+const HEREDOC_FIRST_LINE = /^(.*?)\s*<<-?\s*(['"])([A-Za-z_]\w*)\2\s*$/
 /** The command the review posts with, which a dry run captures instead of running. */
 const POST_COMMAND_PREFIX = 'gh pr comment'
+/**
+ * The one shape a post may take: the number, then the body from stdin, which is the heredoc. Any
+ * other `gh pr comment` (`--body-file <path>`, `-F <path>`, `--repo`, `--edit-last`) is refused.
+ */
+const POST_FIRST_LINE = /^gh pr comment \d+ --body-file -$/
 /** What Claude Code reads as "refuse this call, and tell the model why". */
 const HOOK_BLOCK_EXIT_CODE = 2
 
@@ -137,22 +168,30 @@ function decideBash(grant: ToolGrant, command: string): ToolDecision {
     const prefix = BASH_PREFIX_ENTRY.exec(toolEntry)?.[1]
     return prefix === undefined ? [] : [prefix]
   })
+  const postShape = `post with \`${POST_COMMAND_PREFIX} <number> --body-file - <<'EOF'\` … \`EOF\``
   const parts = shellCommandParts(command.trim())
   if (parts === undefined) {
     return { kind: 'block', reason: 'a heredoc must end with its delimiter, and nothing may follow it' }
   }
-  if (SHELL_COMPOSITION.test(parts.firstLine)) {
+  if (!PLAIN_FIRST_LINE.test(parts.firstLine)) {
     return {
       kind: 'block',
-      reason: `one plain command only: no ; & | \` $( > < or extra lines (allowed: ${prefixes.join(', ')}; post with \`${POST_COMMAND_PREFIX} <number> --body-file - <<'EOF'\` … \`EOF\`)`,
+      reason: `one plain command only: letters, numbers and flags, no $ ~ quotes or shell syntax (allowed: ${prefixes.join(', ')}; ${postShape})`,
     }
   }
   const prefix = prefixes.find((candidate) => startsWithCommand(parts.firstLine, candidate))
-  if (prefix === undefined)
+  if (prefix === undefined) {
     return { kind: 'block', reason: `not in the review's tool grant (allowed: ${prefixes.join(', ')})` }
-  if (grant.captureCommentTo !== undefined && prefix === POST_COMMAND_PREFIX) {
-    return { kind: 'capture', body: parts.heredocBody ?? '' }
   }
+  const isPost = prefix === POST_COMMAND_PREFIX
+  const hasHeredoc = parts.heredocBody !== undefined
+  if (hasHeredoc && !isPost) {
+    return { kind: 'block', reason: `only the post takes a heredoc: ${postShape}` }
+  }
+  if (isPost && !(hasHeredoc && POST_FIRST_LINE.test(parts.firstLine))) {
+    return { kind: 'block', reason: `a post has one shape: ${postShape}` }
+  }
+  if (isPost && grant.captureCommentTo !== undefined) return { kind: 'capture', body: parts.heredocBody ?? '' }
   return { kind: 'allow' }
 }
 

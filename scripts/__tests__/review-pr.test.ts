@@ -5,8 +5,8 @@ import {
   parseReviewArguments,
   planReview,
   type PullRequestState,
+  reviewCommentsSince,
   reviewSettings,
-  reviewWasPosted,
   STATUS_MARKER,
   statusCommentBody,
 } from '../review/review-pr.ts'
@@ -79,18 +79,20 @@ test('⚠ a review posted before docker-agent failed is reported as posted, with
   )
 })
 
-test('the decision log shows a post when a gh pr comment was allowed or captured, and not otherwise', () => {
-  const line = (command: string, kind: string): string =>
-    JSON.stringify({ tool: 'Bash', input: { command }, decision: { kind } })
-  expect(
-    reviewWasPosted(
-      [line('gh pr diff 1', 'allow'), line("gh pr comment 1 --body-file - <<'EOF'\nx\nEOF", 'allow')].join('\n'),
-    ),
-  ).toBe(true)
-  expect(reviewWasPosted(line("gh pr comment 1 --body-file - <<'EOF'\nx\nEOF", 'capture'))).toBe(true)
-  expect(reviewWasPosted(line('gh pr comment 1 --body x; rm -rf ~', 'block'))).toBe(false)
-  expect(reviewWasPosted(`${line('gh pr diff 1', 'allow')}\n`)).toBe(false)
-  expect(reviewWasPosted('')).toBe(false)
+/**
+ * ⚠ POSTED IS WHAT IS ON THE PULL REQUEST. A hook allows a post before `gh` runs it, so "allowed"
+ * would record a head nobody reviewed when the post then failed (#989's review).
+ */
+test('a review counts as posted only when a comment in the template reached the pull request after the run began', () => {
+  const since = '2026-10-14T14:00:00Z'
+  const comments = [
+    { body: '## Code Review\n\n### Overview\nold', created_at: '2026-10-14T13:00:00Z' },
+    { body: `${STATUS_MARKER}\n✅`, created_at: '2026-10-14T14:05:00Z' },
+    { body: 'Thanks, fixed in abc1234.', created_at: '2026-10-14T14:06:00Z' },
+  ]
+  expect(reviewCommentsSince(comments, since)).toEqual([])
+  const posted = { body: '## Code Review (commits pushed up to add4fef)\n…', created_at: '2026-10-14T14:07:00Z' }
+  expect(reviewCommentsSince([...comments, posted], since)).toEqual([posted])
 })
 
 test("Claude Code's session folder for a directory, named as Claude Code names it", () => {
