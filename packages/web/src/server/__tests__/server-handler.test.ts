@@ -1176,12 +1176,12 @@ test('⚠ the host check never asks a host web_fetch would refuse by its address
   ] as const) {
     expect(await checked(host)).toEqual({
       kind: 'failed',
-      reason: `${host} resolves to a non-public address (${address}), so web_fetch would refuse it: it reaches the public web only`,
+      reason: `"${host}" resolves to a non-public address (${address}), so web_fetch would refuse it: it reaches the public web only`,
     })
   }
   expect(await checked('nowhere.example')).toEqual({
     kind: 'failed',
-    reason: expect.stringContaining('nowhere.example did not resolve: Error: queryA ENOTFOUND nowhere.example'),
+    reason: expect.stringContaining('"nowhere.example" did not resolve (Error: queryA ENOTFOUND nowhere.example)'),
   })
   expect(asked).toEqual([])
 })

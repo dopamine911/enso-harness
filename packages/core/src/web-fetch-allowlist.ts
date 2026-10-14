@@ -1,7 +1,8 @@
+import { isIP } from 'node:net'
 import { applyEdits, type Edit, modify } from 'jsonc-parser'
 import { type EnsoConfigParseResult, parseEnsoConfig } from './config.ts'
 import { readTextIfPresent, replaceFileText } from './paths.ts'
-import { readWebFetchHostInput, type WebFetchAllowlistChange } from './web-fetch.ts'
+import { isPublicIpAddress, readWebFetchHostInput, type WebFetchAllowlistChange } from './web-fetch.ts'
 
 /**
  * The user's `webFetch.allowedHosts`, changed from Settings › Web tools (#924) instead of by hand.
@@ -89,6 +90,34 @@ export function changeUserAllowedHosts(path: string, change: WebFetchAllowlistCh
     }
   replaceFileText(path, after)
   return { kind: 'written', hosts: next }
+}
+
+/**
+ * web_fetch's address gate (#54), the one copy: why a request to `host` would be refused by its
+ * addresses — it did not resolve, it resolved to nothing, or any one address is not public
+ * (`isPublicIpAddress`) — or undefined when every address is public. An IP literal is classified as
+ * it is, without a lookup (URL brackets on an IPv6 literal are dropped). The tool and Settings' host
+ * check (#924) both ask here, each adding its own tail to the reason.
+ *
+ * ⚠ ADVISORY: `resolve` answers now, the request resolves again later (the stated non-coverage in
+ * `web-fetch-policy.ts`). The lookup carries no deadline of its own: the system resolver's bounds it.
+ *
+ * @group Web tools
+ */
+export async function nonPublicAddressReason(
+  host: string,
+  resolve: (host: string) => Promise<readonly string[]>,
+): Promise<string | undefined> {
+  const bareHost = host.replace(/^\[/, '').replace(/\]$/, '')
+  let addresses: readonly string[]
+  try {
+    addresses = isIP(bareHost) === 0 ? await resolve(bareHost) : [bareHost]
+  } catch (error: unknown) {
+    return `"${bareHost}" did not resolve (${String(error)})`
+  }
+  const nonPublic = addresses.find((address) => !isPublicIpAddress(address))
+  if (addresses.length > 0 && nonPublic === undefined) return undefined
+  return `"${bareHost}" resolves to a non-public address${nonPublic === undefined ? '' : ` (${nonPublic})`}`
 }
 
 /**

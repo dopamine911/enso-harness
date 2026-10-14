@@ -78,25 +78,47 @@ export function realpathOrSelf(path: string): string {
   }
 }
 
+/** As many links as one path may pass through before it is a loop (Linux's own `MAXSYMLINKS`). */
+const MAX_LINK_HOPS = 40
+
+/**
+ * The file `path` names, through every link — also a link whose file is not there yet (a dotfiles
+ * repo not checked out), which `realpathSync` refuses. A path with nothing at it names itself.
+ */
+function fileBehindLinks(path: string): string {
+  let current = path
+  for (let hop = 0; hop < MAX_LINK_HOPS; hop++) {
+    try {
+      return realpathSync(current)
+    } catch {
+      // Not there, or a link to something not there: follow the link by hand.
+    }
+    let isLink: boolean
+    try {
+      isLink = lstatSync(current).isSymbolicLink()
+    } catch {
+      return current
+    }
+    if (!isLink) return current
+    current = resolve(dirname(current), readlinkSync(current))
+  }
+  return current
+}
+
 /**
  * Replace the file at `path` with `text` in one step: written beside the file it names, then renamed
- * over it — a reader never sees half a file. Settings' writes (#924, #932) go through here.
+ * over it — a reader never sees half a file. Settings' writes (#924) go through here.
  *
- * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config or secrets file kept as a symlink (into a
- * dotfiles repo, say) stays a link, and the file behind it changes. The file keeps its own mode;
- * `mode` is the mode of a new one — or, given `forceMode`, of the file whatever it was before.
- * Nothing staged is left behind when the write or the rename throws: the error is rethrown.
+ * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config file kept as a symlink (into a dotfiles repo,
+ * say) stays a link, and the file behind it changes — or is made, when the link points at a file
+ * not there yet; a link into a directory not there is an error, never replaced. The file keeps its
+ * own mode. Nothing staged is left behind when the write or the rename throws: the error is rethrown.
  *
  * @group Workspace paths
  */
-export function replaceFileText(
-  path: string,
-  text: string,
-  options: { mode?: number; forceMode?: boolean } = {},
-): void {
-  const target = realpathOrSelf(path)
-  const before = existsSync(target) ? statSync(target).mode & 0o7777 : undefined
-  const mode = options.forceMode === true || before === undefined ? options.mode : before
+export function replaceFileText(path: string, text: string): void {
+  const target = fileBehindLinks(path)
+  const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined
   const staged = `${target}.${process.pid}.tmp`
   try {
     writeFileSync(staged, text, mode === undefined ? undefined : { mode })

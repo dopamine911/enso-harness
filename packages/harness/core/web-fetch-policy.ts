@@ -15,7 +15,7 @@ import { WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
  *     DIFFERENT strings from `example.com` and fail closed; exact match, no wildcard, no
  *     subdomain inheritance — `api.example.com` needs its own allowlist entry.
  *   - address    — an allowlisted host resolving to a private/reserved address is refused
- *     (`isPublicIpAddress`, in `@enso/core` — Settings' host check asks it too, #924); an
+ *     (`nonPublicAddressReason` and its `isPublicIpAddress`, in `@enso/core` — Settings' host check asks them too, #924); an
  *     IP-literal URL classifies the literal directly.
  *   - redirect   — never followed (the extension reports the target instead), so an open
  *     redirect on an allowlisted host cannot reach an unlisted one.
