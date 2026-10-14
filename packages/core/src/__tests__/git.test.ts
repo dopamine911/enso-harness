@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -504,6 +504,39 @@ test('⚠ an external diff or textconv program the repository configures does no
   const { files } = await changesAt(directory)
   expect(existsSync(ran)).toBe(false)
   expect(files.find((file) => file.path === 'README.md')?.patch).toContain('+changed')
+})
+
+test('⚠ a clean or process filter the repository configures does not run on a read, wherever an attribute names it (#901)', async () => {
+  const directory = repository()
+  const ran = join(scratch('filter-program'), 'ran')
+  const program = join(directory, 'filter-program.sh')
+  writeFileSync(program, `#!/bin/sh\ntouch '${ran}'\ncat\n`, { mode: 0o755 })
+  // Two drivers, both required: a clean filter the tree's own .gitattributes names, and a long-running
+  // process filter with a dotted name that .git/info/attributes names — a file `--attr-source` leaves in force.
+  git(directory, 'config', 'filter.plain.clean', program)
+  git(directory, 'config', 'filter.plain.required', 'true')
+  git(directory, 'config', 'filter.long.running.process', program)
+  git(directory, 'config', 'filter.long.running.required', 'true')
+  writeFileSync(join(directory, '.gitattributes'), 'README.md filter=plain\n')
+  const info = join(git(directory, 'rev-parse', '--absolute-git-dir').trim(), 'info')
+  mkdirSync(info, { recursive: true })
+  writeFileSync(join(info, 'attributes'), 'new.txt filter=long.running\n')
+  // The same size as 'one\n': `status` can't tell it changed without hashing it through the filter.
+  writeFileSync(join(directory, 'README.md'), 'two\n')
+  writeFileSync(join(directory, 'new.txt'), 'new\n')
+  // The config really is live: git as a person runs each program (and fails on the process filter's
+  // missing handshake, which is why its exit is not asserted).
+  for (const args of [['status', '--porcelain'], ['diff'], ['diff', '--no-index', '--', '/dev/null', 'new.txt']]) {
+    spawnSync('git', args, { cwd: directory, env: environment })
+    expect(existsSync(ran)).toBe(true)
+    unlinkSync(ran)
+  }
+  expect((await repositoryAt(directory)).kind).toBe('repository')
+  expect(existsSync(ran)).toBe(false)
+  const { files } = await changesAt(directory)
+  expect(existsSync(ran)).toBe(false)
+  expect(files.find((file) => file.path === 'README.md')?.patch).toContain('+two')
+  expect(files.find((file) => file.path === 'new.txt')?.patch).toContain('+new')
 })
 
 test('a nested repository is not listed as a file', async () => {
