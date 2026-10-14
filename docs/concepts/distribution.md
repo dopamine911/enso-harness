@@ -7,7 +7,8 @@ run Enso?", lists what stops that today, and ends with the decisions that have t
 packaging work starts.
 
 Evidence is this repository at `1c284345` (`origin/main`, read in the worktree
-`../zhf-distribution`, branch `design/distribution`), its installed `node_modules` after `bun install`,
+`../zhf-distribution`, branch `design/distribution`). The `web_search` client-identity row was re-read
+at `f3cb9e17`, after #925 merged. Also read: its installed `node_modules` after `bun install`,
 pi's own packaging guide (`@earendil-works/pi-coding-agent@1.1.0`, `docs/packages.md`), issue #7, and
 the npm registry as queried on 2026-10-13. Where a claim rests on reasoning rather than on a file read
 or a command, it says **[inference]**. Nothing was built, packed or published.
@@ -80,7 +81,7 @@ why). Two variations:
 | 1 | `extensions/logging` | Enso | Configures LogTape for the pi process, and records the provider's request id (#132, #144). | none found |
 | 2 | `extensions/guards` | Enso | The guard suite on `tool_call`: policy floor, bash policy (through the `cc-safety-net` library, MIT, pinned 2.4.6), egress deny, write confinement, read gate, incidents, the command judge. | Calls `findRepoRoot` at load (blocker 1). Imports `@earendil-works/pi-classifier`, an alias of `pi-ai` (blocker 3). |
 | 3 | `extensions/web-fetch` | Enso | `web_fetch`: the sanctioned web access, with an empty-by-default host allowlist (#54). | none found |
-| 4 | `extensions/web-search` | Enso, partly ported | `web_search`: the current model's native search, with a Tavily fallback (#63). Ported from `pi-web-search` 1.4.0 (© ttttmr, MIT), which its header says. | ⚠ **Client identity.** On the Anthropic OAuth path it sends `user-agent: claude-cli/2.1.75`, Claude Code's beta flags, and "You are Claude Code, Anthropic's official CLI for Claude." as the first system block (`packages/harness/core/web-search/providers/anthropic.ts#ANTHROPIC_OAUTH_USER_AGENT`, `#ANTHROPIC_OAUTH_BETA_FLAGS`, `#ANTHROPIC_OAUTH_IDENTITY`). The comment says the block is load-bearing: without it Anthropic answered 429. The pin is already stale against pi's (#925). MIT also requires the ported notice to ship with the code. |
+| 4 | `extensions/web-search` | Enso, partly ported | `web_search`: the current model's native search, with a Tavily fallback (#63). Ported from `pi-web-search` 1.4.0 (© ttttmr, MIT), which its header says. | ⚠ **Client identity, on searches and on conversations.** A search made with a Claude login sends `claude-cli/<version>`, `x-app: cli`, Claude Code's beta flags, and "You are Claude Code, Anthropic's official CLI for Claude." as the first system block (`packages/harness/core/web-search/providers/anthropic.ts#applyOAuthHeaders`, `#ANTHROPIC_OAUTH_IDENTITY`). The comment says the block is load-bearing: without it, Anthropic answered 429. Since #925 the extension also hooks `before_provider_headers` and replaces pi's user agent on **conversation** requests with the version the user sets in `claudeCode.version` (`packages/harness/extensions/web-search/index.ts#claimClaudeCodeVersion`). The version comes from `packages/core/src/claude-code.ts#CLAUDE_CODE_DEFAULT_VERSION` (`2.1.280`, pi's own) unless that setting overrides it. So the version Enso claims is now Enso's own setting, not something it only inherits from pi. MIT also requires the ported notice to ship with the code. |
 | 5 | `@gotgenes/pi-permission-system` | third party, 40.0.2, MIT | The permission engine: allow/ask/deny rules, the authorizer chain. | Must be bundled (blocker 3). |
 | 6 | `extensions/permission-modes` | Enso | Modes over the engine: `/default`, `/acceptEdits`, `/plan`, `/bypassPermissions`, `/auto` (#496). | Depends on #5's service. |
 | 7 | `pi-multi-account` | third party, 1.24.0, MIT | Multi-account failover and rotation across Anthropic, OpenAI Codex, Kimi, Cursor, Qwen and Ollama. On a quota or rate limit it switches to the next logged-in account. It also has a Cursor bridge (a loopback proxy), which Enso turns off by default (`includeCursor: false`, `packages/web/src/host/multi-account-seed.ts#MULTI_ACCOUNT_INCLUDE_CURSOR_KEY`, #341). | ⚠ **The blocking concern** (top of this page). Its `before_provider_request` hook removes pi from the system prompt and adds a billing attestation built from `CLAUDE_CODE_VERSION = "2.1.288"` and a fixed salt (`node_modules/pi-multi-account/index.ts:3409-3428`, `3525-3531`). Its own comment says that pin "must track the current Claude Code release". Separately, **rotating several subscription accounts to get past each one's quota** is itself something a provider's terms may forbid [inference, terms not read]. Must be bundled (blocker 3). |
@@ -98,13 +99,21 @@ for anything else.
 
 **The concern, in one line:** two of the eleven make requests that claim to be Claude Code. One is
 third-party (`pi-multi-account`, which also forges a billing attestation). The other is Enso's own
-(`web_search`, which sends the identity line and Claude Code's user agent). Under pi's own Anthropic
-OAuth provider, which also sends the identity block (`provider-auth-and-client-identity.md`), both are
-needed for a Pro/Max login to work. A distributed build that should not claim to be Claude Code has
-to drop the subscription path completely: API keys only for Anthropic, `pi-multi-account` left out or
-opt-in, and `web_search`'s OAuth branch disabled. **Confidence 0.75** that pi-ai's OAuth provider,
-`pi-multi-account` and `web_search` are the only parts that claim Claude Code's identity. Caveat: I grepped Enso's packages for `claude-cli` and read `pi-multi-account`'s hook. I did not
-audit `pi-permission-system` or the Cursor bridge's requests.
+`web_search` extension. It sends the identity line and Claude Code's user agent on searches, and since
+#925 it sets the claimed Claude Code version on conversation requests too, from the `claudeCode.version`
+setting. Those sit on top of pi's own Anthropic OAuth provider, which also sends the identity block
+(`provider-auth-and-client-identity.md`). A distributed build that should not claim to be Claude Code
+has to drop the subscription path completely:
+
+- API keys only for Anthropic;
+- `pi-multi-account` left out or opt-in;
+- `web_search`'s OAuth branch, its `before_provider_headers` hook and the `claudeCode` setting
+  disabled.
+
+**Confidence 0.75** that pi-ai's OAuth provider, `pi-multi-account` and `web_search` are the only
+parts that claim Claude Code's identity. Caveat: I grepped Enso's packages for `claude-cli` and
+`claudeCodeUserAgent`, and read `pi-multi-account`'s hook. I did not audit `pi-permission-system` or
+the Cursor bridge's requests.
 
 ---
 
