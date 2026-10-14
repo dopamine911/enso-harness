@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -42,6 +43,7 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type ThreadRuntime,
+  ProjectWebTools,
   readEnsoThreadIncidents,
   readEnsoThreadJudgeCases,
   WebFetchAllowlist,
@@ -1277,6 +1279,122 @@ test('⚠ a foreign page can neither change Searching, set the key, nor read it 
     403,
   )
   expect(readdirSync(home)).toEqual([])
+})
+
+// ── A project page's Web tools tab (#937): the project's own webFetch / webSearch ──────────────
+
+/** A server launched in a fresh project — `.enso/config.json` holding `shared` when given — that pi trusts or not. */
+async function projectToolsServer(options: {
+  readonly trusted: boolean
+  readonly shared?: unknown
+}): Promise<{ url: string; project: string; projectId: string; sharedPath: string }> {
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-tools-project-')))
+  const sharedPath = join(project, '.enso', 'config.json')
+  if (options.shared !== undefined) {
+    mkdirSync(join(project, '.enso'))
+    writeFileSync(sharedPath, JSON.stringify(options.shared))
+  }
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-tools-agent-'))
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: options.trusted }))
+  const home = mkdtempSync(join(tmpdir(), 'enso-tools-home-'))
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ webFetch: { allowedHosts: ['docs.user.example'] } }))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    launch: project,
+    agentDir,
+    userConfigPath: join(home, 'config.json'),
+  })
+  const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
+  if (launch === undefined) throw new Error('no launch project')
+  return { url, project, projectId: launch.projectId, sharedPath }
+}
+
+function postProjectTools(
+  url: string,
+  projectId: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/projects/${projectId}/web-tools`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  })
+}
+
+async function projectToolsOf(response: Response): Promise<ProjectWebTools> {
+  expect(response.status).toBe(200)
+  const answered: unknown = await response.json()
+  if (!Check(ProjectWebTools, answered)) throw new Error('the answer is not ProjectWebTools')
+  return answered
+}
+
+test('a trusted project’s web tools round trip: hosts and Searching in its shared .enso/config.json, its other keys kept (#937)', async () => {
+  const { url, projectId, sharedPath } = await projectToolsServer({
+    trusted: true,
+    shared: { threads: { setup: ['make'] } },
+  })
+  expect(await prompt(url, 'before-change', 'hi')).toBe(202)
+  const added = await projectToolsOf(await postProjectTools(url, projectId, { add: 'docs.project.example' }))
+  expect(added).toMatchObject({
+    path: sharedPath,
+    trusted: true,
+    own: { hosts: ['docs.project.example'], includeDomains: [], excludeDomains: [] },
+    yours: { hosts: ['docs.user.example'], backend: 'model' },
+    staleThreads: ['before-change'],
+  })
+  await projectToolsOf(await postProjectTools(url, projectId, { backend: 'deepseek' }))
+  await projectToolsOf(await postProjectTools(url, projectId, { list: 'includeDomains', add: 'bun.sh' }))
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8'))).toEqual({
+    threads: { setup: ['make'] },
+    webFetch: { allowedHosts: ['docs.project.example'] },
+    webSearch: { backend: 'deepseek', tavily: { includeDomains: ['bun.sh'] } },
+  })
+  // Read back as a fresh page would; `model` takes the project's backend off, so yours applies.
+  expect((await projectToolsOf(await fetch(`${url}/api/projects/${projectId}/web-tools`))).own).toEqual({
+    hosts: ['docs.project.example'],
+    backend: 'deepseek',
+    includeDomains: ['bun.sh'],
+    excludeDomains: [],
+  })
+  const reset = await projectToolsOf(await postProjectTools(url, projectId, { backend: 'model' }))
+  expect(reset.own?.backend).toBeUndefined()
+  await projectToolsOf(await postProjectTools(url, projectId, { remove: 'docs.project.example' }))
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8')).webFetch).toEqual({ allowedHosts: [] })
+  // A URL is not a host: refused with its reason, the file untouched.
+  const before = readFileSync(sharedPath, 'utf8')
+  expect((await postProjectTools(url, projectId, { add: 'https://docs.project.example/' })).status).toBe(422)
+  expect(readFileSync(sharedPath, 'utf8')).toBe(before)
+})
+
+test('a trusted project with no .enso/ yet: the first host makes its shared file (#937)', async () => {
+  const { url, projectId, sharedPath } = await projectToolsServer({ trusted: true })
+  await projectToolsOf(await postProjectTools(url, projectId, { add: 'docs.project.example' }))
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8'))).toEqual({ webFetch: { allowedHosts: ['docs.project.example'] } })
+})
+
+test('⚠ an untrusted project’s .enso/config.json is never read nor written: the tab is read only (#937)', async () => {
+  const { url, project, projectId, sharedPath } = await projectToolsServer({ trusted: false })
+  // A FIFO: a read would block the answer, so an answer at all proves the file was not opened.
+  mkdirSync(join(project, '.enso'))
+  execFileSync('mkfifo', [sharedPath])
+  const read = await projectToolsOf(await fetch(`${url}/api/projects/${projectId}/web-tools`))
+  expect(read).toMatchObject({ trusted: false, yours: { hosts: ['docs.user.example'] } })
+  expect(read.own).toBeUndefined()
+  const refused = await postProjectTools(url, projectId, { add: 'docs.project.example' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('not trusted')
+  expect(lstatSync(sharedPath).isFIFO()).toBe(true)
+})
+
+test('⚠ a foreign page can neither change a project’s web tools nor read them (#937, #717)', async () => {
+  const shared = { webFetch: { allowedHosts: ['docs.project.example'] } }
+  const { url, projectId, sharedPath } = await projectToolsServer({ trusted: true, shared })
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }
+  expect((await postProjectTools(url, projectId, { add: 'evil.example' }, otherPort)).status).toBe(403)
+  const crossSite = { headers: { 'Sec-Fetch-Site': 'cross-site' } }
+  expect((await fetch(`${url}/api/projects/${projectId}/web-tools`, crossSite)).status).toBe(403)
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8'))).toEqual(shared)
+  expect((await postProjectTools(url, '0123456789abcdef', { add: 'a.example' })).status).toBe(404)
 })
 
 // A revoke fails closed AT ONCE, as removal does: never under a running thread of the project, and

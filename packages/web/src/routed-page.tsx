@@ -317,7 +317,7 @@ function PageBody({
         projects={projects.rows}
         stored={stored.rows}
         onDeleted={onDeleted}
-        onOpenProject={(projectId) => onOpen(projectRoute(projectId, 'storage'))}
+        onOpenProject={(projectId, tab) => onOpen(projectRoute(projectId, tab))}
         onOpenProjects={() => onOpen(PROJECTS_ROUTE)}
       />
     )

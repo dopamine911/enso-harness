@@ -79,12 +79,60 @@ function WebFetchAllowlistEditor({ fetch, stored, onOpenProject }: WebToolsSecti
   const answer = useSettingsAnswer(fetch, '/api/settings/web-fetch', WebFetchAllowlist, 'allowlist')
   const { read, writing, writeError, fetchNow } = answer
   const change = (body: WebFetchAllowlistChange): Promise<boolean> => answer.post(body)
+
+  if (read.kind !== 'read') return <SettingsUnread read={read} what="the allowlist" />
+  const { value: allowlist } = read
+
+  return (
+    <div className="grid gap-4">
+      <AllowlistNotes path={allowlist.path} unreadable={allowlist.unreadable} />
+
+      <UserHosts
+        path={allowlist.path}
+        hosts={allowlist.hosts}
+        busy={writing}
+        onRemove={(host) => void change({ remove: host })}
+      />
+
+      <HostAddForm idPrefix="settings" fetchNow={fetchNow} writing={writing} onAdd={(host) => change({ add: host })} />
+      {writeError === undefined ? null : (
+        <p role="alert" className="text-sm text-refuse">
+          Not saved: {writeError}
+        </p>
+      )}
+
+      <WhenItApplies
+        staleThreads={allowlist.staleThreads}
+        stored={stored}
+        lead="Applies to sessions started after the change: a thread reads the list when its session starts."
+        old="the old list"
+      />
+
+      <ProjectHosts projects={allowlist.projects} onOpenProject={onOpenProject} />
+    </div>
+  )
+}
+
+/**
+ * Add a host, with Check (#924): a pasted URL reduced to its host only once confirmed, a refusal in
+ * its words, and the server's one request to the host — the user's allowlist's and a project's
+ * (#937). `idPrefix` names the field, one per page; `onAdd` answers true once the host is saved.
+ */
+export function HostAddForm(props: {
+  idPrefix: string
+  fetchNow: FetchLike
+  writing: boolean
+  onAdd: (host: string) => Promise<boolean>
+}): React.ReactNode {
+  const { idPrefix, fetchNow, writing, onAdd } = props
   const [typed, setTyped] = useState('')
   const [add, setAdd] = useState<AddState>({ kind: 'idle' })
   const [check, setCheck] = useState<CheckState>({ kind: 'idle' })
+  const inputId = `${idPrefix}-web-fetch-host`
+  const refusalId = `${idPrefix}-web-fetch-refusal`
 
   async function addHost(host: string): Promise<void> {
-    if (await change({ add: host })) {
+    if (await onAdd(host)) {
       setTyped('')
       setAdd({ kind: 'idle' })
       setCheck({ kind: 'idle' })
@@ -105,95 +153,67 @@ function WebFetchAllowlistEditor({ fetch, stored, onOpenProject }: WebToolsSecti
     setCheck(await askHostCheck(fetchNow, host))
   }
 
-  if (read.kind !== 'read') return <SettingsUnread read={read} what="the allowlist" />
-  const { value: allowlist } = read
   const busy = writing || check.kind === 'checking'
-
   return (
-    <div className="grid gap-4">
-      <AllowlistNotes path={allowlist.path} unreadable={allowlist.unreadable} />
-
-      <UserHosts
-        path={allowlist.path}
-        hosts={allowlist.hosts}
-        busy={busy}
-        onRemove={(host) => void change({ remove: host })}
-      />
-
-      <form
-        className="grid gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          const host = typedHost()
-          if (host !== undefined) void addHost(host)
-        }}
-      >
-        <label htmlFor="settings-web-fetch-host" className="text-sm font-medium">
-          Add a host
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <input
-            id="settings-web-fetch-host"
-            className={cn(PAGE_INPUT, 'min-w-0 flex-1 font-mono sm:w-auto')}
-            placeholder="docs.example.com"
-            autoComplete="off"
-            spellCheck={false}
-            value={typed}
-            aria-invalid={add.kind === 'refused' ? true : undefined}
-            aria-describedby={add.kind === 'refused' ? 'settings-web-fetch-refusal' : undefined}
-            onChange={(event) => {
-              setTyped(event.target.value)
-              setAdd({ kind: 'idle' })
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            className={PAGE_OUTLINE_BUTTON}
-            disabled={busy || typed.trim() === ''}
-            onClick={() => {
-              const input = readWebFetchHostInput(typed)
-              if (input.kind === 'refused') setAdd({ kind: 'refused', reason: input.reason })
-              else void checkHost(input.host)
-            }}
-          >
-            Check
-          </Button>
-          <Button type="submit" className={PAGE_PRIMARY_BUTTON} disabled={busy || typed.trim() === ''}>
-            Add
-          </Button>
-        </div>
-        {add.kind === 'refused' ? (
-          <p id="settings-web-fetch-refusal" role="alert" className="text-sm text-refuse">
-            {add.reason}
-          </p>
-        ) : null}
-        {add.kind === 'confirm-url' ? (
-          <UrlReduction
-            host={add.host}
-            url={add.url}
-            busy={busy}
-            onAdd={() => void addHost(add.host)}
-            onCancel={() => setAdd({ kind: 'idle' })}
-          />
-        ) : null}
-        <CheckResult check={check} busy={busy} onAdd={(host) => void addHost(host)} />
-        {writeError === undefined ? null : (
-          <p role="alert" className="text-sm text-refuse">
-            Not saved: {writeError}
-          </p>
-        )}
-      </form>
-
-      <WhenItApplies
-        staleThreads={allowlist.staleThreads}
-        stored={stored}
-        lead="Applies to sessions started after the change: a thread reads the list when its session starts."
-        old="the old list"
-      />
-
-      <ProjectHosts projects={allowlist.projects} onOpenProject={onOpenProject} />
-    </div>
+    <form
+      className="grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        const host = typedHost()
+        if (host !== undefined) void addHost(host)
+      }}
+    >
+      <label htmlFor={inputId} className="text-sm font-medium">
+        Add a host
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <input
+          id={inputId}
+          className={cn(PAGE_INPUT, 'min-w-0 flex-1 font-mono sm:w-auto')}
+          placeholder="docs.example.com"
+          autoComplete="off"
+          spellCheck={false}
+          value={typed}
+          aria-invalid={add.kind === 'refused' ? true : undefined}
+          aria-describedby={add.kind === 'refused' ? refusalId : undefined}
+          onChange={(event) => {
+            setTyped(event.target.value)
+            setAdd({ kind: 'idle' })
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          className={PAGE_OUTLINE_BUTTON}
+          disabled={busy || typed.trim() === ''}
+          onClick={() => {
+            const input = readWebFetchHostInput(typed)
+            if (input.kind === 'refused') setAdd({ kind: 'refused', reason: input.reason })
+            else void checkHost(input.host)
+          }}
+        >
+          Check
+        </Button>
+        <Button type="submit" className={PAGE_PRIMARY_BUTTON} disabled={busy || typed.trim() === ''}>
+          Add
+        </Button>
+      </div>
+      {add.kind === 'refused' ? (
+        <p id={refusalId} role="alert" className="text-sm text-refuse">
+          {add.reason}
+        </p>
+      ) : null}
+      {add.kind === 'confirm-url' ? (
+        <UrlReduction
+          host={add.host}
+          url={add.url}
+          busy={busy}
+          onAdd={() => void addHost(add.host)}
+          onCancel={() => setAdd({ kind: 'idle' })}
+        />
+      ) : null}
+      <CheckResult check={check} busy={busy} onAdd={(host) => void addHost(host)} />
+    </form>
   )
 }
 

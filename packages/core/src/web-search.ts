@@ -1,5 +1,5 @@
 import { type Static, Type } from 'typebox'
-import { WebToolsProject } from './web-fetch.ts'
+import { WebFetchAllowlistChange, WebToolsProject } from './web-fetch.ts'
 
 /**
  * The web_search tool's shapes and config section (#63).
@@ -171,3 +171,50 @@ export const WebSearchSettings = Type.Object({
 })
 /** @group Web tools */
 export type WebSearchSettings = Static<typeof WebSearchSettings>
+
+/**
+ * One change to a project's own web tools from its page's Web tools tab (#937): a `web_fetch` host
+ * added or removed, or a Searching change. `{ backend: 'model' }` removes the project's backend, so
+ * the user's applies there.
+ *
+ * @group Web tools
+ */
+export const ProjectWebToolsChange = Type.Union([WebFetchAllowlistChange, WebSearchSettingsChange])
+/** @group Web tools */
+export type ProjectWebToolsChange = Static<typeof ProjectWebToolsChange>
+
+/**
+ * A project's page › Web tools (#937): its shared `.enso/config.json` (`path`) — the one project
+ * tier a session merges (`.enso/config.local.json` is never read for web tools) — and, beside it,
+ * the user's own settings it adds to. ⚠ `own` is there only when the project is trusted and its
+ * file read: an untrusted project's file is never read, and its tab is read only. `staleThreads`:
+ * the project's live threads still on its settings as they were before the last change made there.
+ *
+ * @group Web tools
+ */
+export const ProjectWebTools = Type.Object({
+  ...WebToolsProject.properties,
+  trusted: Type.Boolean(),
+  own: Type.Optional(
+    Type.Object({
+      hosts: Type.Array(Type.String()),
+      backend: Type.Optional(Type.Literal('deepseek')),
+      includeDomains: Type.Array(Type.String()),
+      excludeDomains: Type.Array(Type.String()),
+    }),
+  ),
+  /** Why the project's file could not be read; it is never overwritten then. */
+  unreadable: Type.Optional(Type.String()),
+  /** The user's own `webFetch` and `webSearch`, which the project's add to (lists) or replace (the backend). */
+  yours: Type.Object({
+    path: Type.String(),
+    hosts: Type.Array(Type.String()),
+    backend: WebSearchBackendChoice,
+    includeDomains: Type.Array(Type.String()),
+    excludeDomains: Type.Array(Type.String()),
+    unreadable: Type.Optional(Type.String()),
+  }),
+  staleThreads: Type.Array(Type.String()),
+})
+/** @group Web tools */
+export type ProjectWebTools = Static<typeof ProjectWebTools>

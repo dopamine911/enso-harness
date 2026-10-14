@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   type EnsoConfig,
   ensoLogger,
+  type ProjectWebTools,
+  ProjectWebToolsChange,
   readWebFetchHostInput,
   TavilyKeyChange,
   type WebFetchAllowlist,
@@ -15,6 +17,7 @@ import {
   WebSearchSettingsChange,
 } from '@enso/core'
 import { projectConfigPath } from '@enso/core/paths'
+import { changeProjectWebTools } from '@enso/core/project-config'
 import { readDotenvFile, writeSecret } from '@enso/core/secrets'
 import { readEnsoConfigFile } from '@enso/core/user-config-write'
 import { changeUserAllowedHosts } from '@enso/core/web-fetch-allowlist'
@@ -44,7 +47,17 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * ⚠ The page is the only writer here, guarded like every route (#717, `fromTrustedOrigin`); the
  * agent still cannot write the file (the guards refuse writes into `ENSO_HOME`). Only
  * `webFetch.allowedHosts` changes (`@enso/core/web-fetch-allowlist`).
+ *
+ * A project page's Web tools tab (#937) reads and changes the same keys in a project's shared
+ * `.enso/config.json` (`/api/projects/<projectId>/web-tools`). ⚠ An untrusted project's file is
+ * never read — nor written: its tab is read only until the project is trusted.
  */
+
+/** `/api/projects/<projectId>/web-tools` (#937): `GET` reads a project's own web tools, `POST` changes one key. */
+const PROJECT_WEB_TOOLS_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/web-tools$/
+
+/** Why a project's Web tools are not answered or not changed: its status and reason, sent as the body. */
+type ProjectRefusal = { readonly status: 404 | 422; readonly reason: string }
 
 const log = ensoLogger('server', 'http')
 
@@ -62,7 +75,7 @@ export interface WebToolsRoutesState {
   readonly userConfigPath: string | undefined
   /** The user's `ENSO_HOME/secrets.env`, where the Tavily key is set; absent, the key route refuses. */
   readonly userSecretsPath: string | undefined
-  readonly projects: Pick<ProjectRegistry, 'list'>
+  readonly projects: Pick<ProjectRegistry, 'list' | 'get' | 'byDirectory'>
   readonly threads: Pick<ThreadRegistry, 'list'>
   /** pi's agent dir, whose `trust.json` decides whether a project's own hosts are read. */
   readonly agentDir: string
@@ -105,6 +118,17 @@ async function checkWebFetchHost(host: string, checkFetch: HostCheckFetch): Prom
   }
 }
 
+/** A config's own `webFetch` hosts and `webSearch`, as a project's Web tools tab shows them (#937). */
+function webToolsOf(config: EnsoConfig): NonNullable<ProjectWebTools['own']> {
+  const search = config.webSearch
+  return {
+    hosts: config.webFetch?.allowedHosts ?? [],
+    ...(search?.backend === undefined ? {} : { backend: search.backend }),
+    includeDomains: search?.tavily?.includeDomains ?? [],
+    excludeDomains: search?.tavily?.excludeDomains ?? [],
+  }
+}
+
 export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes {
   const { userConfigPath, userSecretsPath, projects, threads, agentDir } = state
   const checkFetch: HostCheckFetch =
@@ -116,6 +140,8 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
   let onOldList = new Map<string, HostedThread>()
   /** The same, for the last Searching change: the backend and domains are read at session start too. */
   let onOldSearch = new Map<string, HostedThread>()
+  /** The same, per project, for the last change on its Web tools tab (#937): its own threads only. */
+  const onOldProjectTools = new Map<string, Map<string, HostedThread>>()
 
   /** Each trusted project's own config, read as a new session there would read it (#421). */
   function trustedProjectConfigs(): (WebToolsProject & { readonly config: EnsoConfig })[] {
@@ -357,6 +383,98 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
     return false
   }
 
+  /** The project's live threads, by the session each runs: its checkout's and its trees' (#551). */
+  function liveThreadsOf(projectId: string): Map<string, HostedThread> {
+    return new Map(
+      threads
+        .list()
+        .filter((thread) => projects.byDirectory(thread.hosted.inspect().cwd)?.projectId === projectId)
+        .map((thread) => [thread.threadId, thread.hosted]),
+    )
+  }
+
+  /**
+   * A project's Web tools tab (#937): its shared file, read only once the project is trusted, and
+   * the user's own settings beside it; or why there is none to answer.
+   */
+  function projectWebToolsOf(projectId: string): ProjectWebTools | ProjectRefusal {
+    const project = projects.get(projectId)
+    if (project === undefined) return { status: 404, reason: `no registered project has the id ${projectId}` }
+    if (userConfigPath === undefined)
+      return { status: 422, reason: 'this server reads no user config, so it has no web tools settings to show' }
+    const user = readEnsoConfigFile(userConfigPath)
+    const path = projectConfigPath(project.path)
+    const trusted = projectTrusted(project.path, agentDir)
+    // ⚠ Untrusted, the file is never read (#502, #873): nothing of it is shown.
+    const read = trusted ? readEnsoConfigFile(path) : undefined
+    const yours = webToolsOf(user.kind === 'ok' ? user.config : {})
+    return {
+      projectId,
+      title: project.title,
+      path,
+      trusted,
+      ...(read?.kind === 'ok' ? { own: webToolsOf(read.config) } : {}),
+      ...(read?.kind === 'unreadable' ? { unreadable: read.reason } : {}),
+      yours: {
+        ...yours,
+        path: userConfigPath,
+        backend: yours.backend ?? 'model',
+        ...(user.kind === 'unreadable' ? { unreadable: user.reason } : {}),
+      },
+      staleThreads: stillOn(onOldProjectTools.get(projectId) ?? new Map()),
+    }
+  }
+
+  function answerProjectWebTools(response: ServerResponse, answer: ProjectWebTools | ProjectRefusal): void {
+    if ('status' in answer) refuseWith(response, answer)
+    else answerJson(response, answer)
+  }
+
+  /**
+   * `POST /api/projects/<projectId>/web-tools` (#937): one host or Searching key changed in the
+   * project's shared `.enso/config.json`, answered with the tab as it now stands. ⚠ Refused for an
+   * untrusted project, before its file is read, and for a folder that is gone.
+   */
+  async function respondToProjectChange(
+    projectId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const change = await readBody(request, response, {
+      schema: ProjectWebToolsChange,
+      name: 'project web tools change',
+      requirement:
+        'a project web tools change takes exactly `add` or `remove`, a host name; or a web search change: `backend` (`model` or `deepseek`), or `list` (`includeDomains` or `excludeDomains`) with `add` or `remove`, a domain',
+    })
+    if (change === undefined) return
+    const target = writableProject(projectId)
+    const written = 'status' in target ? target : changeProjectWebTools(target.path, change)
+    if ('status' in written || written.kind === 'refused') {
+      log.warn('project {projectId}: web tools change refused: {reason}', { projectId, reason: written.reason })
+      return refuseWith(response, 'status' in written ? written : { status: 422, reason: written.reason })
+    }
+    if (written.kind === 'written') {
+      log.info('project {projectId}: web tools changed from its page: {change}', { projectId, change })
+      onOldProjectTools.set(projectId, liveThreadsOf(projectId))
+    }
+    answerProjectWebTools(response, projectWebToolsOf(projectId))
+  }
+
+  /** The project whose file a change may be written to: registered, there, and trusted — or why not. */
+  function writableProject(projectId: string): { readonly path: string } | ProjectRefusal {
+    const project = projects.get(projectId)
+    if (project === undefined) return { status: 404, reason: `no registered project has the id ${projectId}` }
+    if (project.status === 'missing-dir')
+      return { status: 422, reason: `${project.path} is gone; nothing is written there` }
+    if (!projectTrusted(project.path, agentDir))
+      return {
+        status: 422,
+        reason:
+          'this project is not trusted, so Enso does not read its .enso/config.json; trust it to change its web tools',
+      }
+    return { path: project.path }
+  }
+
   function dispatchWebToolsRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
     if (request.method === 'GET' && url === '/api/settings/web-fetch') {
@@ -373,7 +491,17 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
       answerOrFail(respondToCheck(request, response), response)
       return true
     }
-    return dispatchWebSearchRoute(request, response)
+    return dispatchProjectWebToolsRoute(request, response, url) || dispatchWebSearchRoute(request, response)
+  }
+
+  /** `GET` and `POST /api/projects/<projectId>/web-tools` (#937). */
+  function dispatchProjectWebToolsRoute(request: IncomingMessage, response: ServerResponse, url: string): boolean {
+    const projectId = PROJECT_WEB_TOOLS_ROUTE.exec(url)?.[1]
+    if (projectId === undefined) return false
+    if (request.method === 'GET') answerProjectWebTools(response, projectWebToolsOf(projectId))
+    else if (request.method === 'POST') answerOrFail(respondToProjectChange(projectId, request, response), response)
+    else return false
+    return true
   }
 
   return { dispatchWebToolsRoute }

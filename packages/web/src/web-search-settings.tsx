@@ -28,7 +28,7 @@ import {
  * Each field says where its value comes from, and a trusted project's own `webSearch` is shown, read only.
  */
 
-const DOMAIN_LISTS: readonly { list: WebSearchDomainList; label: string; says: string; empty: string }[] = [
+export const DOMAIN_LISTS: readonly { list: WebSearchDomainList; label: string; says: string; empty: string }[] = [
   {
     list: 'includeDomains',
     label: 'Only these domains',
@@ -74,6 +74,9 @@ export function WebSearchSettingsEditor({ fetch, stored, onOpenProject }: WebToo
       <BackendField
         path={settings.path}
         backend={settings.backend}
+        set={settings.backend !== 'model'}
+        options={BACKENDS}
+        idPrefix="settings"
         busy={writing}
         onChoose={(backend) => void change({ backend })}
       />
@@ -114,23 +117,44 @@ export function WebSearchSettingsEditor({ fetch, stored, onOpenProject }: WebToo
   )
 }
 
-/** Where a field's value comes from: the user's file, under the key it is kept as. */
-function FieldSource({ path, configKey, set }: { path: string; configKey: string; set: boolean }): React.ReactNode {
+/** Where a field's value comes from: the file, under the key it is kept as — or, unset there, what applies (`unset`). */
+export function FieldSource({
+  path,
+  configKey,
+  set,
+  unset = 'the default',
+}: {
+  path: string
+  configKey: string
+  set: boolean
+  unset?: string | undefined
+}): React.ReactNode {
   return (
     <span className="font-mono text-meta font-semibold tracking-wider text-muted-foreground uppercase">
-      <span className="normal-case">{set ? `${configKey} · ${path}` : `not set in ${path}: the default`}</span>
+      <span className="normal-case">{set ? `${configKey} · ${path}` : `not set in ${path}: ${unset}`}</span>
     </span>
   )
 }
 
+/** A backend to choose, in words: what it is and what choosing it means. */
+export type BackendOption = { readonly value: WebSearchBackendChoice; readonly label: string; readonly says: string }
+
 interface BackendFieldProps {
   readonly path: string
+  /** The option chosen: `model` while the file sets no backend. */
   readonly backend: WebSearchBackendChoice
+  /** Whether the file sets `webSearch.backend`. */
+  readonly set: boolean
+  /** What applies while it doesn't: Enso's default here, the user's on a project's page (#937). */
+  readonly unset?: string
+  readonly options: readonly BackendOption[]
+  /** The radio group's name prefix: one per page. */
+  readonly idPrefix: string
   readonly busy: boolean
   readonly onChoose: (backend: WebSearchBackendChoice) => void
 }
 
-const BACKENDS: readonly { value: WebSearchBackendChoice; label: string; says: string }[] = [
+const BACKENDS: readonly BackendOption[] = [
   {
     value: 'model',
     label: "The current model's own search",
@@ -143,13 +167,15 @@ const BACKENDS: readonly { value: WebSearchBackendChoice; label: string; says: s
   },
 ]
 
-function BackendField({ path, backend, busy, onChoose }: BackendFieldProps): React.ReactNode {
+/** `webSearch.backend`: one card per option, the file it comes from above them. */
+export function BackendField(props: BackendFieldProps): React.ReactNode {
+  const { path, backend, set, unset, options, idPrefix, busy, onChoose } = props
   return (
     <fieldset className="grid gap-2">
       <legend className="mb-1 text-sm font-medium">Backend</legend>
-      <FieldSource path={path} configKey="webSearch.backend" set={backend !== 'model'} />
+      <FieldSource path={path} configKey="webSearch.backend" set={set} unset={unset} />
       <div className="grid gap-2 sm:grid-cols-2">
-        {BACKENDS.map((option) => (
+        {options.map((option) => (
           <label
             key={option.value}
             aria-label={option.label}
@@ -161,7 +187,7 @@ function BackendField({ path, backend, busy, onChoose }: BackendFieldProps): Rea
           >
             <input
               type="radio"
-              name="settings-web-search-backend"
+              name={`${idPrefix}-web-search-backend`}
               className="mt-1 accent-primary"
               value={option.value}
               checked={backend === option.value}
@@ -253,14 +279,18 @@ interface DomainListProps {
   readonly domains: readonly string[]
   readonly busy: boolean
   readonly onChange: (body: WebSearchSettingsChange) => Promise<boolean>
+  /** What applies while the file sets no list: Enso's default here, the user's on a project's page (#937). */
+  readonly unset?: string
+  /** The add field's id prefix: one per page the list is on. */
+  readonly idPrefix?: string
 }
 
 /** One Tavily domain list: its domains, each with Remove, and a field to add one. */
-function DomainList(props: DomainListProps): React.ReactNode {
-  const { list, label, says, empty, path, domains, busy, onChange } = props
+export function DomainList(props: DomainListProps): React.ReactNode {
+  const { list, label, says, empty, path, domains, busy, onChange, unset, idPrefix = 'settings' } = props
   const [typed, setTyped] = useState('')
   const [refused, setRefused] = useState<string | undefined>(undefined)
-  const inputId = `settings-web-search-${list}`
+  const inputId = `${idPrefix}-web-search-${list}`
   async function addDomain(domain: string): Promise<void> {
     if (await onChange({ list, add: domain })) setTyped('')
   }
@@ -278,7 +308,7 @@ function DomainList(props: DomainListProps): React.ReactNode {
       <label htmlFor={inputId} className="text-sm font-medium">
         {label}
       </label>
-      <FieldSource path={path} configKey={`webSearch.tavily.${list}`} set={domains.length > 0} />
+      <FieldSource path={path} configKey={`webSearch.tavily.${list}`} set={domains.length > 0} unset={unset} />
       <p className="text-xs text-muted-foreground">{says}</p>
       {domains.length === 0 ? (
         <p className="rounded-sm border border-dashed px-3 py-2 text-sm text-muted-foreground">{empty}</p>

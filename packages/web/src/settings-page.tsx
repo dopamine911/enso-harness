@@ -18,7 +18,7 @@ import { cn } from './lib/utils.ts'
 import { SUB_TITLE } from './page-styles.ts'
 import { PermissionsSection, type PolicyEditor } from './permissions-settings.tsx'
 import { applyTheme, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
-import { SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
+import { type ProjectTab, SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
 import { TreesSection } from './trees-settings.tsx'
 import { WebToolsSection } from './web-tools-settings.tsx'
 
@@ -288,8 +288,8 @@ export interface SettingsPageProps {
   readonly stored: readonly EnsoStoredThread[]
   /** A thread deleted from Storage: the page leaves it, as the header's Delete does. */
   readonly onDeleted: (threadId: string) => void
-  /** Open a project's page at its Storage tab (#871), from Storage's group of that project. */
-  readonly onOpenProject: (projectId: string) => void
+  /** Open a project's page at `tab` (#871): Storage from Storage's group of it, Web tools from its own web tools (#937). */
+  readonly onOpenProject: (projectId: string, tab: ProjectTab) => void
   /** Open the Projects page, from the nav's last link. */
   readonly onOpenProjects: () => void
 }
@@ -307,14 +307,21 @@ function SectionBody({
 }: SettingsPageProps): React.ReactNode {
   if (section === 'appearance') return <AppearanceFields />
   if (section === 'permissions') return <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
-  if (section === 'web-tools') return <WebToolsSection fetch={fetch} stored={stored} onOpenProject={onOpenProject} />
+  if (section === 'web-tools')
+    return (
+      <WebToolsSection
+        fetch={fetch}
+        stored={stored}
+        onOpenProject={(projectId) => onOpenProject(projectId, 'web-tools')}
+      />
+    )
   return (
     <TreesSection
       fetch={fetch}
       projects={projects}
       stored={stored}
       onDeleted={onDeleted}
-      onOpenProject={onOpenProject}
+      onOpenProject={(projectId) => onOpenProject(projectId, 'storage')}
     />
   )
 }

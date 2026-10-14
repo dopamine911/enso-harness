@@ -187,6 +187,8 @@ interface Mounted {
   readonly sent: Sent[]
   /** Each trust PUT's body, as sent. */
   readonly trustSent: string[]
+  /** Each Web tools POST's body, as sent (#937). */
+  readonly toolsSent: string[]
   readonly asked: Asked
   readonly container: HTMLElement
   readonly unmount: () => Promise<void>
@@ -206,10 +208,38 @@ async function mountPage(options: MountOptions = {}): Promise<Mounted> {
     trust = { ...trust, trusted: init.body === '{"trusted":true}' }
     return Response.json(trust)
   }
+  /** The project's own hosts, as its shared file holds them: what the Web tools tab reads and changes (#937). */
+  const ownHosts: string[] = []
+  const toolsSent: string[] = []
+  const answerTools = (init: RequestInit | undefined): Response => {
+    if (init?.method === 'POST') {
+      if (typeof init.body !== 'string') throw new Error(`expected a JSON text body, got ${typeof init.body}`)
+      toolsSent.push(init.body)
+      const body = JSON.parse(init.body) as { add?: string }
+      if (body.add !== undefined) ownHosts.push(body.add)
+    }
+    // As the server answers: the file read only once the project is trusted.
+    return Response.json({
+      projectId: 'p-app',
+      title: 'app',
+      path: '/code/app/.enso/config.json',
+      trusted: trust.trusted,
+      ...(trust.trusted ? { own: { hosts: [...ownHosts], includeDomains: [], excludeDomains: [] } } : {}),
+      yours: {
+        path: '/home/me/.enso/config.json',
+        hosts: ['docs.user.example'],
+        backend: 'model',
+        includeDomains: [],
+        excludeDomains: [],
+      },
+      staleThreads: [],
+    })
+  }
   const fetchImpl = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const path = requestedUrl(input)
     if (path === '/api/trees') return Promise.resolve(Response.json(TREES))
     if (path === '/api/projects/p-app/trust') return Promise.resolve(answerTrust(init))
+    if (path === '/api/projects/p-app/web-tools') return Promise.resolve(answerTools(init))
     if (init?.method === 'PUT') {
       if (typeof init.body !== 'string') throw new Error(`expected a JSON text body, got ${typeof init.body}`)
       sent.push(JSON.parse(init.body) as Sent)
@@ -264,6 +294,7 @@ async function mountPage(options: MountOptions = {}): Promise<Mounted> {
   return {
     sent,
     trustSent,
+    toolsSent,
     asked,
     container,
     unmount: async () => {
@@ -419,7 +450,12 @@ test('the rail’s Add project opens the Add project page (#872)', async () => {
 
 test('the tabs open at the route’s and move with the arrow keys, each move a route of its own (#871)', async () => {
   const page = await mountPage()
-  expect(tabs(page.container).map((tab) => tab.textContent)).toEqual(['Threads', 'Worktree settings', 'Storage'])
+  expect(tabs(page.container).map((tab) => tab.textContent)).toEqual([
+    'Threads',
+    'Worktree settings',
+    'Web tools',
+    'Storage',
+  ])
   expect(selectedTab(page.container)).toBe('Threads')
   const threads = tabs(page.container)[0]
   await flush(async () => {
@@ -688,6 +724,42 @@ test('⚠ untrusted: the banner says what isn’t read; Trust this project… na
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   // The tab's settings read again: they resolve under the trust now saved.
   await eventually(() => expect(page.container.textContent).not.toContain('This project is not trusted yet'))
+  await page.unmount()
+})
+
+test('⚠ Web tools: untrusted, read only with only your hosts; trusted, a host added goes to the project’s .enso/config.json (#937)', async () => {
+  const page = await mountPage({ trust: UNTRUSTED, route: { kind: 'project', projectId: 'p-app', tab: 'web-tools' } })
+  const reachable = (): string[] =>
+    [...page.container.querySelectorAll('[aria-label="hosts web_fetch may reach in this project"] > li')].map(
+      (item) => item.textContent ?? '',
+    )
+  await eventually(() => expect(page.container.textContent).toContain('Not read yet'))
+  expect(reachable()).toEqual(['docs.user.example · yours'])
+  // Nothing of the project's to change while its file is not read.
+  expect([...page.container.querySelectorAll('label')].map((label) => label.textContent)).not.toContain('Add a host')
+  expect(page.container.querySelector('input[type="radio"]')).toBeNull()
+
+  const banner = section(page, 'untrusted-title')
+  if (banner === null) throw new Error('no untrusted banner')
+  await press(buttonNamed(banner, 'Trust this project…'))
+  await press(buttonNamed(await openDialog(), 'Trust project'))
+  // The tab reads again under the trust now saved: the project's own, editable.
+  const field = await eventually(() => {
+    expect(page.container.textContent).not.toContain('Not read yet')
+    return labelled<HTMLInputElement>(page.container, 'Add a host')
+  })
+  expect(page.container.textContent).toContain('not set in /code/app/.enso/config.json: none — only your hosts apply')
+  await flush(async () => {
+    Reflect.set(HTMLInputElement.prototype, 'value', 'docs.project.example', field)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+  })
+  await press(buttonNamed(page.container, 'Add'))
+  expect(page.toolsSent).toEqual(['{"add":"docs.project.example"}'])
+  await eventually(() =>
+    expect(reachable()).toEqual(['docs.user.example · yours', 'docs.project.example · this project']),
+  )
+  expect(page.container.textContent).toContain('webFetch.allowedHosts · /code/app/.enso/config.json')
   await page.unmount()
 })
 

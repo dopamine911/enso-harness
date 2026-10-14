@@ -10,6 +10,9 @@ import type {
   EnsoProjectTierFile,
 } from './project-settings.ts'
 import { readEnsoConfigFile } from './user-config-write.ts'
+import { changeUserAllowedHosts } from './web-fetch-allowlist.ts'
+import { changeUserWebSearch } from './web-search-settings.ts'
+import type { ProjectWebToolsChange } from './web-search.ts'
 
 /**
  * A project's `threads` settings read from its tiers (#754), and written to its own files by the
@@ -134,6 +137,26 @@ export function writeProjectThreadSettings(
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`)
   return { kind: 'written' }
+}
+
+/**
+ * One change to a project's own web tools from its page (#937): a `web_fetch` host or a Searching
+ * key, in its shared `.enso/config.json` — the one project tier a session merges, so the only one
+ * written for web tools. Only the touched key changes, as in the user's file (`editUserConfig`);
+ * `<project>/.enso/` is made if needed, and an unreadable file is never overwritten.
+ * ⚠ The caller decides trust first: an untrusted project's file is never read, so never written here.
+ *
+ * @group Project settings
+ */
+export function changeProjectWebTools(
+  project: string,
+  change: ProjectWebToolsChange,
+): { readonly kind: 'written' | 'unchanged' } | { readonly kind: 'refused'; readonly reason: string } {
+  const path = projectConfigPath(project)
+  mkdirSync(dirname(path), { recursive: true })
+  return 'list' in change || 'backend' in change
+    ? changeUserWebSearch(path, change)
+    : changeUserAllowedHosts(path, change)
 }
 
 /** The largest tier file the trust confirmation reads; a project's config is a few hundred bytes. */
