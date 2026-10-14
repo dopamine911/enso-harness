@@ -10,6 +10,7 @@ import {
   type EnsoIncidentResolution,
   type EnsoHostCommandRun,
   ensoLogger,
+  type EnsoMessageStart,
   type EnsoObservation,
   type EnsoPromptBody,
   type EnsoPromptImage,
@@ -67,6 +68,9 @@ import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
  */
 
 const followLog = ensoLogger('browser', 'follow')
+
+/** The `runId` prefix of a run another client started, synthesised from its generation. */
+const EXTERNAL_RUN = 'external-'
 
 /**
  * The wire validator, compiled once at module load — the `@enso/core` convention
@@ -131,8 +135,8 @@ interface OpenRun {
    * Assistant messages pi has begun in this run since its last prompt. Every one after the first
    * is a new model turn and gets its own bubble (#921), as the stored history draws it. A USER
    * `message-start` after the first of them is a queued prompt being CLAIMED (#75), not the
-   * prompt that opened the run — the view then ends the current assistant bubble and starts a
-   * new one, so the reply lands after its question rather than inside the previous answer.
+   * prompt that opened the run — the view then ends the current assistant bubble, draws the
+   * prompt's own bubble (#917), and starts a new one, so the reply lands after its question rather than inside the previous answer.
    */
   assistantMessages: number
   /**
@@ -495,34 +499,58 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
+   * The prompt pi has just DELIVERED, as a user bubble between the assistant bubble that ends and
+   * the one that opens (#917). A prompt typed during a run is not in the transcript while pi holds
+   * it — only in the queue above the composer — so this is where it lands, on every page following
+   * the thread, when pi actually sends it. Text only: pi's `message-start` carries the words, not
+   * the images a queued prompt was sent with; a reload draws those from the stored branch.
+   */
+  function deliverPrompt(run: OpenRun, text: string): void {
+    const ended = run.messageId
+    const prompt = crypto.randomUUID()
+    run.messageId = crypto.randomUUID()
+    run.refused = false
+    push(
+      { type: EventType.TEXT_MESSAGE_END, messageId: ended },
+      { type: EventType.TEXT_MESSAGE_START, messageId: prompt, role: 'user' },
+      ...(text.length === 0 ? [] : [{ type: EventType.TEXT_MESSAGE_CONTENT as const, messageId: prompt, delta: text }]),
+      { type: EventType.TEXT_MESSAGE_END, messageId: prompt },
+      { type: EventType.TEXT_MESSAGE_START, messageId: run.messageId, role: 'assistant' },
+    )
+  }
+
+  /**
    * A message boundary inside the run. Three of them rotate the assistant bubble:
    * - an ASSISTANT message after another one: a new model turn (#921). Thinking and text are
    *   keyed by the bubble's id, so in one bubble each turn's thinking appended to the run's first
    *   thinking part, above every later tool row. One bubble per assistant message is what the
    *   stored history draws, so the live view and a reload read the same;
-   * - a USER message after an assistant message has begun: pi claimed a queued prompt (#75), so
-   *   the reply lands after its question rather than inside the previous answer. The run's own
-   *   prompt arrives before any assistant message and rotates nothing;
+   * - a USER message pi delivers after an assistant message has begun: pi claimed a queued prompt
+   *   (#75). Its bubble goes in there (#917), and the reply lands after its question rather than
+   *   inside the previous answer. So does the opening prompt of a run another page started — this
+   *   page never had it. A run THIS page sent already holds its prompt (TanStack put it there), so
+   *   its own opening prompt adds nothing;
    * - an ASSISTANT message after a refused attempt: pi's retry (#382). Without it the refused
    *   attempt and the reply that got through share one bubble, and a line said between them has
    *   nowhere to go but after both.
    */
-  function observeMessageStart(role: string): void {
+  function observeMessageStart(observation: EnsoMessageStart): void {
     if (current === undefined) return
-    if (role === 'assistant') {
+    if (observation.role === 'assistant') {
       // Whatever began before the refusal — the attempt's own message, or none when the provider
       // refused before pi started one — stays in the bubble the refusal's lines follow.
       if (current.refused || current.assistantMessages > 0) rotateMessage(current)
       current.assistantMessages += 1
       return
     }
-    if (role !== 'user' || current.assistantMessages === 0) return
-    rotateMessage(current)
+    if (observation.role !== 'user') return
+    if (current.assistantMessages === 0 && !current.runId.startsWith(EXTERNAL_RUN)) return
+    deliverPrompt(current, observation.text ?? '')
     current.assistantMessages = 0
   }
 
   function idsOf(run: OpenRun | undefined): AguiIdentifiers {
-    return { threadId, runId: run?.runId ?? `external-${threadId}`, messageId: run?.messageId ?? threadId }
+    return { threadId, runId: run?.runId ?? `${EXTERNAL_RUN}${threadId}`, messageId: run?.messageId ?? threadId }
   }
 
   /** The server's latest word on the thread, from the last snapshot or status frame. */
@@ -568,7 +596,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     for (const run of runs.values()) {
       if (run.generation === generation || run.generation === undefined) return
     }
-    openRun(`external-${generation}`, undefined, generation)
+    openRun(`${EXTERNAL_RUN}${generation}`, undefined, generation)
   }
 
   async function declineUnreadable(id: string): Promise<void> {
@@ -603,7 +631,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /** What an observation does to this adapter's own state before its chunks cross. */
   function observeBeforeCrossing(observation: EnsoObservation): void {
-    if (observation.kind === 'message-start') observeMessageStart(observation.role)
+    if (observation.kind === 'message-start') observeMessageStart(observation)
     if (observation.kind === 'provider-refused' && current !== undefined) current.refused = true
     if (observation.kind === 'extension-ui-request' && observation.blocking && observation.dialog === undefined) {
       if (observation.id.length > 0) void declineUnreadable(observation.id)

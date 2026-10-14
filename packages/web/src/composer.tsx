@@ -697,18 +697,6 @@ function useComposerLaunch(onScreen: boolean): {
 }
 
 /**
- * A value as of the latest COMMITTED render, for a closure an older render made to read after it
- * changed — written in an effect, never during render (React's rule).
- */
-function useLatestCommitted<T>(value: T): React.RefObject<T> {
-  const latest = useRef(value)
-  useEffect(() => {
-    latest.current = value
-  }, [value])
-  return latest
-}
-
-/**
  * The composer's dialogs, each rendered ONCE in it: the `select` host command whose dialog is open
  * (`model`; undefined while closed) — for the chip and the palette's `/model` row alike (#338
  * slice 2) — with the Model chip its picker hangs from (#417); and `/context` (#361 phase 5), the
@@ -770,17 +758,8 @@ export function ChatPromptInput(): React.ReactNode {
   const [draft, setDraft] = useState(opening.text)
   // The textarea, so a palette choice can put focus back where typing continues (#338).
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  // The user messages this composer put in the transcript for prompts pi is still
-  // HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
-  // leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
-  const heldLocally = useRef<Array<{ id: string; text: string }>>([])
   // The pane's fork (#433): `/fork` forks at the last prompt; absent where no page opens a fork.
   const forkAt = useContext(ForkContext)
-  // ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
-  // `chat.messages` there is that render's snapshot; filtering it would replace the
-  // transcript with the snapshot minus one, reverting every delta that streamed in
-  // between. The ref is the transcript as of the latest COMMITTED render.
-  const latestMessages = useLatestCommitted(chat.messages)
   // A compaction rewrote the branch (#348): the transcript is re-read once the thread is idle.
   useRereadAfterCompaction(stores, chat)
   /**
@@ -813,39 +792,26 @@ export function ChatPromptInput(): React.ReactNode {
     }
     // A prompt DURING a run queues through pi (#75). ⚠ Not `chat.sendMessage`: TanStack
     // holds a send in its own queue while the run it started is open and delivers it at
-    // settle — the browser's queue, invisible to other tabs, lost on reload. So the user
-    // message goes into the transcript here, and the text goes to pi now: pi lists it on
-    // the follow for every follower (`queue`, the list above this composer) and claims
-    // it when the run's turn ends. Refused or unreachable, the words come back to the
-    // draft. ⚠ The images do not: pi's queue hands back texts (`EnsoAbortReceipt.restored`),
+    // settle — the browser's queue, invisible to other tabs, lost on reload. So the text goes
+    // to pi now, and NOTHING goes into the transcript (#917): pi lists it on the follow for
+    // every follower (`queue`, the list above this composer), and the follow draws its bubble
+    // when pi delivers it (`follow-connection.ts`). Refused or unreachable, the words come back
+    // to the draft. ⚠ The images do not: pi's queue hands back texts (`EnsoAbortReceipt.restored`),
     // and the composer's attachments are the form's, not this component's — re-attach.
-    const id = crypto.randomUUID()
-    heldLocally.current.push({ id, text })
-    chat.setMessages([...chat.messages, { id, role: 'user', parts, createdAt: new Date() }])
     void stores.connection.prompt(text, images).then((outcome) => {
       if (outcome === 'refused' || outcome === 'unreachable') takeBack([text])
     })
     return true
   }
   /**
-   * Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript.
+   * Texts pi never took come back to the draft.
    *
-   * @invariant abort-clear-restore/composer-takes-back The stopping tab's composer gets the texts back; the bubbles that were never asked leave.
-   * A stop's `restored` is appended to the draft after anything already typed, and the user
-   * bubbles this composer put in the transcript for prompts the runtime still held are removed;
-   * a claimed prompt's bubble stays, and deltas that streamed meanwhile are kept (the filter
-   * reads the latest committed transcript, not this render's). Only texts come back: images
+   * @invariant abort-clear-restore/composer-takes-back The stopping tab's composer gets the texts back.
+   * A stop's `restored` is appended to the draft after anything already typed. A prompt pi still
+   * held never had a bubble (#917), so the transcript is untouched. Only texts come back: images
    * attached to a queued prompt are not restored, a limit the composer states, not a gap.
    */
   const takeBack = (texts: readonly string[]): void => {
-    const leaving = new Set<string>()
-    for (const takenBackText of texts) {
-      const position = heldLocally.current.findIndex((held) => held.text === takenBackText)
-      if (position === -1) continue
-      leaving.add(heldLocally.current[position]?.id ?? '')
-      heldLocally.current.splice(position, 1)
-    }
-    if (leaving.size > 0) chat.setMessages(latestMessages.current.filter((message) => !leaving.has(message.id)))
     setDraft((current) => joinDrafts(current, ...texts))
   }
   // Stop (#116) hands back what was queued behind the run (#75, clear-and-restore): the

@@ -1229,6 +1229,30 @@ test('a prompt on a busy thread is enqueued through the runtime, not refused and
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
 })
 
+// #917: a page that opens on the thread after another page queued lists the same queue — the
+// snapshot carries what pi holds, and nothing when nothing waits.
+test('⚠ a follow opened while pi holds prompts behind the run lists them in its snapshot, interrupting first (#917)', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  await prompt(url, 't1', 'one')
+  const empty = await openFollow(url, 't1')
+  await empty.untilFrames(1)
+  expect(empty.frames[0]).not.toHaveProperty('queue')
+  empty.close()
+  const built = fake.built[0]
+  if (built === undefined) throw new Error('no session built')
+  built.queue.enqueued.push('where is the file?')
+  built.queue.interrupting.push('stop at the tests')
+  const late = await openFollow(url, 't1')
+  await late.untilFrames(1)
+  expect(late.frames[0]).toMatchObject({
+    type: 'snapshot',
+    busy: true,
+    queue: { interrupting: ['stop at the tests'], enqueued: ['where is the file?'] },
+  })
+  late.close()
+})
+
 // ⚠ The record on the BUSY path, which is the one nothing asserted (PR #326 review). Two facts
 // are logged here — what the SERVER did (`queued`) and what the CLIENT asked for (`enqueue`) —
 // and #216's rename briefly gave both the key `admission`, so the object literal's spread

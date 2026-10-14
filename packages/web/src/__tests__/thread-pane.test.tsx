@@ -1314,9 +1314,10 @@ test("⚠ the composer's e2e selectors match the rendered markup, and the spec's
   await pane.unmount()
 })
 
-// PR #129 review: the take-back runs after a network round trip, from a closure an older
-// render made. It must act on the transcript as it is THEN — not revert what streamed in between.
-test('⚠ a queued prompt refused after a delay takes back only its own bubble; deltas that streamed meanwhile stay', async () => {
+// PR #129 review: the take-back runs after a network round trip, from a closure an older render
+// made. A queued prompt has no bubble (#917), so a refusal touches only the draft — never the
+// transcript, and not the deltas that streamed in between.
+test('⚠ a queued prompt refused after a delay comes back to the draft; deltas that streamed meanwhile stay', async () => {
   const server = createScriptedFetch()
   let releaseSecondPrompt: () => void = () => undefined
   let prompts = 0
@@ -1367,7 +1368,11 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
     pressEnter(composer())
     await tick()
   })
-  await eventually(() => expect(container.textContent).toContain('second, queued'))
+  // Held by pi, it is not in the transcript (#917): sent, the draft is empty and no bubble holds it.
+  await eventually(() => {
+    expect(prompts).toBe(2)
+    expect(container.textContent).not.toContain('second, queued')
+  })
   // Meanwhile the first answer streams.
   await flush(async () => {
     server.frame({ type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } })
@@ -1379,7 +1384,7 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
     await tick()
   })
   await eventually(() => expect(container.textContent).toContain('streamed while held'))
-  // Now the refusal lands: its bubble leaves, its text returns to the draft — and the delta STAYS.
+  // Now the refusal lands: its text returns to the draft — and the delta STAYS.
   await flush(async () => {
     releaseSecondPrompt()
     await tick()
@@ -1396,8 +1401,12 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
 
 // ── the follow ending under the page (#103 receipt, #119) ───────────────────────────────
 
+function userBubbles(pane: MountedPane): string[] {
+  return [...pane.container.querySelectorAll('[data-role="user"]')].map((bubble) => bubble.textContent ?? '')
+}
+
 // @pins abort-clear-restore/composer-takes-back
-test('Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer, and a stop hands it back (#75)', async () => {
+test('Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer and not in the transcript, and a stop hands it back (#75, #917)', async () => {
   const pane = await mountPane({ server: { queued: ['by the button, mid-run'] } })
   await pane.settle(SNAPSHOT_IDLE)
   await flush(async () => {
@@ -1413,7 +1422,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
 
   // A prompt during the run: to pi NOW as a follow-up — not TanStack's browser queue (which
-  // held it until settle before #75) — with the user message in the transcript at once.
+  // held it until settle before #75) — and NOT into the transcript: pi has not sent it (#917).
   await flush(async () => {
     typeInto(pane.composer(), 'by the button, mid-run')
     await tick()
@@ -1429,7 +1438,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
       { message: 'hello pi' },
       { message: 'by the button, mid-run', admission: 'enqueue' },
     ])
-    expect(pane.container.textContent).toContain('by the button, mid-run')
+    expect(userBubbles(pane)).toEqual([expect.stringContaining('hello pi')])
   })
   // pi lists it for every follower; this pane shows the list above the composer.
   await pane.settle({
@@ -1458,11 +1467,109 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   await pane.settle({ type: 'observation', seq: 2, observation: { kind: 'queue', interrupting: [], enqueued: [] } })
   await eventually(() => {
     expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull()
-    // The bubble that was never asked leaves with its text (pi's TUI does the same): with the
-    // queue list gone, the ONLY place the words remain is the composer. The first prompt's bubble stays.
+    // The words were never in the transcript (#917): with the queue list gone, the ONLY place
+    // they remain is the composer. The first prompt's bubble stays.
     expect((pane.container.textContent?.match(/by the button, mid-run/g) ?? []).length).toBe(1)
+    expect(userBubbles(pane)).toEqual([expect.stringContaining('hello pi')])
     expect(pane.container.textContent).toContain('hello pi')
   })
+  await pane.unmount()
+})
+
+// #917: a queued prompt reads in the queue only — never as a sent bubble with fork and restore —
+// until pi delivers it; then it is in the transcript, before the reply to it, and counted.
+test('⚠ a prompt queued during a run leaves the transcript unchanged and shows in the queue; delivered, it moves to the transcript (#917)', async () => {
+  const pane = await mountPane({
+    server: { promptStatus: { status: 202, body: { threadId: 't1', messageId: 'pm1', generation: 1, queued: false } } },
+  })
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), 'first ask')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(pane.status()).toContain('working'))
+  await pane.settle(
+    { type: 'status', live: true, busy: true, generation: 1 },
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'user', text: 'first ask' } },
+    { type: 'observation', seq: 2, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 3, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
+  )
+  await eventually(() => expect(assistantBubbles(pane).at(-1)).toContain('FIRST-REPLY'))
+  const transcriptBefore = userBubbles(pane)
+  expect(transcriptBefore).toEqual([expect.stringContaining('first ask')])
+
+  await flush(async () => {
+    typeInto(pane.composer(), 'where is the file?')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await pane.settle({
+    type: 'observation',
+    seq: 4,
+    observation: { kind: 'queue', interrupting: [], enqueued: ['where is the file?'] },
+  })
+  await eventually(() => {
+    expect(pane.server.prompts.at(-1)).toEqual({ message: 'where is the file?', admission: 'enqueue' })
+    expect(pane.container.querySelector('[aria-label="queued prompts"]')?.textContent).toContain('where is the file?')
+  })
+  // Queued: the transcript is as it was — no bubble (so nothing to fork or restore at), one prompt.
+  expect(userBubbles(pane)).toEqual(transcriptBefore)
+
+  // pi claims it as the run's turn ends: the queue empties, the prompt is in the transcript, the reply after it.
+  await pane.settle(
+    { type: 'observation', seq: 5, observation: { kind: 'queue', interrupting: [], enqueued: [] } },
+    { type: 'observation', seq: 6, observation: { kind: 'message-start', role: 'user', text: 'where is the file?' } },
+    { type: 'observation', seq: 7, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 8, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+  )
+  await eventually(() => {
+    expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull()
+    expect(userBubbles(pane)).toEqual([
+      expect.stringContaining('first ask'),
+      expect.stringContaining('where is the file?'),
+    ])
+    expect(assistantBubbles(pane).at(-1)).toContain('SECOND-REPLY')
+  })
+  const text = pane.container.textContent ?? ''
+  expect(text.indexOf('FIRST-REPLY')).toBeLessThan(text.indexOf('where is the file?'))
+  expect(text.indexOf('where is the file?')).toBeLessThan(text.indexOf('SECOND-REPLY'))
+  await pane.unmount()
+})
+
+// #917: a second page following the thread shows the queue another page made — from the
+// snapshot it opens on, then the follow — and counts the same prompts.
+test('⚠ a page opening on a run another page queued behind lists the same queue entry, and draws the prompt once pi delivers it (#917)', async () => {
+  const pane = await mountPane()
+  await pane.settle({
+    ...SNAPSHOT_IDLE,
+    live: true,
+    busy: true,
+    generation: 1,
+    queue: { interrupting: [], enqueued: ['where is the file?'] },
+  })
+  await eventually(() => {
+    const queueList = pane.container.querySelector('[aria-label="queued prompts"]')
+    expect(queueList?.textContent).toContain('1 prompt queued')
+    expect(queueList?.textContent).toContain('where is the file?')
+  })
+  expect(userBubbles(pane)).toEqual([])
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
+    { type: 'observation', seq: 3, observation: { kind: 'queue', interrupting: [], enqueued: [] } },
+    { type: 'observation', seq: 4, observation: { kind: 'message-start', role: 'user', text: 'where is the file?' } },
+    { type: 'observation', seq: 5, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+  )
+  await eventually(() => {
+    expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull()
+    expect(userBubbles(pane)).toEqual([expect.stringContaining('where is the file?')])
+    expect(assistantBubbles(pane).at(-1)).toContain('SECOND-REPLY')
+  })
+  // A later snapshot that lists nothing waiting clears a stale list (a resync is complete).
+  await pane.settle({ ...SNAPSHOT_IDLE, queue: { interrupting: [], enqueued: ['stale'] } }, SNAPSHOT_IDLE)
+  await eventually(() => expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull())
   await pane.unmount()
 })
 

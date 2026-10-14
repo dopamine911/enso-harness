@@ -557,6 +557,12 @@ export const ThreadRuntime = Type.Object({
    * nothing runs unasked on the next turn. ZEN's two words (#216) — the host maps them.
    */
   clearQueue: Type.Unsafe<() => { interrupting: string[]; enqueued: string[] }>(Type.Function([], Type.Unknown())),
+  /**
+   * The prompts waiting behind the run, interrupting first (#917), without touching them — what the
+   * follow's snapshot lists, so a page that opens mid-run shows the same queue as the page that
+   * queued. ZEN's two words (#216), as `clearQueue` answers.
+   */
+  queued: Type.Unsafe<() => { interrupting: string[]; enqueued: string[] }>(Type.Function([], Type.Unknown())),
   /** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
   dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
 })

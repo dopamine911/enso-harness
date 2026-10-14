@@ -638,7 +638,7 @@ test('⚠ abort() hands back what pi had queued; a later rejection of a queued p
   await releaseEnsoLogs()
 })
 
-test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistant one), the view ends the assistant bubble and opens a new one — the reply lands after its question', async () => {
+test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistant one), the view ends the assistant bubble, draws the prompt, and opens a new one — the reply lands after its question (#75, #917)', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
   await server.untilChunks(1)
@@ -655,13 +655,18 @@ test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistan
   server.frame({ type: 'observation', seq: 4, observation: { kind: 'message-start', role: 'user', text: 'second' } })
   server.frame({ type: 'observation', seq: 5, observation: { kind: 'message-start', role: 'assistant' } })
   server.frame({ type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'two' } })
-  await server.untilChunks(7)
+  await server.untilChunks(10)
   const starts = server.chunks.filter((chunk) => chunk.type === EventType.TEXT_MESSAGE_START) as Array<{
     messageId: string
+    role: string
   }>
-  expect(starts).toHaveLength(2)
+  // The delivered prompt's own bubble (#917) between the two answers: the queue held it until now.
+  expect(starts.map(({ role }) => role)).toEqual(['assistant', 'user', 'assistant'])
+  const promptId = starts[1]?.messageId ?? 'no prompt bubble'
   expect(server.chunks).toContainEqual({ type: EventType.TEXT_MESSAGE_END, messageId: firstMessageId })
-  const secondMessageId = starts[1]?.messageId
+  expect(server.chunks).toContainEqual({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: promptId, delta: 'second' })
+  expect(server.chunks).toContainEqual({ type: EventType.TEXT_MESSAGE_END, messageId: promptId })
+  const secondMessageId = starts[2]?.messageId
   expect(secondMessageId).not.toBe(firstMessageId)
   // The second answer's text streams into the NEW message.
   const lastDelta = [...server.chunks].toReversed().find((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT) as {

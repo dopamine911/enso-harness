@@ -398,6 +398,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       emit({ kind: 'queue', interrupting: [], enqueued: [] })
       return cleared
     },
+    queued: () => ({ interrupting: [...record.queue.interrupting], enqueued: [...record.queue.enqueued] }),
     dispose: () => {
       record.disposed += 1
     },

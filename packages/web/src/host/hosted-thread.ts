@@ -693,6 +693,9 @@ export async function buildHostedThread(
       const cleared = session.clearQueue()
       return { interrupting: cleared.steering, enqueued: cleared.followUp }
     },
+    queued(): { interrupting: string[]; enqueued: string[] } {
+      return { interrupting: [...session.getSteeringMessages()], enqueued: [...session.getFollowUpMessages()] }
+    },
     dispose(): void {
       if (disposed) return
       disposed = true
