@@ -232,9 +232,14 @@ function registerWebFetch(
 
       // --- the ADVISORY address gate (see web-fetch-policy.ts's stated non-coverage:
       // resolve-here vs resolve-in-fetch is a TOCTOU window, accepted for MVP).
-      const addressProblem = await nonPublicAddressReason(url.hostname, dependencies.resolveHostAddresses)
-      if (addressProblem !== undefined)
-        return refusal(rawUrl, `${addressProblem} — ${WEB_FETCH_TOOL_NAME} reaches the public web only.`)
+      const refused = await nonPublicAddressReason(url.hostname, dependencies.resolveHostAddresses)
+      if (refused !== undefined)
+        return refusal(
+          rawUrl,
+          refused.kind === 'non-public'
+            ? `${refused.reason} — ${WEB_FETCH_TOOL_NAME} reaches the public web only.`
+            : `${refused.reason}.`,
+        )
 
       return await fetchUnderDeadline(url, rawUrl, dependencies, signal)
     },

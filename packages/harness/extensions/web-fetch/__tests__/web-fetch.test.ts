@@ -152,6 +152,7 @@ test('a host added from Settings is in the next session’s tool description; on
 // --- the empty-allowlist refusal is the product (#54): it must carry everything a human
 // needs — the file path, the exact JSON shape, and that the change is theirs to make.
 
+// @pins web-search-call/web-fetch-gates
 test('empty allowlist: the refusal names the file, the shape, the restart, and the human', async () => {
   const loaded = loadWebFetch({ readConfigText: () => configWith([]) })
   const text = await run(loaded, 'https://docs.example.com/guide')
@@ -271,6 +272,7 @@ test('a config that cannot be located refuses every call and still names where i
   expect(loaded.fetchedUrls).toEqual([])
 })
 
+// @pins web-search-call/web-fetch-gates
 test('malformed config JSON refuses, naming the parse failure and the expected shape', async () => {
   const loaded = loadWebFetch({ readConfigText: () => '{ webFetch: [' })
   const text = await run(loaded, 'https://docs.example.com/')
@@ -295,6 +297,7 @@ test('a TYPO in a key refuses loudly — strict schema, a typo must not configur
 
 // --- the host gate ----------------------------------------------------------------------
 
+// @pins web-search-call/web-fetch-gates
 test('a host off the allowlist is refused, listing what IS allowed — and nothing is fetched or resolved', async () => {
   const loaded = loadWebFetch()
   const text = await run(loaded, 'https://evil.example/payload')
@@ -305,6 +308,7 @@ test('a host off the allowlist is refused, listing what IS allowed — and nothi
   expect(loaded.resolvedHosts).toEqual([])
 })
 
+// @pins web-search-call/web-fetch-gates
 test('a URL with credentials is refused BEFORE any allowlist or DNS work', async () => {
   const loaded = loadWebFetch()
   const text = await run(loaded, 'https://user:secret@docs.example.com/')
@@ -315,6 +319,7 @@ test('a URL with credentials is refused BEFORE any allowlist or DNS work', async
 
 // --- the address gate (advisory — see web-fetch-policy.ts's stated non-coverage) ---------
 
+// @pins web-search-call/web-fetch-gates
 test('an allowlisted host resolving to a private address is refused, naming the address', async () => {
   const loaded = loadWebFetch({ resolveHostAddresses: async () => ['10.0.0.7'] })
   const text = await run(loaded, 'https://docs.example.com/')
@@ -329,15 +334,21 @@ test('ONE private address among public ones still refuses — any answer can be 
   expect(loaded.fetchedUrls).toEqual([])
 })
 
-test('a host that does not resolve is refused, and an empty answer refuses too', async () => {
+// @pins web-search-call/web-fetch-gates
+test('a host that does not resolve is refused as missing, not private; an empty answer refuses as non-public', async () => {
   const failing = loadWebFetch({
     resolveHostAddresses: async () => {
       throw new Error('NXDOMAIN')
     },
   })
-  expect(await run(failing, 'https://docs.example.com/')).toContain('did not resolve')
+  expect(await run(failing, 'https://docs.example.com/')).toBe(
+    'Not fetched: "docs.example.com" did not resolve (Error: NXDOMAIN).',
+  )
+  expect(failing.fetchedUrls).toEqual([])
   const empty = loadWebFetch({ resolveHostAddresses: async () => [] })
-  expect(await run(empty, 'https://docs.example.com/')).toContain('non-public')
+  expect(await run(empty, 'https://docs.example.com/')).toBe(
+    `Not fetched: "docs.example.com" resolves to a non-public address — ${WEB_FETCH_TOOL_NAME} reaches the public web only.`,
+  )
 })
 
 test('an allowlisted PRIVATE IP literal is refused without consulting the resolver', async () => {

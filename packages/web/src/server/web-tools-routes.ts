@@ -99,11 +99,14 @@ export interface WebToolsRoutes {
  * tool still applies its content-type check to each page.
  */
 async function checkWebFetchHost(host: string, network: Required<HostCheckNetwork>): Promise<WebFetchHostCheck> {
-  const refusedAddress = await nonPublicAddressReason(host, network.checkResolve)
-  if (refusedAddress !== undefined)
+  const refused = await nonPublicAddressReason(host, network.checkResolve)
+  if (refused !== undefined)
     return {
       kind: 'failed',
-      reason: `${refusedAddress}, so ${WEB_FETCH_TOOL_NAME} would refuse it: it reaches the public web only`,
+      reason:
+        refused.kind === 'non-public'
+          ? `${refused.reason}, so ${WEB_FETCH_TOOL_NAME} would refuse it: it reaches the public web only`
+          : `${refused.reason}, so ${WEB_FETCH_TOOL_NAME} would refuse it`,
     }
   const url = `https://${host}/`
   let response: Response
