@@ -111,17 +111,22 @@ export function lastReviewedHeadOf(statusCommentBody: string | undefined): strin
 /**
  * The status comments on a pull request, as a run needs them: `own`, the one `login` wrote, which it
  * updates (so it never rewrites the Actions step's comment, or the owner's from before the App); and
- * the last reviewed head, from its own first,
- * else from any status comment that records one, so a change of poster (the owner's login, then the
- * review App's bot) does not forget what was reviewed.
+ * the last reviewed head, from its own first, else from a status comment by one of `trustedAuthors`
+ * (the repository's owner, whose login posted before the App), so a change of poster does not forget
+ * what was reviewed. ⚠ ONLY those: a `head=` line in anyone else's comment would make the reviewer
+ * skip a head nobody reviewed (#989's review).
  */
 export function statusCommentsOf(
   comments: readonly IssueComment[],
   login: string,
+  trustedAuthors: readonly string[] = [],
 ): { readonly own: IssueComment | undefined; readonly lastReviewedHead: string | undefined } {
   const statuses = comments.filter((comment) => comment.body.startsWith(STATUS_MARKER))
   const own = statuses.find((comment) => comment.author === login)
-  const recorded = statuses.map((comment) => lastReviewedHeadOf(comment.body)).find((head) => head !== undefined)
+  const recorded = statuses
+    .filter((comment) => trustedAuthors.includes(comment.author))
+    .map((comment) => lastReviewedHeadOf(comment.body))
+    .find((head) => head !== undefined)
   return { own, lastReviewedHead: lastReviewedHeadOf(own?.body) ?? recorded }
 }
 
@@ -438,7 +443,9 @@ async function reviewPullRequest(options: ReviewOptions): Promise<string> {
   const pullRequest = readPullRequest(options.number, poster)
   const plan = planReview(
     pullRequest,
-    statusCommentsOf(pullRequestComments(repository, options.number, poster), poster.login).lastReviewedHead,
+    statusCommentsOf(pullRequestComments(repository, options.number, poster), poster.login, [
+      repository.split('/')[0] ?? '',
+    ]).lastReviewedHead,
     (sha) =>
       Bun.spawnSync(['git', 'merge-base', '--is-ancestor', sha, pullRequest.headRefOid], { cwd: REPOSITORY_ROOT })
         .exitCode === 0,

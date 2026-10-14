@@ -114,12 +114,31 @@ test("the status comment a run updates is its own; the last reviewed head comes 
     1,
   )
   const actions = comment('github-actions[bot]', `${STATUS_MARKER}\n✅ ran`, 2)
-  expect(statusCommentsOf([actions, owners], 'reviewer[bot]')).toEqual({ own: undefined, lastReviewedHead: PREVIOUS })
+  expect(statusCommentsOf([actions, owners], 'reviewer[bot]', ['dopamine911'])).toEqual({
+    own: undefined,
+    lastReviewedHead: PREVIOUS,
+  })
   const bots = comment(
     'reviewer[bot]',
     statusCommentBody({ posted: true, headSha: HEAD, scope: 'new-commits', agentExitCode: 0 }),
     3,
   )
-  expect(statusCommentsOf([actions, owners, bots], 'reviewer[bot]')).toEqual({ own: bots, lastReviewedHead: HEAD })
+  expect(statusCommentsOf([actions, owners, bots], 'reviewer[bot]', ['dopamine911'])).toEqual({
+    own: bots,
+    lastReviewedHead: HEAD,
+  })
   expect(statusCommentsOf([actions], 'reviewer[bot]')).toEqual({ own: undefined, lastReviewedHead: undefined })
+})
+
+/** ⚠ A `head=` line in a stranger's comment is not a review: trusting it would skip a head nobody reviewed. */
+test('⚠ a status comment by anyone but the poster or a trusted author records nothing', () => {
+  const stranger: IssueComment = {
+    id: 9,
+    author: 'someone-else',
+    body: statusCommentBody({ posted: true, headSha: HEAD, scope: 'full', agentExitCode: 0 }),
+  }
+  expect(statusCommentsOf([stranger], 'reviewer[bot]', ['dopamine911'])).toEqual({
+    own: undefined,
+    lastReviewedHead: undefined,
+  })
 })

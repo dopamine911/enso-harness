@@ -3,7 +3,13 @@ import { createVerify, generateKeyPairSync } from 'node:crypto'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appJsonWebToken, type GithubFetch, readReviewAppConfig, reviewAppIdentity } from '../review/app-token.ts'
+import {
+  appJsonWebToken,
+  type GithubFetch,
+  readReviewAppConfig,
+  readTokenPermissions,
+  reviewAppIdentity,
+} from '../review/app-token.ts'
 
 /** A throwaway key pair: the test signs with one half and checks with the other. */
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -57,6 +63,15 @@ test('a config file holding null is refused with the same message, not a TypeErr
   expect(() => readReviewAppConfig(path)).toThrow('appId')
 })
 
+/** What the fake GitHub answers: the App, its installation (without checks or statuses), then tokens. */
+function fakeAnswer(url: string, requestNumber: number): object {
+  if (url.endsWith('/app')) return { slug: 'reviewer' }
+  if (url.endsWith(`/installations/${INSTALLATION_ID}`)) {
+    return { permissions: { contents: 'read', pull_requests: 'write', metadata: 'read' } }
+  }
+  return { token: `token-${requestNumber}` }
+}
+
 /**
  * ⚠ THE MODEL'S TOKEN CANNOT WRITE (#981). Two tokens are asked for, each for this repository only:
  * the model's with read permissions alone, the runner's with `pull_requests: write` to post. A
@@ -69,16 +84,15 @@ test("⚠ the model's token is read-only and the runner's only posts, both for o
   const fakeGithub: GithubFetch = async (url, init) => {
     const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
     requests.push({ url, body })
-    const answer = url.endsWith('/app') ? { slug: 'reviewer' } : { token: `token-${requests.length}` }
-    return new Response(JSON.stringify(answer), { status: 200 })
+    return new Response(JSON.stringify(fakeAnswer(url, requests.length)), { status: 200 })
   }
   const identity = await reviewAppIdentity(
     { appId: APP_ID, installationId: INSTALLATION_ID, privateKeyPath: keyPath },
     'zen-harness-foundation',
     fakeGithub,
   )
-  expect(identity).toEqual({ readToken: 'token-2', postToken: 'token-3', login: 'reviewer[bot]' })
-  const [, readRequest, postRequest] = requests
+  expect(identity).toEqual({ readToken: 'token-3', postToken: 'token-4', login: 'reviewer[bot]' })
+  const [, , readRequest, postRequest] = requests
   expect(readRequest?.url).toEndWith(`/app/installations/${INSTALLATION_ID}/access_tokens`)
   expect(readRequest?.body).toEqual({
     repositories: ['zen-harness-foundation'],
@@ -96,4 +110,20 @@ test('a GitHub refusal names its status, even when its body is not JSON', async 
   const refusing: GithubFetch = async () => new Response('<html>bad gateway</html>', { status: 502 })
   const config = { appId: APP_ID, installationId: INSTALLATION_ID, privateKeyPath: keyPath }
   await expect(reviewAppIdentity(config, 'zen-harness-foundation', refusing)).rejects.toThrow('502')
+})
+
+test("checks and statuses join the model's read token only when the installation grants them, and only as read", () => {
+  expect(readTokenPermissions({ contents: 'read', pull_requests: 'write' })).toEqual({
+    contents: 'read',
+    metadata: 'read',
+    pull_requests: 'read',
+  })
+  expect(readTokenPermissions({ checks: 'write', statuses: 'read', pull_requests: 'write' })).toEqual({
+    contents: 'read',
+    metadata: 'read',
+    pull_requests: 'read',
+    checks: 'read',
+    statuses: 'read',
+  })
+  expect(readTokenPermissions(undefined)).toEqual({ contents: 'read', metadata: 'read', pull_requests: 'read' })
 })

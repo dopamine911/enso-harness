@@ -42,6 +42,14 @@ export interface ReviewAppConfig {
  * `POST_TOKEN_PERMISSIONS` (#981).
  */
 const READ_TOKEN_PERMISSIONS = { contents: 'read', metadata: 'read', pull_requests: 'read' } as const
+/**
+ * Read permissions the model's token takes when the installation has them, and goes without when it
+ * does not: plain `gh pr view <n>` and `gh pr view <n> --comments` ask GitHub for the checks summary
+ * (`statusCheckRollup`), which needs both (measured on #989: without them, "Resource not accessible
+ * by integration"; with `--json` fields it works). Asked for only when granted, because a token
+ * request naming a permission the installation lacks is refused whole.
+ */
+const READ_TOKEN_PERMISSIONS_IF_GRANTED = ['checks', 'statuses'] as const
 /** The runner's token: post the review and the status comment. Never given to the model. */
 const POST_TOKEN_PERMISSIONS = { metadata: 'read', pull_requests: 'write' } as const
 
@@ -100,6 +108,17 @@ async function githubJson(
   return (await response.json()) as Record<string, unknown>
 }
 
+/** The model's read-only permissions, with the optional ones the installation grants. */
+export function readTokenPermissions(installationPermissions: unknown): Record<string, 'read'> {
+  const granted =
+    typeof installationPermissions === 'object' && installationPermissions !== null ? installationPermissions : {}
+  const optional = READ_TOKEN_PERMISSIONS_IF_GRANTED.filter((permission) => permission in granted)
+  return {
+    ...READ_TOKEN_PERMISSIONS,
+    ...Object.fromEntries(optional.map((permission) => [permission, 'read' as const])),
+  }
+}
+
 /** Who a run is on GitHub: the model's read-only token, the runner's posting token, and the login they post as. */
 export interface ReviewIdentity {
   readonly readToken: string
@@ -120,9 +139,10 @@ export async function reviewAppIdentity(
   const jsonWebToken = appJsonWebToken(config.appId, readFileSync(config.privateKeyPath, 'utf8'))
   const tokenPath = `/app/installations/${config.installationId}/access_tokens`
   const app = await githubJson(fetchGithub, '/app', jsonWebToken)
+  const installation = await githubJson(fetchGithub, `/app/installations/${config.installationId}`, jsonWebToken)
   const read = await githubJson(fetchGithub, tokenPath, jsonWebToken, {
     repositories: [repositoryName],
-    permissions: READ_TOKEN_PERMISSIONS,
+    permissions: readTokenPermissions(installation.permissions),
   })
   const post = await githubJson(fetchGithub, tokenPath, jsonWebToken, {
     repositories: [repositoryName],
