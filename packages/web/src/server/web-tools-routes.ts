@@ -1,10 +1,8 @@
 import { lookup } from 'node:dns/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { isIP } from 'node:net'
 import {
   type EnsoConfig,
   ensoLogger,
-  isPublicIpAddress,
   type ProjectWebTools,
   ProjectWebToolsChange,
   readWebFetchHostInput,
@@ -26,7 +24,7 @@ import { projectConfigPath } from '@enso/core/paths'
 import { changeProjectWebTools } from '@enso/core/project-config'
 import { readDotenvFile, writeSecret } from '@enso/core/secrets'
 import { readEnsoConfigFile } from '@enso/core/user-config-write'
-import { changeUserAllowedHosts } from '@enso/core/web-fetch-allowlist'
+import { changeUserAllowedHosts, nonPublicAddressReason } from '@enso/core/web-fetch-allowlist'
 import { changeUserWebSearch } from '@enso/core/web-search-settings'
 import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
@@ -69,7 +67,10 @@ type ProjectRefusal = { readonly status: 404 | 422; readonly reason: string }
 
 const log = ensoLogger('server', 'http')
 
-/** The check's whole deadline: one request, never held open by a slow host. */
+/**
+ * The request's deadline: never held open by a slow host. ⚠ The lookup before it carries none, as in
+ * web_fetch's own gate: the system resolver's timeouts bound it.
+ */
 const HOST_CHECK_TIMEOUT_MS = 10_000
 
 /** The check's one request; injectable so a test answers it without the network. */
@@ -104,31 +105,19 @@ export interface WebToolsRoutes {
 }
 
 /**
- * Why web_fetch would refuse `host` by its addresses — it reaches the public web only, as its own
- * gate decides (`isPublicIpAddress`) — or undefined when they are all public. An IP literal is
- * classified as it is.
- */
-async function nonPublicReason(host: string, checkResolve: HostCheckResolve): Promise<string | undefined> {
-  let addresses: readonly string[]
-  try {
-    addresses = isIP(host) === 0 ? await checkResolve(host) : [host]
-  } catch (error: unknown) {
-    return `${host} did not resolve: ${String(error)}`
-  }
-  const nonPublic = addresses.find((address) => !isPublicIpAddress(address))
-  if (addresses.length > 0 && nonPublic === undefined) return undefined
-  return `${host} resolves to a non-public address${nonPublic === undefined ? '' : ` (${nonPublic})`}, so ${WEB_FETCH_TOOL_NAME} would refuse it: it reaches the public web only`
-}
-
-/**
- * The one request to `https://<host>/` (#924), as `web_fetch` would make it: refused when the host
- * resolves to an address web_fetch refuses (the server never asks a private one), sent with
- * web_fetch's User-Agent, its redirects reported, never followed. ⚠ The answer is the host's, not a
- * page web_fetch is sure to read: the tool still applies its content-type check to each page.
+ * At most one request to `https://<host>/` (#924), as `web_fetch` would make it: none when the host
+ * does not resolve or resolves to an address web_fetch's gate refuses (`nonPublicAddressReason`, the
+ * tool's own — the server never asks a private one); sent with web_fetch's User-Agent, its redirects
+ * reported, never followed. ⚠ The answer is the host's, not a page web_fetch is sure to read: the
+ * tool still applies its content-type check to each page.
  */
 async function checkWebFetchHost(host: string, network: Required<HostCheckNetwork>): Promise<WebFetchHostCheck> {
-  const refusedAddress = await nonPublicReason(host, network.checkResolve)
-  if (refusedAddress !== undefined) return { kind: 'failed', reason: refusedAddress }
+  const refusedAddress = await nonPublicAddressReason(host, network.checkResolve)
+  if (refusedAddress !== undefined)
+    return {
+      kind: 'failed',
+      reason: `${refusedAddress}, so ${WEB_FETCH_TOOL_NAME} would refuse it: it reaches the public web only`,
+    }
   const url = `https://${host}/`
   let response: Response
   try {
@@ -330,7 +319,10 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
     })
   }
 
-  /** `POST /api/settings/web-fetch/check`: `{ host }`, one request to it from this server. */
+  /**
+   * `POST /api/settings/web-fetch/check`: `{ host }`, at most one request to it from this server, after
+   * a lookup web_fetch's address gate would accept.
+   */
   async function respondToCheck(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const requirement = 'a host check takes exactly `host`, a host name'
     const asked = await readBody(request, response, {
