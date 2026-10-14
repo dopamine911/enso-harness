@@ -46,7 +46,8 @@ export type EnsoQuestionnaireAnswersProps = Static<typeof EnsoQuestionnaireAnswe
 
 /**
  * A `write` call's receipt (#920): whether the file was there before (overwritten) or not (new). pi's
- * own result says only `Successfully wrote to <path>`; the harness looks before the write runs.
+ * own result says only `Successfully wrote to <path>`; the harness looks when the call starts — in a
+ * parallel batch, before any call of the batch runs (`extensions/write-receipt`).
  *
  * @group Tool results
  */

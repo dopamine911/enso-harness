@@ -65,9 +65,10 @@ function readUsage(raw: unknown): EnsoUsage | undefined {
  *
  * ⚠ No `kind` is invented per tool here: that would put rendering decisions in the transport. A
  * tool that wants a richer descriptor emits one in its `details`, under {@link ENSO_TOOL_RESULT_KEY}
- * (`ask_user`'s answers, the `write` receipt — #920), and it is taken as it stands. Two things are
- * mapped for every tool: an image the tool returned in its `content` (`read` of a PNG — #920), which
- * the text this seam keeps names only as `[image content]`, and truncation.
+ * (`ask_user`'s answers, the `write` receipt — #920), and it is taken as it stands. Truncation is
+ * mapped for every tool; an image the tool returned in its `content` (`read` of a PNG — #920), which
+ * the text this seam keeps names only as `[image content]`, is mapped unless the tool emits its own
+ * descriptor — then the tool's descriptor stands and the image is not drawn (no tool does both).
  *
  * `truncation` is pi's `TruncationResult` — the one shape every built-in tool (read, bash, grep,
  * find, ls) puts there (#411: this once read `shown`/`total`/`unit`, which pi never sends, so no

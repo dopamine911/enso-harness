@@ -270,6 +270,30 @@ test('grep / find / ls: pattern and path, the count, the results folded', async 
   expect(ls.out()).toContain('(empty directory)')
 })
 
+test("a listing's count drops only pi's closing notice — a `[slug]/` entry counts — and grep's context lines are not matches", async () => {
+  const ls = await mountCard(
+    'ls',
+    { path: 'app' },
+    { content: '[slug]/\nlayout.tsx\npage.tsx\n\n[3 entries limit reached. Use limit=6 for more]' },
+  )
+  expect(ls.out()).toContain('3 entries')
+  const grep = await mountCard(
+    'grep',
+    { pattern: 'TODO', context: 1 },
+    {
+      content: [
+        'notes/2024-12-01.md-4- before',
+        'notes/2024-12-01.md:5: TODO',
+        'notes/2024-12-01.md-6- after: 7: x',
+        '',
+        '[1 matches limit reached. Use limit=2 for more, or refine pattern]',
+      ].join('\n'),
+    },
+  )
+  // The label: one match, over the folded text (which still holds pi's notice as it came).
+  expect(grep.out()).toStartWith('›1 matchnotes/')
+})
+
 test('web_fetch / web_search: the URL or query, the status line over the folded result', async () => {
   const fetched = await mountCard(
     'web_fetch',

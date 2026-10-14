@@ -16,7 +16,11 @@ import { constantStore, ThreadStoresContext, useStore } from './store.ts'
  * successful empty result. Every early return below ends in visible output.
  */
 
-/** Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. */
+/**
+ * Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. A renderer
+ * declines a descriptor by drawing nothing — `null`, `undefined`, a boolean or `''`, anything React
+ * shows as no output — and the text is shown instead, never a blank box.
+ */
 export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
 
 /**
@@ -153,7 +157,8 @@ export function EnsoToolResult({
   // descriptor visible instead of blank, and it is the one worth a test. The truncation is data,
   // not the renderer's (#411): it is said under the text too — the text of every pi tool's
   // truncated result lands here.
-  if (drawn === undefined || drawn === null) {
+  // A decline is anything React draws as nothing (see `EnsoRendererMap`), not only `null`.
+  if (drawn === undefined || drawn === null || typeof drawn === 'boolean' || drawn === '') {
     return (
       <div data-enso-kind={descriptor.kind}>
         <TextFallback result={state.result} view={view} />

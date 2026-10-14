@@ -320,13 +320,39 @@ function toggled(set: ReadonlySet<string>, path: string): ReadonlySet<string> {
 export const DiffFocusContext = createContext<{ readonly path: string } | undefined>(undefined)
 
 /**
- * Whether a changed file (relative to the repository) is the one a call named: the same path, or
- * one ending in the other — an absolute path ends in the repository's, and a path relative to a
- * folder inside the repository is the end of the repository's.
+ * Where the changed files' paths start from: `root`, the absolute folder they are relative to (a
+ * repository's top level, a copy's tree), and `scope`, the thread's folder within it (`''` at the
+ * top, else `/`-ended) — what a call's relative path is relative to.
  */
-function samePath(changed: string, named: string): boolean {
+interface FilesPlace {
+  readonly root: string
+  readonly scope: string
+}
+
+/**
+ * The changed file a call's path names (#920). The path is made relative to `place.root` — an
+ * absolute one under the root loses it, a relative one gains the thread's `scope` — and the file at
+ * exactly that path wins. Only when none is there (a root reached through a symlink, a `..`) does
+ * a path sharing a suffix count, and then the longest such file: two paths share a suffix as often
+ * as a repository holds two `package.json`s, so a suffix alone never outranks the exact file.
+ */
+function namedFile(
+  ordered: readonly EnsoGitFileChange[],
+  named: string,
+  place: FilesPlace,
+): EnsoGitFileChange | undefined {
   const asked = named.replace(/^\.\//, '')
-  return changed === asked || asked.endsWith(`/${changed}`) || changed.endsWith(`/${asked}`)
+  const rootPrefix = `${place.root.replace(/\/$/, '')}/`
+  const absolute = asked.startsWith('/')
+  const relative = absolute ? asked.slice(rootPrefix.length) : `${place.scope}${asked}`
+  const exact =
+    absolute && !asked.startsWith(rootPrefix) ? undefined : ordered.find((change) => change.path === relative)
+  if (exact !== undefined) return exact
+  const sharing = ordered.filter((change) => asked.endsWith(`/${change.path}`) || change.path.endsWith(`/${asked}`))
+  return sharing.reduce<EnsoGitFileChange | undefined>(
+    (longest, change) => (longest === undefined || change.path.length > longest.path.length ? change : longest),
+    undefined,
+  )
 }
 
 /**
@@ -335,11 +361,13 @@ function samePath(changed: string, named: string): boolean {
  */
 function ChangedFiles({
   description,
+  place,
   files,
   truncated,
   nothingText,
 }: {
   readonly description: React.ReactNode
+  readonly place: FilesPlace
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
   readonly nothingText: string
@@ -354,7 +382,7 @@ function ChangedFiles({
   // The chosen file while it still differs; else the asked-for file; otherwise the first in the tree.
   const shown =
     ordered.find((change) => change.path === chosen) ??
-    (focus === undefined ? undefined : ordered.find((change) => samePath(change.path, focus.path))) ??
+    (focus === undefined ? undefined : namedFile(ordered, focus.path, place)) ??
     ordered[0]
   const added = files.reduce((sum, change) => sum + (change.added ?? 0), 0)
   const removed = files.reduce((sum, change) => sum + (change.removed ?? 0), 0)
@@ -423,6 +451,7 @@ function RepositoryChanges({
           )}
         </>
       }
+      place={repository}
       files={files}
       truncated={truncated}
       nothingText="Nothing differs: the tree matches the baseline."
@@ -432,14 +461,17 @@ function RepositoryChanges({
 
 /**
  * A thread's copy of its project (#650): no repository, so no branch, baseline or ahead/behind —
- * the files changed since the copy was made, off its snapshot store.
+ * the files changed since the copy was made, off its snapshot store, relative to the copy's tree:
+ * the thread's folder, `cwd`.
  */
 function CopyChanges({
   project,
+  cwd,
   files,
   truncated,
 }: {
   readonly project: string
+  readonly cwd: string
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
 }): React.ReactNode {
@@ -452,6 +484,7 @@ function CopyChanges({
           Changes in this thread&apos;s copy of {name} since the copy was made
         </span>
       }
+      place={{ root: cwd, scope: '' }}
       files={files}
       truncated={truncated}
       nothingText="Nothing differs: the copy matches the project as it was copied."
@@ -470,8 +503,8 @@ export function ThreadChangesView({ outcome }: { readonly outcome: ChangesOutcom
   if (outcome.kind === 'failed') {
     return <p className="px-4 py-6 text-sm text-refuse">The changes could not be read: {outcome.problem}</p>
   }
-  const { git, files, truncated, copy } = outcome.payload
-  if (copy !== null) return <CopyChanges project={copy.project} files={files} truncated={truncated} />
+  const { cwd, git, files, truncated, copy } = outcome.payload
+  if (copy !== null) return <CopyChanges project={copy.project} cwd={cwd} files={files} truncated={truncated} />
   if (git.kind === 'not-a-repository') {
     return (
       <p className="px-4 py-6 text-sm text-muted-foreground">

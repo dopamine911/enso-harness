@@ -164,7 +164,11 @@ The web's half — renderers keyed by kind, and the one definition of what state
 
 <!-- source: packages/web/src/EnsoToolResult.tsx#EnsoRendererMap -->
 ```ts
-/** Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. */
+/**
+ * Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. A renderer
+ * declines a descriptor by drawing nothing — `null`, `undefined`, a boolean or `''`, anything React
+ * shows as no output — and the text is shown instead, never a blank box.
+ */
 export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
 ```
 
@@ -192,9 +196,10 @@ entry carries it), so a live transcript and a resumed one agree. The builder:
  *
  * ⚠ No `kind` is invented per tool here: that would put rendering decisions in the transport. A
  * tool that wants a richer descriptor emits one in its `details`, under {@link ENSO_TOOL_RESULT_KEY}
- * (`ask_user`'s answers, the `write` receipt — #920), and it is taken as it stands. Two things are
- * mapped for every tool: an image the tool returned in its `content` (`read` of a PNG — #920), which
- * the text this seam keeps names only as `[image content]`, and truncation.
+ * (`ask_user`'s answers, the `write` receipt — #920), and it is taken as it stands. Truncation is
+ * mapped for every tool; an image the tool returned in its `content` (`read` of a PNG — #920), which
+ * the text this seam keeps names only as `[image content]`, is mapped unless the tool emits its own
+ * descriptor — then the tool's descriptor stands and the image is not drawn (no tool does both).
  *
  * `truncation` is pi's `TruncationResult` — the one shape every built-in tool (read, bash, grep,
  * find, ls) puts there (#411: this once read `shown`/`total`/`unit`, which pi never sends, so no
@@ -222,9 +227,11 @@ export function descriptorFrom(
 Three things are mapped (#920). **A tool's own descriptor**, under `ENSO_TOOL_RESULT_KEY` in its
 `details`, is taken as it stands: `ask_user` emits `enso.questionnaire-answers` (the questions beside
 the answers, `ask-user/index.ts#textResult`), and the `write-receipt` extension adds `enso.write-receipt`
-(whether the file existed before the call, `write-receipt/index.ts#writeReceipt`) to pi's `write`, whose
-own `details` are empty. **An image the tool returned** in its `content` becomes `enso.images` — its
-bytes, never a URL. **Truncation** goes on whichever of these it is, else on `pi.tool.<toolName>` with
+(whether the file existed when the call started — in a parallel batch, before any call of the batch
+ran, an earlier write of the batch to the same path counting as there; `write-receipt/index.ts#writeReceipt`)
+to pi's `write`, whose own `details` are empty. **An image the tool returned** in its `content` becomes
+`enso.images` — its bytes, never a URL — unless the tool emitted its own descriptor, which stands.
+**Truncation** goes on whichever of these it is, else on `pi.tool.<toolName>` with
 empty `props`. The kinds and their props schemas are `core/src/tool-result-kinds.ts`. `web-fetch` and
 `web-search` still return `details: undefined` on every path
 (`web-fetch/index.ts#refusal`, `web-fetch/index.ts#renderResponse`; `web-search/index.ts#progressForwarder`, `web-search/index.ts#refusal`, `web-search/index.ts#renderUngrounded`, `web-search/index.ts#renderOutcome`).

@@ -171,6 +171,22 @@ test('⚠ an image the tool returned becomes an images descriptor of its bytes',
     descriptor: { kind: ENSO_IMAGES_KIND, props: { images: [{ mimeType: 'image/png', data: 'iVBORw0KGgo=' }] } },
   }))
 
+test("a tool's own descriptor stands over an image it also returned: the image is not drawn", () => {
+  const own = { kind: ENSO_WRITE_RECEIPT_KIND, props: { existed: false } }
+  expect(
+    mapPiEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'c1',
+      toolName: 'write',
+      result: {
+        content: [{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+        details: { [ENSO_TOOL_RESULT_KEY]: own },
+      },
+      isError: false,
+    }),
+  ).toMatchObject({ descriptor: own })
+})
+
 test('the descriptor is wrapped under the namespaced metadata key', () => {
   const descriptor = { kind: 'pi.tool.bash', props: {} }
   expect(toolResultMetadata(descriptor)).toEqual({ [ENSO_TOOL_RESULT_KEY]: descriptor })

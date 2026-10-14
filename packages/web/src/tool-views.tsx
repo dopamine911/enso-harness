@@ -25,7 +25,7 @@ import { cn } from './lib/utils.ts'
  * URL of an `image/*` type.
  */
 
-/** Opens the Diff view at one file (#920: a `write` card's link) — provided by the views' box. */
+/** Opens the Diff view at one file (#920: a `write` or `edit` card's link) — provided by the views' box. */
 export const OpenInDiffContext = createContext<((path: string) => void) | undefined>(undefined)
 
 const PRE = 'max-h-60 overflow-y-auto break-words whitespace-pre-wrap'
@@ -156,7 +156,7 @@ function KeyValues({ record }: { record: Record<string, unknown> }): React.React
   )
 }
 
-/** The `write` card's way to the Diff view, at the file it wrote — only where a Diff view exists. */
+/** A `write` or `edit` card's way to the Diff view, at the file it changed — only where a Diff view exists. */
 function OpenInDiff({ path }: { path: string }): React.ReactNode {
   const open = useContext(OpenInDiffContext)
   if (open === undefined) return null
@@ -328,21 +328,38 @@ export function ToolInput({ name, input }: { name: string; input: unknown }): Re
   return INPUT_VIEWS[name]?.(record, name) ?? <KeyValues record={record} />
 }
 
-/** The lines of a listing result that are results — not pi's closing `[… limit reached]` notices. */
-function listedLines(text: string): number {
-  return text.split('\n').filter((line) => line.trim().length > 0 && !line.startsWith('[')).length
+/**
+ * A listing's lines without pi's closing notice: `ls`, `find` and `grep` end a capped result with a
+ * blank line, then the notices in one bracketed line (`[100 entries limit reached. Use limit=200
+ * for more]`). Only that last line goes — an entry that starts with `[` (a `[slug]/` folder) stays.
+ */
+function listingLines(text: string): string[] {
+  return text
+    .replace(/\n\n\[[^\n]*\]\s*$/, '')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+}
+
+/**
+ * Whether a `grep` line is a match: pi writes `path:12: text` for a match and `path-11- text` for a
+ * context line around it (`context`), so the marker that comes first says which.
+ */
+function isMatchLine(line: string): boolean {
+  const match = /:\d+: /.exec(line)
+  const context = /-\d+- /.exec(line)
+  return match !== null && (context === null || match.index < context.index)
 }
 
 /** What a listing tool says when it found nothing. */
 const NOTHING_FOUND = new Set(['No matches found', 'No files found matching pattern', '(empty directory)'])
 
-/** A listing's count over its folded results: `12 matches`. */
-function listingView(one: string, many: string): ToolTextView {
+/** A listing's count over its folded results — `12 matches`, of the lines `counts` keeps. */
+function listingView(one: string, many: string, counts: (line: string) => boolean = () => true): ToolTextView {
   return (text) =>
     NOTHING_FOUND.has(text.trim()) ? (
       <p className="text-muted-foreground">{text}</p>
     ) : (
-      <Folded label={plural(listedLines(text), one, many)} text={text} />
+      <Folded label={plural(listingLines(text).filter(counts).length, one, many)} text={text} />
     )
 }
 
@@ -365,7 +382,7 @@ export function toolTextView(name: string): ToolTextView | undefined {
   if (name === 'read') {
     return (text) => <Folded label={plural(lineCount(text), 'line', 'lines')} text={text} />
   }
-  if (name === 'grep') return listingView('match', 'matches')
+  if (name === 'grep') return listingView('match', 'matches', isMatchLine)
   if (name === 'find') return listingView('file', 'files')
   if (name === 'ls') return listingView('entry', 'entries')
   if (name === 'web_fetch' || name === 'web_search') {

@@ -131,7 +131,7 @@ function ThreadViews(): React.ReactNode {
     },
     [open],
   )
-  // A tool card's "open in Diff" (#920): the Diff view, at the file the call wrote.
+  // A tool card's "open in Diff" (#920): the Diff view, at the file the call wrote or edited.
   const [diffFocus, setDiffFocus] = useState<{ readonly path: string } | undefined>(undefined)
   const openInDiff = useCallback(
     (path: string): void => {
