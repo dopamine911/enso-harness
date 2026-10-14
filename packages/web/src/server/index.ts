@@ -8,6 +8,7 @@ import type { ProjectThreadSettingsSource } from '../host/tree-setup.ts'
 import type { FollowRouteDeps } from './follow.ts'
 import { createLiteralRoutes } from './literal-routes.ts'
 import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
+import { createModelsRoutes } from './models-routes.ts'
 import { createPermissionRoutes } from './permission-routes.ts'
 import { createProjectRoutes } from './project-routes.ts'
 import { createProjectRegistry } from './projects.ts'
@@ -60,6 +61,12 @@ export interface EnsoServerOptions {
   projectRoots?: Readonly<EnsoProjectsConfig['roots']>
   /** The config file `projectRoots` came from, named when a refusal points at a root. */
   projectsConfigPath?: string
+  /**
+   * The user's config file (`ENSO_HOME/config.json`) whose `models` section — favorites, hidden
+   * providers, roles, presets (#904) — the models routes read and write, user-only; absent (tests),
+   * those routes refuse and a role resolves to nothing.
+   */
+  modelsConfigPath?: string
   /** Enso's own home (`ENSO_HOME`, #421): never a project, nor anything under it (#866); absent (tests), no such refusal. */
   ensoHome?: string
   /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
@@ -232,10 +239,15 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const reads = createThreadReadRoutes({ threadRead, logsDir: options.logsDir, servesDirectory })
   const promptRoutes = createPromptRoutes({ prompts, threads, host, projects })
+  const { dispatchModelsRoute, resolveRole } = createModelsRoutes({
+    configPath: options.modelsConfigPath,
+    providers: host.providers,
+  })
   const controls = createThreadControlRoutes({
     followDeps,
     threadRead,
     pickSystemPrompt: promptRoutes.pickSystemPrompt,
+    resolveRole,
   })
   const permissions = createPermissionRoutes({
     threads,
@@ -333,6 +345,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (dispatchProjectRoute(request, response)) return
     if (dispatchPromptRoute(request, response)) return
     if (dispatchPermissionRoute(request, response)) return
+    if (dispatchModelsRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

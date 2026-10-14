@@ -162,6 +162,8 @@ export interface ModelChipProps {
   readonly state: EnsoModelState | null
   /** What a cold thread's branch records (#434); shown only while `state` is `null`. */
   readonly recorded?: EnsoRecordedModel | null
+  /** The role the thread runs under (#904): its name leads the chip's value, `review · …`, live or recorded. */
+  readonly roleName?: string | null
   /** Open the model dialog — the owner renders it (`composer.tsx`), the same one the palette's `/model` row opens. */
   readonly onOpen: () => void
   /** That dialog is open: the chip is drawn open. */
@@ -194,8 +196,17 @@ function chipFace(
  * else on the page would say so. A cold thread's recorded model is named `Model (recorded)`, so it
  * never reads as live (#434).
  */
-export function ModelChip({ state, recorded = null, onOpen, open, ref }: ModelChipProps): React.ReactNode {
-  const { label, display } = chipFace(state, recorded)
+export function ModelChip({
+  state,
+  recorded = null,
+  roleName = null,
+  onOpen,
+  open,
+  ref,
+}: ModelChipProps): React.ReactNode {
+  const face = chipFace(state, recorded)
+  const { label } = face
+  const display = roleName === null ? face.display : `${roleName} · ${face.display}`
   const model = state?.model ?? null
   let title = 'the model this thread runs — change it here or with /model'
   if (state === null && recorded !== null) {
@@ -235,6 +246,10 @@ export interface ModelChoiceDialogProps {
   readonly returnFocus: () => void
   /** The user picked an option: `onHost(command, optionId)`. The dialog has closed by then. */
   readonly onPick: (command: string, optionId: string) => void
+  /** The user picked a role in the model picker (#904); without it the picker lists no roles. */
+  readonly onChooseRole?: (role: string) => void
+  /** The role the thread runs under (#904): marked in the picker. */
+  readonly chosenRole?: string | undefined
   /** The connection's `fetch` — injected by tests, the page's global by default. */
   readonly fetch?: FetchLike
 }
@@ -307,6 +322,27 @@ function OptionChoices({
   )
 }
 
+/** The command's row, read from `GET …/commands` each time the dialog opens on it. */
+function useCommandRow(
+  threadId: string,
+  command: string | undefined,
+  fetchImpl: ModelChoiceDialogProps['fetch'],
+): DialogState {
+  const [state, setState] = useState<DialogState>({ kind: 'loading' })
+  useEffect(() => {
+    if (command === undefined) return
+    let current = true
+    setState({ kind: 'loading' })
+    void loadCommandRow(threadId, command, fetchImpl).then((loaded) => {
+      if (current) setState(loaded)
+    })
+    return (): void => {
+      current = false
+    }
+  }, [threadId, command, fetchImpl])
+  return state
+}
+
 /**
  * A host command's second step, for the composer's chip and the palette alike: `/model` opens the
  * model picker (`model-picker.tsx`, #880 — Recent, then providers, each row's effort range); a
@@ -327,20 +363,11 @@ export function ModelChoiceDialog({
   onClose,
   returnFocus,
   onPick,
+  onChooseRole,
+  chosenRole,
   fetch: fetchImpl,
 }: ModelChoiceDialogProps): React.ReactNode {
-  const [state, setState] = useState<DialogState>({ kind: 'loading' })
-  useEffect(() => {
-    if (command === undefined) return
-    let current = true
-    setState({ kind: 'loading' })
-    void loadCommandRow(threadId, command, fetchImpl).then((loaded) => {
-      if (current) setState(loaded)
-    })
-    return (): void => {
-      current = false
-    }
-  }, [threadId, command, fetchImpl])
+  const state = useCommandRow(threadId, command, fetchImpl)
   const pick = (option: HostCommandOption): void => {
     if (command === undefined) return
     onClose()
@@ -350,16 +377,19 @@ export function ModelChoiceDialog({
     event.preventDefault()
     returnFocus()
   }
+  const loaded = state.kind === 'loaded' ? state.row : undefined
   return (
     <>
       <ModelPicker
         open={command === MODEL_COMMAND}
         anchor={anchor}
         listing={state.kind === 'loaded' ? { kind: 'loaded', options: state.row.options ?? [] } : state}
-        chosen={state.kind === 'loaded' ? state.row.value : undefined}
+        chosen={loaded?.value}
         recent={recent}
-        purpose={state.kind === 'loaded' ? (state.row.description ?? 'switch the model') : 'switch the model'}
+        purpose={loaded?.description ?? 'switch the model'}
         onChoose={(option: HostCommandOption): void => onPick(MODEL_COMMAND, option.id)}
+        {...(onChooseRole === undefined ? {} : { onChooseRole })}
+        chosenRole={chosenRole}
         onClose={onClose}
         returnFocus={returnFocus}
       />
@@ -370,7 +400,7 @@ export function ModelChoiceDialog({
         }}
       >
         <ModelSelectorContent
-          title={state.kind === 'loaded' ? (state.row.description ?? `/${state.row.name}`) : 'model'}
+          title={loaded === undefined ? 'model' : (loaded.description ?? `/${loaded.name}`)}
           filter={rankOption}
           onCloseAutoFocus={closeAutoFocus}
         >

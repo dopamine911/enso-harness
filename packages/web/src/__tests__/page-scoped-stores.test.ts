@@ -23,6 +23,8 @@ const PAGE_SCOPED_BY_DESIGN: readonly string[] = [
   'page-listings.ts:storedThreads',
   // The server's projects (#395): the rail's sections, one list per page, fetched on load.
   'page-listings.ts:projectList',
+  // The user's models section (#904): favorites, roles, presets — one per page, read on load and saved whole.
+  'models-settings.ts:modelsSettings',
   // The page's log ring and shipper (#132): configured once by main.tsx, read by the drawer.
   'thread-stores.ts:browserLogging',
   // The page's clock (#278): one interval, every relative age on the page subscribed to it.

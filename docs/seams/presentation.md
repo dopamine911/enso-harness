@@ -218,6 +218,11 @@ export interface ThreadStores {
    * entry appended live. Undefined until the follow's first snapshot — never assumed pi's default.
    */
   readonly systemPrompt: WritableStore<EnsoThreadSystemPrompt | undefined>
+  /**
+   * The role the thread runs under (#904): every snapshot's `modelRole`, then an `enso-model-role`
+   * entry appended live (`null` once the model or effort is changed by hand). `null` when none.
+   */
+  readonly modelRole: WritableStore<EnsoThreadModelRole | null>
   /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
   readonly cwd: WritableStore<string | undefined>
   /** Whether the thread runs on a tree of its own (#551), from every snapshot — what makes "Restore files to here" an offer. */

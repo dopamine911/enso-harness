@@ -2,15 +2,18 @@ import { afterAll, afterEach, expect, test } from 'bun:test'
 import {
   type EnsoLibraryPrompt,
   type EnsoLibraryPromptListing,
+  type EnsoModelsConfig,
   type EnsoProject,
   type EnsoProjectPromptLibrary,
   type EnsoStoredThread,
   type HostCommandOption,
+  readEnsoModelsConfig,
   type RuntimeCommand,
   summarizeLibraryPrompt,
 } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
+import { modelsSettings } from '../models-settings.ts'
 import { projectList, storedThreads } from '../page-listings.ts'
 import type { LaunchActions } from '../pane-context.ts'
 import { ThreadPane } from '../thread-pane.tsx'
@@ -44,7 +47,21 @@ const leftOpen = new Set<Mounted>()
 afterEach(async () => {
   for (const mounted of leftOpen) await mounted.unmount()
   clearThreadsForTest()
+  modelsSection = undefined
+  modelsSaves.length = 0
+  // The page's one models store outlives the test: read again — unanswered, as before #904 — so the
+  // next test, or the next file in this process, starts with no section at all.
+  await modelsSettings.refresh()
 })
+
+/**
+ * What `GET /api/models/settings` answers (#904): the user's section, each `PUT` replacing it as the
+ * server does; `undefined`, the route's 404 — a test that sets up no section reads none.
+ */
+let modelsSection: EnsoModelsConfig | undefined
+/** Every `PUT /api/models/settings` body. */
+const modelsSaves: unknown[] = []
+const MODELS_FILE = '/home/someone/.enso/config.json'
 
 const tick = (): Promise<void> => {
   const { promise, resolve } = Promise.withResolvers<void>()
@@ -191,27 +208,45 @@ interface MountOptions {
   readonly catalogueHeld?: Promise<void>
 }
 
+/** `/api/models/settings` over the test's models section: a PUT is recorded and becomes the section. */
+function modelsSettingsRoute(init: RequestInit | undefined): Promise<Response> {
+  if (init?.method === 'PUT') {
+    const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
+    modelsSaves.push(body)
+    modelsSection = readEnsoModelsConfig(body) ?? {}
+  }
+  return Promise.resolve(
+    modelsSection === undefined
+      ? new Response('not found', { status: 404 })
+      : Response.json({ path: MODELS_FILE, models: modelsSection }),
+  )
+}
+
+/** The prompt libraries' answers (#443, #470), or `undefined` for a path they do not serve. */
+function promptRoute(path: string, options: MountOptions, project: unknown): Response | undefined {
+  if (path === '/api/prompts') {
+    return options.library === 'absent'
+      ? new Response('this server has no prompt library', { status: 404 })
+      : Response.json(LIBRARY)
+  }
+  if (path === '/api/prompts/triage') return Response.json(TRIAGE, { headers: { ETag: `"${'c'.repeat(64)}"` } })
+  if (/^\/api\/threads\/[^/]+\/project-prompts$/.test(path)) return Response.json(project)
+  if (/^\/api\/threads\/[^/]+\/project-prompts\/kickoff$/.test(path)) {
+    return Response.json(KICKOFF, { headers: { ETag: `"${'d'.repeat(64)}"` } })
+  }
+  return undefined
+}
+
 /** The server's prompt routes (#443, #470) over the scripted server, which has none. */
 function withPromptRoutes(server: ScriptedFetch, options: MountOptions): typeof fetch {
   const project = options.projectPrompts ?? EMPTY_PROJECT
   return ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const path = new URL(requestedUrl(input), 'http://localhost').pathname
-    if (path === '/api/prompts') {
-      return Promise.resolve(
-        options.library === 'absent'
-          ? new Response('this server has no prompt library', { status: 404 })
-          : Response.json(LIBRARY),
-      )
-    }
-    if (path === '/api/prompts/triage') {
-      return Promise.resolve(Response.json(TRIAGE, { headers: { ETag: `"${'c'.repeat(64)}"` } }))
-    }
-    if (/^\/api\/threads\/[^/]+\/project-prompts$/.test(path)) return Promise.resolve(Response.json(project))
+    if (path === '/api/models/settings') return modelsSettingsRoute(init)
+    const prompt = promptRoute(path, options, project)
+    if (prompt !== undefined) return Promise.resolve(prompt)
     if (options.catalogueHeld !== undefined && /^\/api\/threads\/[^/]+\/commands$/.test(path)) {
       return options.catalogueHeld.then(() => server.fetch(input, init))
-    }
-    if (/^\/api\/threads\/[^/]+\/project-prompts\/kickoff$/.test(path)) {
-      return Promise.resolve(Response.json(KICKOFF, { headers: { ETag: `"${'d'.repeat(64)}"` } }))
     }
     return server.fetch(input, init)
   }) as typeof fetch
@@ -223,7 +258,7 @@ async function mountLaunch(options: MountOptions = {}): Promise<Mounted> {
   const fetchImpl = withPromptRoutes(server, options)
   globalThis.fetch = fetchImpl
   await flush(async () => {
-    await Promise.all([projectList.refresh(), storedThreads.refresh()])
+    await Promise.all([projectList.refresh(), storedThreads.refresh(), modelsSettings.refresh()])
   })
   const stores = mintThread(fetchImpl, options.projectId ?? 'p-launch', options.threadId)
   const opened: string[] = []
@@ -905,4 +940,118 @@ test('⚠ a provider not logged in is collapsed, opens to its models, shows them
   await press(modelFilter(dialog), 'Enter')
   expect(picker()).not.toBeNull()
   expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Plain')
+})
+
+// #904: a role is chosen in the launch panel's picker — Roles on top — and the chips say what it
+// resolves to now; Start sends the role's NAME, never its model and effort.
+test('⚠ Roles lead the picker; choosing one shows `role · model` and its clamped effort, and Start sends { role } (#904)', async () => {
+  modelsSection = { roles: { review: { model: 'fake/deep', effort: 'xhigh' } } }
+  const mounted = await mountLaunch()
+  // No `default` role: the panel starts as before.
+  await eventually(() => expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Thinker'))
+  const dialog = await openModelPicker(mounted)
+  expect(pickerGroups(dialog)[0]).toEqual(['Roles', ['role review']])
+  const row = dialog.querySelector<HTMLElement>('[cmdk-item][data-value="role review"]')
+  // Thinker offers up to high: xhigh is clamped, and the row says so.
+  expect(row?.textContent).toBe('reviewThinkerhigh · clamped from xhigh')
+  if (row === null) throw new Error('expected the role row')
+  await click(row)
+  await eventually(() => expect(picker()).toBeNull())
+  expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: review · Thinker')
+  expect(mounted.chip('Effort').getAttribute('aria-label')).toBe('Effort: high · clamped from xhigh')
+  await typeAndStart(mounted, 'go')
+  await eventually(() =>
+    expect(mounted.server.configures.map((configure) => configure.body)).toEqual([
+      { role: 'review', mode: 'default', systemPrompt: null },
+    ]),
+  )
+})
+
+// #904: once the session runs, a role chosen in the composer's picker is `POST …/configure { role }`;
+// a role the server does not take is said as a notice naming the role and why — never silently dropped.
+test('a role chosen in a live thread posts { role }; a refused or failed one is said as a notice (#904)', async () => {
+  modelsSection = { roles: { review: { model: 'fake/deep', effort: 'high' } } }
+  const mounted = await mountLaunch({
+    server: {
+      configureAnswers: [{ status: 204 }, refusedAt('model', 'No API key for fake/deep'), { status: 500 }],
+    },
+  })
+  await typeAndStart(mounted, 'go')
+  await eventually(() => expect(panelTitle(mounted)).toBeUndefined())
+  const chooseReview = async (): Promise<void> => {
+    const dialog = await openModelPicker(mounted)
+    const row = await eventually(() => {
+      const found = dialog.querySelector<HTMLElement>('[cmdk-item][data-value="role review"]')
+      if (found === null) throw new Error('expected the role row')
+      return found
+    })
+    await click(row)
+    await eventually(() => expect(picker()).toBeNull())
+  }
+  const notices = (): string[] => mounted.stores.notifications.get().map((notice) => notice.message)
+
+  await chooseReview()
+  await eventually(() =>
+    expect(notices()).toContain(`thread ${mounted.stores.threadId}: role review refused: No API key for fake/deep`),
+  )
+  await chooseReview()
+  await eventually(() =>
+    expect(notices()).toContain(`thread ${mounted.stores.threadId}: role review failed: the server answered 500`),
+  )
+  expect(mounted.server.configures.map((configure) => configure.body).slice(1)).toEqual([
+    { role: 'review' },
+    { role: 'review' },
+  ])
+})
+
+test('a new thread starts on the `default` role; a model picked by hand leaves it; a refused default says why (#904)', async () => {
+  modelsSection = { roles: { default: { model: 'fake/plain' } } }
+  const mounted = await mountLaunch()
+  await eventually(() => expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: default · Plain'))
+  expect(mounted.chip('Effort').getAttribute('aria-label')).toBe('Effort: off')
+  await chooseModel(mounted, 'fake/deep')
+  expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Thinker')
+  await typeAndStart(mounted, 'go')
+  await eventually(() =>
+    expect(mounted.server.configures.map((configure) => configure.body)).toEqual([
+      { model: 'fake/deep', thinking: 'medium', mode: 'default', systemPrompt: null },
+    ]),
+  )
+  await mounted.unmount()
+  clearThreadsForTest()
+
+  // A default whose model is not on offer is refused, said, and the panel runs the session's own model.
+  modelsSection = { roles: { default: { model: 'gone/model' } } }
+  const refused = await mountLaunch()
+  await eventually(() =>
+    expect(refused.container.textContent).toContain('role default has no model available: gone/model'),
+  )
+  expect(refused.chip('Model').getAttribute('aria-label')).toBe('Model: Thinker')
+})
+
+test('Favorites lead the picker; an unavailable one is listed disabled; a star saves the favorites and chooses nothing (#904)', async () => {
+  modelsSection = { favorites: ['gone/model', 'fake/plain'] }
+  const mounted = await mountLaunch()
+  await eventually(() => expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Thinker'))
+  const dialog = await openModelPicker(mounted)
+  expect(pickerGroups(dialog)).toEqual([
+    ['Favorites', ['favorite gone/model', 'favorite fake/plain']],
+    ['fake', ['fake/deep']],
+  ])
+  const gone = dialog.querySelector<HTMLElement>('[cmdk-item][data-value="favorite gone/model"]')
+  expect(gone?.getAttribute('aria-disabled')).toBe('true')
+  expect(gone?.textContent).toContain('unavailable')
+  const star = dialog.querySelector<HTMLButtonElement>('button[aria-label="Star Thinker"]')
+  expect(star?.getAttribute('aria-pressed')).toBe('false')
+  if (star === null) throw new Error('expected the star')
+  await click(star)
+  await eventually(() => expect(modelsSaves).toEqual([{ favorites: ['gone/model', 'fake/plain', 'fake/deep'] }]))
+  // The picker stays open on the same choice; the starred model now leads with the others.
+  expect(picker()).not.toBeNull()
+  expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Thinker')
+  await eventually(() =>
+    expect(pickerGroups(dialog)).toEqual([
+      ['Favorites', ['favorite gone/model', 'favorite fake/plain', 'favorite fake/deep']],
+    ]),
+  )
 })

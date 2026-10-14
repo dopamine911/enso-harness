@@ -150,12 +150,14 @@ function ModelControls({
 }): React.ReactNode {
   const state = useModelState()
   const recorded = useRecordedModel()
+  const role = useStore(useThreadStores().modelRole)
   return (
     <>
       <ModelChip
         ref={chipRef}
         state={state}
         recorded={recorded}
+        roleName={role?.role ?? null}
         onOpen={(): void => onOpenModelDialog('model')}
         open={pickerOpen}
       />
@@ -164,9 +166,13 @@ function ModelControls({
   )
 }
 
-/** The composer's host-command dialog (#338), its model picker's Recent group read from the stored sessions (#880). */
-function ComposerModelDialog(props: Omit<ModelChoiceDialogProps, 'recent'>): React.ReactNode {
-  return <ModelChoiceDialog {...props} recent={useRecentModels()} />
+/**
+ * The composer's host-command dialog (#338), its model picker's Recent group read from the stored
+ * sessions (#880) and the role the thread runs under marked (#904).
+ */
+function ComposerModelDialog(props: Omit<ModelChoiceDialogProps, 'recent' | 'chosenRole'>): React.ReactNode {
+  const role = useStore(useThreadStores().modelRole)
+  return <ModelChoiceDialog {...props} recent={useRecentModels()} chosenRole={role?.role} />
 }
 
 /** How a `host` command is run and how the model dialog is opened — the composer's, handed to its chrome and palette. */
@@ -892,6 +898,23 @@ export function ChatPromptInput(): React.ReactNode {
         notifications: stores.notifications,
       }),
   }
+  // A role chosen in the model picker (#904): `POST …/configure` with the role's name — the server
+  // resolves it and records it, and the chip moves on the follow (the `model` observation and the
+  // `enso-model-role` entry). A refusal is said as a refused host command is: a notice.
+  const chooseRole = (role: string): void => {
+    void stores.connection.configure({ role }).then((outcome) => {
+      if (outcome.outcome === 'told') return
+      let said = 'the server could not be reached'
+      if (outcome.outcome === 'refused' || outcome.outcome === 'busy') said = outcome.reason
+      else if (outcome.outcome === 'failed') said = `the server answered ${outcome.status}`
+      stores.notifications.push(
+        `thread ${stores.threadId}: role ${role} ${outcome.outcome}: ${said}`,
+        'warning',
+        'run',
+        ENSO_NOTICE_SOURCE,
+      )
+    })
+  }
   // A bare `/<name>` typed and sent (#388): when the thread's command list names it as a HOST
   // row, it does what choosing that row in the palette does — `/login` opens the provider
   // picker — instead of reaching the transcript as a user message the server refuses.
@@ -976,6 +999,7 @@ export function ChatPromptInput(): React.ReactNode {
         onClose={(): void => setModelDialog(undefined)}
         returnFocus={(): void => textareaRef.current?.focus()}
         onPick={host.onHost}
+        onChooseRole={chooseRole}
       />
       <ThreadContextDialog
         open={contextOpen}

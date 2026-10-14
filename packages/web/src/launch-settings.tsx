@@ -1,4 +1,13 @@
-import type { EnsoConfigurationRefusal, EnsoSessionConfiguration, HostCommandOption, RuntimeCommand } from '@enso/core'
+import {
+  ENSO_DEFAULT_ROLE,
+  type EnsoModelsConfig,
+  type EnsoConfigurationRefusal,
+  type EnsoRoleResolution,
+  type EnsoSessionConfiguration,
+  type HostCommandOption,
+  resolveModelRole,
+  type RuntimeCommand,
+} from '@enso/core'
 import { TriangleAlertIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
@@ -17,6 +26,8 @@ import {
   SystemPromptChip,
   useSystemPromptChoice,
 } from './launch-prompts.tsx'
+import { roleEffortText } from './model-picker.tsx'
+import { modelsConfigOf, useModelsSettings } from './models-settings.ts'
 import { useRecentModels } from './page-listings.ts'
 import { useChatContext } from './pane-context.ts'
 import { usePermissionMode } from './permission-mode.tsx'
@@ -37,7 +48,16 @@ import { useStore, useThreadStores } from './store.ts'
  * The effort list is the CHOSEN model's (each `/model` option carries its levels, #391), not the
  * session's current one: that is what "all at once" needs. Nothing is built to offer them: the
  * commands route answers a thread with no session from the host's catalogue (#484).
+ *
+ * ROLES (#904). A role chosen in the picker sets the model and effort the chips show — what the
+ * role resolves to now (`resolveModelRole`) — and Start sends the role's NAME, not the model: the
+ * server resolves it again and records it. With nothing picked and a `default` role set up, the
+ * panel starts on it; one that is refused says why, and the panel falls back to the session's own
+ * model. Picking a model or an effort by hand leaves the role.
  */
+
+/** The role the chips show: resolved, so Start can send it. */
+type ResolvedRole = Extract<EnsoRoleResolution, { kind: 'resolved' }>
 
 /**
  * Why a prompt beginning with `/` cannot start a session (#484): the slash commands belong to a
@@ -160,6 +180,11 @@ export interface LaunchForm {
   readonly catalogue: Catalogue
   readonly model: string | undefined
   readonly chooseModel: (option: HostCommandOption) => void
+  /** The role the session starts under (#904), resolved; undefined when none is chosen or it was refused. */
+  readonly role: ResolvedRole | undefined
+  readonly chooseRole: (role: string) => void
+  /** Why the role the panel would start on is refused (#904): the panel runs the session's own model instead. */
+  readonly roleRefusal: string | undefined
   readonly effort: string | undefined
   readonly levels: readonly string[]
   readonly chooseEffort: (level: string) => void
@@ -181,20 +206,59 @@ export interface LaunchForm {
  * The settings as the configure body (#391): every setting the panel shows, sent as shown. The
  * effort is the level the session runs at (#852) — picked, or the host's — and goes only when there
  * is one. pi's default system prompt is said as `null` (#443): a Start refused at a later step may
- * already have applied a library prompt, and a retry with pi's default must replace it.
+ * already have applied a library prompt, and a retry with pi's default must replace it. Under a
+ * role (#904) the role's name goes in place of the model and the effort — never with them.
  */
-function configurationOf(form: Pick<LaunchForm, 'model' | 'effort' | 'mode' | 'prompts'>): EnsoSessionConfiguration {
+function configurationOf(
+  form: Pick<LaunchForm, 'model' | 'role' | 'effort' | 'mode' | 'prompts'>,
+): EnsoSessionConfiguration {
   const { systemPrompt } = form.prompts
+  const modelAndEffort =
+    form.role === undefined
+      ? {
+          ...(form.model === undefined ? {} : { model: form.model }),
+          ...(form.effort === undefined ? {} : { thinking: form.effort }),
+        }
+      : { role: form.role.role }
   return {
-    ...(form.model === undefined ? {} : { model: form.model }),
-    ...(form.effort === undefined ? {} : { thinking: form.effort }),
+    ...modelAndEffort,
     ...(form.mode === undefined ? {} : { mode: form.mode }),
     systemPrompt: systemPrompt === PI_DEFAULT_SYSTEM_PROMPT ? null : systemPrompt,
   }
 }
 
+/**
+ * The role the panel would start on (#904): the one picked, else — nothing picked at all — the
+ * `default` role when one is set up. Resolved against the catalogue once it holds.
+ */
+function roleOf(
+  catalogue: Catalogue,
+  models: EnsoModelsConfig,
+  name: string | undefined,
+): EnsoRoleResolution | undefined {
+  if (name === undefined || catalogue.kind !== 'loaded') return undefined
+  return resolveModelRole(name, models, catalogue.models)
+}
+
 /** The disconnected page's refusal: the settings applied, but the prompt had nowhere to go. */
 const NOT_SENT: LaunchRefusal = { text: 'the prompt could not be sent — the page is disconnected; reload' }
+
+/** The role the picks resolve to — the default one while nothing is picked — and the model it leaves. */
+function resolvePicks(
+  catalogue: Catalogue,
+  models: EnsoModelsConfig,
+  picked: { role: string | undefined; model: string | undefined; effort: string | undefined },
+): {
+  resolution: EnsoRoleResolution | undefined
+  role: Extract<EnsoRoleResolution, { kind: 'resolved' }> | undefined
+  model: string | undefined
+} {
+  const nothingPicked = picked.role === undefined && picked.model === undefined && picked.effort === undefined
+  const defaultRole = nothingPicked && models.roles?.[ENSO_DEFAULT_ROLE] !== undefined ? ENSO_DEFAULT_ROLE : undefined
+  const resolution = roleOf(catalogue, models, picked.role ?? defaultRole)
+  const role = resolution?.kind === 'resolved' ? resolution : undefined
+  return { resolution, role, model: role === undefined ? modelOf(catalogue, picked.model) : role.model }
+}
 
 /**
  * The launch panel's form for the thread on this pane. `active` while the panel is on screen: only
@@ -214,14 +278,21 @@ export function useLaunchForm(active: boolean): LaunchForm {
   const prompts = useSystemPromptChoice(active, stores.threadId, stores.fetch)
   const [pickedModel, setPickedModel] = useState<string | undefined>(undefined)
   const [pickedEffort, setPickedEffort] = useState<string | undefined>(undefined)
+  const [pickedRole, setPickedRole] = useState<string | undefined>(undefined)
   // Only what the user picked is held: until then the chip follows the thread's own mode (#391).
   const [pickedMode, setPickedMode] = useState<string | undefined>(undefined)
   const [applying, setApplying] = useState(false)
   const [refusal, setRefusal] = useState<LaunchRefusal | undefined>(undefined)
-  const model = modelOf(catalogue, pickedModel)
+  const models = modelsConfigOf(useModelsSettings())
+  const { resolution, role, model } = resolvePicks(catalogue, models, {
+    role: pickedRole,
+    model: pickedModel,
+    effort: pickedEffort,
+  })
   const settings = {
     model,
-    effort: effortOf(catalogue, model, pickedEffort),
+    role,
+    effort: role === undefined ? effortOf(catalogue, model, pickedEffort) : role.effort,
     mode: pickedMode ?? permission.mode ?? permission.available[0],
     prompts,
   }
@@ -243,9 +314,24 @@ export function useLaunchForm(active: boolean): LaunchForm {
   return {
     ...settings,
     catalogue,
-    chooseModel: (option: HostCommandOption): void => setPickedModel(option.id),
+    // A model picked by hand leaves the role (#904).
+    chooseModel: (option: HostCommandOption): void => {
+      setPickedRole(undefined)
+      setPickedModel(option.id)
+    },
+    chooseRole: (name: string): void => {
+      setPickedModel(undefined)
+      setPickedEffort(undefined)
+      setPickedRole(name)
+    },
+    roleRefusal: resolution?.kind === 'refused' ? resolution.reason : undefined,
     levels: levelsOf(catalogue, model),
-    chooseEffort: setPickedEffort,
+    // An effort picked by hand leaves the role too, keeping the model it had resolved to.
+    chooseEffort: (level: string): void => {
+      if (role !== undefined) setPickedModel(role.model)
+      setPickedRole(undefined)
+      setPickedEffort(level)
+    },
     modes: permission.available,
     chooseMode: setPickedMode,
     applying,
@@ -270,9 +356,10 @@ export function LaunchChips({
   readonly onSavedPrompt: (text: string) => void
 }): React.ReactNode {
   const stores = useThreadStores()
-  const { catalogue } = form
+  const { catalogue, role } = form
   const refusedAt = form.refusal?.step
   const recent = useRecentModels()
+  const effort = role === undefined ? form.effort : roleEffortText(role)
   return (
     <div role="group" aria-label="Session settings" className="flex flex-wrap items-center gap-2">
       <LaunchModelChip
@@ -280,13 +367,15 @@ export function LaunchChips({
         recent={recent}
         chosen={form.model}
         onChoose={form.chooseModel}
+        roleName={role?.role}
+        onChooseRole={form.chooseRole}
         loading={catalogue.kind === 'loading'}
         invalid={refusedAt === 'model'}
       />
       <SettingChip
         label="Effort"
         value={form.effort ?? ''}
-        display={catalogue.kind === 'loading' ? 'loading…' : (form.effort ?? PI_DEFAULT_EFFORT)}
+        display={catalogue.kind === 'loading' ? 'loading…' : (effort ?? PI_DEFAULT_EFFORT)}
         onChoose={form.chooseEffort}
         disabled={form.levels.length === 0}
         invalid={refusedAt === 'thinking'}
@@ -327,6 +416,16 @@ export function LaunchNotes({ form }: { readonly form: LaunchForm }): React.Reac
         </p>
       ) : null}
       <LibraryNotes choice={form.prompts} />
+      {form.roleRefusal === undefined ? null : (
+        <p role="alert" className="px-1 text-detail text-refuse">
+          {form.roleRefusal}
+        </p>
+      )}
+      {form.role?.notice === undefined ? null : (
+        <p role="status" className="px-1 text-detail text-muted-foreground">
+          {form.role.notice}
+        </p>
+      )}
       {form.refusal === undefined ? null : (
         <Alert className={REFUSAL_ALERT}>
           <TriangleAlertIcon aria-hidden="true" />

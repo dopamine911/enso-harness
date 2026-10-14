@@ -1,6 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import type { EnsoOpenDialog, EnsoQuestionAnswer } from './dialog.ts'
+import type { EnsoThreadModelRole } from './model-roles.ts'
 import type { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import type { EnsoPermissionModeState } from './permission-mode.ts'
 import type { EnsoSystemPromptChoice } from './prompt-library.ts'
@@ -284,6 +285,13 @@ export const EnsoSessionConfiguration = Type.Object(
      * goes back to pi's default over a prompt the first attempt already applied.
      */
     systemPrompt: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
+    /**
+     * A role's name (#904), in place of `model` and `thinking`: the server resolves it from the
+     * user's config against the models on offer, applies its model and effort as the `model` step,
+     * and records the role's name with what it resolved to (`enso-model-role`). Never sent with
+     * `model` or `thinking`.
+     */
+    role: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false },
 )
@@ -518,6 +526,13 @@ export const ThreadRuntime = Type.Object({
   setSystemPrompt: Type.Unsafe<(choice: EnsoSystemPromptChoice | null) => string | undefined>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
+  /**
+   * Record the role the session now runs under (#904 decision 5): its name and the model and effort
+   * it resolved to, as an `enso-model-role` entry appended through pi — the file and every follower
+   * get it — or `null`, ending it. A change of model or effort by hand ends a role by itself.
+   * Synchronous; the caller has already applied the role's model and effort.
+   */
+  setModelRole: Type.Unsafe<(record: EnsoThreadModelRole | null) => void>(Type.Function([Type.Unknown()], Type.Void())),
   /**
    * Record a human's resolution of the thread's incident (#466): refused — the reason returned —
    * when `incidentResolutionRefusal` refuses it against the live branch; else its

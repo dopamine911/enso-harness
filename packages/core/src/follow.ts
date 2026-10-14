@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { EnsoOpenDialog } from './dialog.ts'
+import { EnsoThreadModelRole } from './model-roles.ts'
 import { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoThreadSystemPrompt } from './prompt-library.ts'
@@ -44,6 +45,12 @@ export const EnsoFollowSnapshot = Type.Object(
     model: Type.Union([EnsoModelState, Type.Null()]),
     /** What a NOT-live thread's branch records it last ran on (#434); absent when live, or when the branch records neither. */
     recordedModel: Type.Optional(EnsoRecordedModel),
+    /**
+     * The role the thread runs under (#904): the branch's last `enso-model-role` record — its name and
+     * the model and effort it resolved to then — live or cold; `null` for none. One chosen later
+     * arrives as that entry, appended live.
+     */
+    modelRole: Type.Optional(Type.Union([EnsoThreadModelRole, Type.Null()])),
     /**
      * The system prompt the session runs with (#443, #878): the branch's last `enso-system-prompt`
      * record — live or cold, the same record, so a reload says what a running session was given.

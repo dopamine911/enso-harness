@@ -60,16 +60,18 @@ const SECTIONS: MarkTarget = { role: 'navigation', name: 'Settings sections' }
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts · permissions · storage',
+  landingTagline: 'themes · fonts · providers · roles · permissions · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
+    "**Providers**: every provider pi knows that you have set up or that an extension registered (an account slot), logged in or not, and how: a subscription, from the environment, or \"a key is set\" — a key is never shown. **Log in** runs pi's own login, the one `/login` runs: a subscription login says its page and asks for the code; an API key goes in a password field, once, straight to pi's credential store. **Log out** removes what pi stored. **Hide from picker** keeps a provider logged in but out of the picker. Each model has a star: starred models lead the picker as **Favorites**, in your order, and one that becomes unavailable stays there, marked. **Add a provider** reaches pi's built-ins nobody has set up.",
+    "**Roles**: a role names a model and an effort, with fallbacks in order — `default` is what a new thread starts on; `quick` and `deep` are suggestions. The picker lists them first, and choosing one sets the model and the effort together; the effort is clamped to the model's levels, and a role whose model is unavailable runs its first available fallback and says so, or is refused with the reason. A thread records the role's name with what it ran, so a reload or a fork still says it after the role is edited. **Presets** save every role and the default effort under a name; switching to one replaces them all. Roles, favorites, hidden providers and presets are kept in the `models` section of `ENSO_HOME/config.json`, yours alone: a project's own config is never read for them.",
     "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, set the file's other keys under **Behaviour**, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
     '**Storage**: the totals across every project (trees, what they take, and what the snapshot stores take), then each project with what it takes on disk (its trees plus its snapshot store, the number its card on the Projects page says), every thread tree with what it takes, and a Delete for each. See [Thread trees](./thread-trees.md).',
     "A project's own settings are on the project's page, not here: **Project settings…** in its menu on the rail. See [Thread trees](./thread-trees.md).",
   ],
   opens: [
     '{steps}, at the foot of the rail. Settings opens as a page in place of the thread, which keeps running behind it; opening a thread from the rail leaves the page.',
-    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
+    "Each section has an address of its own, `?page=settings&section=appearance`, `providers`, `roles`, `permissions` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
   ],
   shots: [
     {

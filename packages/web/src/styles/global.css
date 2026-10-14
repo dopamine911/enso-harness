@@ -193,6 +193,10 @@
 @utility grid-cols-font-row {
   grid-template-columns: calc(var(--spacing) * 30) minmax(0, calc(var(--spacing) * 55)) minmax(0, 1fr);
 }
+/* A role's model and its effort (#904): the model takes the rest. */
+@utility grid-cols-role-target {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
 /* Permissions' add-a-rule row: tool, pattern, decision, the button; Try a command's: tool, input, the button. */
 @utility grid-cols-add-rule {
   grid-template-columns: calc(var(--spacing) * 35) minmax(0, 1fr) calc(var(--spacing) * 30) auto;

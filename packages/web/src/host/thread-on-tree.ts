@@ -170,6 +170,7 @@ export function treeOnFirstRun(first: HostedThread, move: TreeMove): HostedThrea
     setPermissionMode: (mode, outcome) =>
       isMoving() ? outcome.onRejected(whileMoving) : current.runtime.setPermissionMode(mode, outcome),
     setSystemPrompt: (choice) => (isMoving() ? whileMoving : current.runtime.setSystemPrompt(choice)),
+    setModelRole: (record) => current.runtime.setModelRole(record),
     resolveIncident: (incidentId, resolution) =>
       isMoving() ? whileMoving : current.runtime.resolveIncident(incidentId, resolution),
     subscribe: (observer) => {

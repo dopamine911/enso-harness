@@ -83,6 +83,8 @@ const { listening } = startEnsoServer({
   cwd,
   projectRoots,
   projectsConfigPath: configPath,
+  // Favorites, roles and presets (#904): the user's file alone, read fresh by the models routes.
+  modelsConfigPath: configPath,
   ensoHome: home,
   // The replayed risk is measured as the guard measures it (#466): the user's thresholds.
   riskThresholds: incidentPolicyOf(config.config.security).thresholds,

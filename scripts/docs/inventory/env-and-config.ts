@@ -325,6 +325,14 @@ export const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     reader: `\`${WEB_SEARCH_SOURCE}#claimClaudeCodeVersion\``,
     check: { file: WEB_SEARCH_SOURCE, contains: "headers['user-agent'] = claudeCodeUserAgent(version)" },
   },
+  {
+    field: 'models',
+    required: 'no',
+    defaultWhenOmitted:
+      'No favorites, no hidden providers, no roles or presets: the model picker groups Recent and the providers, and a new thread starts on pi’s own default. Settings › Providers and Roles write it, the whole section at a time; read fresh on each request and user-only — a project’s `.enso/config.json` is never read for it (#904).',
+    reader: '`packages/web/src/server/models-routes.ts#readSection`',
+    check: { file: 'packages/web/src/server/models-routes.ts', contains: 'parsed.config.models' },
+  },
   incidentField('', 'Incidents alert and suspend nothing; the default risk thresholds.', 'security?.incidents'),
   incidentField(
     '.incidents',

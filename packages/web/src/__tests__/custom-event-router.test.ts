@@ -3,6 +3,7 @@ import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_MODEL_ROLE_ENTRY,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_NOTICE_SOURCE,
   ENSO_RUN_STOPPED_ENTRY,
@@ -121,6 +122,23 @@ test("a cold snapshot's recordedModel rides beside the live store, never in it; 
   route('snapshot', snapshot({ model: LIVE_MODEL }))
   expect(stores.model.get()).toEqual(LIVE_MODEL)
   expect(stores.model.recorded.get()).toBeNull()
+})
+
+// #904: the role a thread runs under — the snapshot's record (live or cold), then the host's
+// `enso-model-role` entry; a change made by hand records `null`, and the chip drops the role.
+test("the snapshot's modelRole seeds the role store; a role entry replaces it and a null one ends it (#904)", () => {
+  const review = { role: 'review', provider: 'anthropic', modelId: 'claude-opus-5', thinkingLevel: 'high' }
+  expect(stores.modelRole.get()).toBeNull()
+  route('snapshot', snapshot({ model: null, modelRole: review }))
+  expect(stores.modelRole.get()).toEqual(review)
+  const quick = { role: 'quick', provider: 'fake', modelId: 'fake-1' }
+  observe({ kind: 'custom-entry', customType: ENSO_MODEL_ROLE_ENTRY, data: quick })
+  expect(stores.modelRole.get()).toEqual(quick)
+  observe({ kind: 'custom-entry', customType: ENSO_MODEL_ROLE_ENTRY, data: null })
+  expect(stores.modelRole.get()).toBeNull()
+  route('snapshot', snapshot({ modelRole: review }))
+  route('snapshot', snapshot())
+  expect(stores.modelRole.get()).toBeNull()
 })
 
 // #44: the project the status bar names is whatever the latest snapshot says — a reconnect's

@@ -151,6 +151,8 @@ export interface AgentHost {
    * views, pi's extension commands. Read afresh per call, so a login through one thread shows at once.
    */
   catalogue(): Promise<RuntimeCommand[]>
+  /** The providers pi knows, and logging in and out of them outside any thread (#904, Settings). */
+  readonly providers: HostProviders
   /**
    * The project a session built for `branch` in `cwd` would answer to, and whether it would read
    * that project's own configuration (#470): the decision a build makes first (`hostedProjectTrust`,

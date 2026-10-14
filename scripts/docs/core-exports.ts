@@ -48,6 +48,7 @@ const REGIONS: readonly Region[] = ['web/host', 'web/server', 'web/browser', 'ha
 const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record<string, string>>>> = {
   wire: {
     'ask-user.ts': 'Control',
+    'closed-schema.ts': 'Control',
     'dialog.ts': 'Control',
     'follow.ts': 'Control, Observation',
     'git-state.ts': 'Thread, Observation',
@@ -60,6 +61,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'project-settings.ts': 'Thread, Record',
     'prompt-library.ts': 'Thread, Record',
     'provider-refusal.ts': 'Observation, Record',
+    'providers.ts': 'Control',
     'run-context.ts': 'Thread, Record',
     'runtime-entries.ts': 'Thread, Record',
     'session-eval.ts': 'Thread, Record',
@@ -79,6 +81,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
   },
   'config/policy': {
     'claude-code.ts': 'Permission, Control',
+    'model-roles.ts': 'Thread, Record',
     'command-constructs.ts': 'Permission',
     'command-judge.ts': 'Permission, Record',
     'config.ts': 'Record, Permission',

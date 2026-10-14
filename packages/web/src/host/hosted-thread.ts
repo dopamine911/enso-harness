@@ -15,6 +15,7 @@ import {
   ENSO_LOG_EVENTS,
   ENSO_PROJECT_TRUST_ENTRY,
   ENSO_RUN_STOPPED_ENTRY,
+  ENSO_MODEL_ROLE_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoIncidentResolution,
   type EnsoHostCommandRun,
@@ -22,6 +23,7 @@ import {
   type EnsoPermissionCheckRequest,
   type EnsoPromptAdmission,
   type EnsoSystemPromptChoice,
+  type EnsoThreadModelRole,
   ensoLogger,
   incidentResolutionRefusal,
   incidentResolvedOf,
@@ -31,6 +33,7 @@ import {
   recordedSystemPrompt,
   THREAD_PROJECT_TRUST,
   type ThreadRuntime,
+  threadModelRole,
 } from '@enso/core'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
@@ -241,6 +244,8 @@ export async function buildHostedThread(
     throw new Error(`thread ${threadId}: its ${ENSO_SYSTEM_PROMPT_ENTRY} entry does not read as a system prompt`)
   }
   let systemPrompt: EnsoSystemPromptChoice | undefined = recorded.kind === 'chosen' ? recorded.choice : undefined
+  // The role the branch runs under (#904): what a hand change of model or effort ends.
+  let modelRole: EnsoThreadModelRole | null = threadModelRole(threadLog.transcript())
   // The watcher's handler is bound after the session exists (`announceModelState` below);
   // `model_select` cannot fire before it — only the session's own methods emit it.
   let onModelSelect = (): void => undefined
@@ -612,9 +617,19 @@ export async function buildHostedThread(
           break
         }
       }
+      // A model or effort chosen by hand is no longer the role's (#904): the record ends.
+      if (modelRole !== null) runtime.setModelRole(null)
       // pi's own events have said it by now (see the module header); this is the guarantee
       // that the caller's change is on the feed whatever pi's plumbing did — deduped.
       announceModelState()
+    },
+    setModelRole(record: EnsoThreadModelRole | null): void {
+      if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
+      modelRole = record
+      // Through the host's extension API, as the system prompt is: pi emits `entry_appended`, so
+      // every follower's chip says the role, and a reload or a fork reads it off the branch.
+      hostApi.appendEntry(ENSO_MODEL_ROLE_ENTRY, record)
+      log.info('model role {role} recorded', { threadId, role: record?.role ?? null })
     },
     permissionModeState: currentPermissionModeState,
     setSystemPrompt(choice: EnsoSystemPromptChoice | null): string | undefined {
@@ -697,6 +712,7 @@ export async function buildHostedThread(
       if (disposed) return
       disposed = true
       if (liveLogs.get(threadId) === threadLog) liveLogs.delete(threadId)
+      catalogueModels.release(session.modelRuntime)
       flows.dispose()
       trustGate.abort()
       ui.cancelAllDialogs()

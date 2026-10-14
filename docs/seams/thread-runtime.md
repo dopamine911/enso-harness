@@ -130,6 +130,13 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /**
+   * Record the role the session now runs under (#904 decision 5): its name and the model and effort
+   * it resolved to, as an `enso-model-role` entry appended through pi — the file and every follower
+   * get it — or `null`, ending it. A change of model or effort by hand ends a role by itself.
+   * Synchronous; the caller has already applied the role's model and effort.
+   */
+  setModelRole: Type.Unsafe<(record: EnsoThreadModelRole | null) => void>(Type.Function([Type.Unknown()], Type.Void())),
+  /**
    * Record a human's resolution of the thread's incident (#466): refused — the reason returned —
    * when `incidentResolutionRefusal` refuses it against the live branch; else its
    * `enso-incident-resolved` record is appended through pi, so it reaches the file and every
