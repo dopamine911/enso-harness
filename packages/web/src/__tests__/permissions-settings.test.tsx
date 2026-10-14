@@ -589,9 +589,8 @@ test('a 422 lists where the schema refused the file, and keeps the draft', async
   expect(actionOf(mounted, 'bash git status')).toBe('deny')
 })
 
-test('⚠ yoloMode on is said under the lede, which takes the reader to its Behaviour row; off, neither shows', async () => {
+test('⚠ yoloMode on is said under the lede, which takes the reader to its Behaviour row; off, the callout does not show', async () => {
   const off = await mountSettings({ file: { ...FILE, yoloMode: false } })
-  expect(off.section().querySelector('[aria-label="yolo mode"]')).toBeNull()
   expect(off.section().querySelector('[aria-label="yolo mode is on"]')).toBeNull()
   await off.unmount()
   const on = await mountSettings({ file: { ...FILE, yoloMode: true } })
@@ -601,6 +600,123 @@ test('⚠ yoloMode on is said under the lede, which takes the reader to its Beha
   expect(callout.compareDocumentPosition(find(on, 'table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   await click(on, 'See Behaviour')
   expect(document.activeElement).toBe(row)
+})
+
+/** Click the button named `name` inside the Behaviour row labelled `row`. */
+async function clickInRow(mounted: Mounted, row: string, name: string): Promise<void> {
+  const button = await eventually(() => {
+    const found = [...find(mounted, `[aria-label="${row}"]`).querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.textContent?.trim() === name || candidate.getAttribute('aria-label') === name,
+    )
+    if (found === undefined) throw new Error(`expected ${name} in ${row}`)
+    return found
+  })
+  await act(async () => button.click())
+  await settle()
+}
+
+const behaviourSwitch = (mounted: Mounted, key: string): HTMLButtonElement =>
+  find<HTMLButtonElement>(mounted, `[role="switch"][aria-labelledby="behaviour-${key}"]`)
+
+/** The file the last save sent. */
+function lastWritten(mounted: Mounted): Record<string, unknown> {
+  const write = writes(mounted).at(-1)
+  if (write === undefined) throw new Error('nothing was saved')
+  return (write.body as EnsoPermissionPolicyWrite).file
+}
+
+// #935: every key beside the rules has its control, and one Save writes them all with the rules
+// and every key not edited exactly as read — the read-only ones (shellTools, terminal, deprecated) among them.
+test('⚠ Behaviour: each key round-trips through its control in one save, the rules and the other keys untouched (#935)', async () => {
+  const file = {
+    ...FILE,
+    authorizerChain: ['enso-auto', 'judge'],
+    debugLog: true,
+    promptFieldMaxWidth: 300,
+    piInfrastructureReadPaths: ['~/old'],
+    shellTools: { exec_command: { commandArgument: 'cmd' } },
+    doublePressToConfirm: false,
+    toolInputPreviewMaxLength: 80,
+  }
+  const mounted = await mountSettings({ file })
+  await act(async () => behaviourSwitch(mounted, 'permissionReviewLog').click())
+  await act(async () => behaviourSwitch(mounted, 'debugLog').click())
+  await typeInto(mounted, 'forwarding timeout', '30000')
+  await typeInto(mounted, 'prompt rows', '12')
+  await typeInto(mounted, 'review log field width', '2000')
+  await typeInto(mounted, 'prompt field width', '')
+  await clickInRow(mounted, 'authorizer chain', 'move judge up')
+  await typeInto(mounted, 'add to authorizerChain', 'second-judge')
+  await clickInRow(mounted, 'authorizer chain', 'Add')
+  await clickInRow(mounted, 'infrastructure read paths', 'remove ~/old')
+  await typeInto(mounted, 'add to piInfrastructureReadPaths', '~/tools')
+  await clickInRow(mounted, 'infrastructure read paths', 'Add')
+  await click(mounted, 'Save')
+  await eventually(() => expect(writes(mounted)).toHaveLength(1))
+  expect(writes(mounted)[0]?.ifMatch).toBe('"v1"')
+  const { promptFieldMaxWidth: _removed, ...kept } = file
+  expect(lastWritten(mounted)).toEqual({
+    ...kept,
+    authorizerChain: ['judge', 'enso-auto', 'second-judge'],
+    debugLog: false,
+    permissionReviewLog: false,
+    forwardingTimeoutMs: 30_000,
+    promptMaxRows: 12,
+    reviewLogFieldMaxWidth: 2000,
+    piInfrastructureReadPaths: ['~/tools'],
+  })
+  await eventually(() => expect(buttonNamed(mounted, 'Save').disabled).toBe(true))
+  // "Remove from the file — use the default" takes a key off; a rule edit rides the same save.
+  await clickInRow(mounted, 'authorizer chain', 'use the default authorizer chain')
+  await decide(mounted, 'bash git status', 'deny')
+  await click(mounted, 'Save')
+  await eventually(() => expect(writes(mounted)).toHaveLength(2))
+  expect(writes(mounted)[1]?.ifMatch).toBe('"v2"')
+  expect(lastWritten(mounted)).not.toHaveProperty('authorizerChain')
+  expect((lastWritten(mounted).permission as typeof FILE.permission).bash['git status']).toBe('deny')
+})
+
+test('⚠ turning yoloMode on asks first, naming what it does; Cancel leaves it off and nothing to save (#935)', async () => {
+  const mounted = await mountSettings({ file: { ...FILE, yoloMode: false } })
+  await act(async () => behaviourSwitch(mounted, 'yoloMode').click())
+  const confirm = await eventually(() => find(mounted, '[aria-label="confirm yolo mode"]'))
+  expect(confirm.textContent).toContain('Every Ask becomes Allow — in every thread and every subagent.')
+  expect(behaviourSwitch(mounted, 'yoloMode').getAttribute('aria-checked')).toBe('false')
+  expect(buttonNamed(mounted, 'Save').disabled).toBe(true)
+  await clickInRow(mounted, 'yolo mode', 'Cancel')
+  expect(mounted.section().querySelector('[aria-label="confirm yolo mode"]')).toBeNull()
+  expect(buttonNamed(mounted, 'Save').disabled).toBe(true)
+  await act(async () => behaviourSwitch(mounted, 'yoloMode').click())
+  await clickInRow(mounted, 'yolo mode', 'Turn yolo mode on')
+  await click(mounted, 'Save')
+  await eventually(() => expect(writes(mounted)).toHaveLength(1))
+  expect(lastWritten(mounted)).toEqual({ ...FILE, yoloMode: true })
+  // Saved on, the callout is up; turning it off needs no confirmation.
+  await eventually(() => find(mounted, '[aria-label="yolo mode is on"]'))
+  await act(async () => behaviourSwitch(mounted, 'yoloMode').click())
+  expect(behaviourSwitch(mounted, 'yoloMode').getAttribute('aria-checked')).toBe('false')
+})
+
+test('a Behaviour value the schema refuses is a 422: nothing saved, and the value stays to fix (#935)', async () => {
+  const mounted = await mountSettings({
+    override: (request) =>
+      request === 'PUT /api/permissions'
+        ? Response.json(
+            {
+              reason: 'the engine would not run this policy as written (1 problem); nothing was saved',
+              problems: [{ at: '/promptMaxRows', message: 'must be >= 1' }],
+            },
+            { status: 422 },
+          )
+        : undefined,
+  })
+  await typeInto(mounted, 'prompt rows', '0')
+  await click(mounted, 'Save')
+  const refusal = await eventually(() => find(mounted, '[aria-label="refused"]'))
+  expect(refusal.textContent).toContain('/promptMaxRows')
+  expect(lastWritten(mounted).promptMaxRows).toBe(0)
+  expect(find<HTMLInputElement>(mounted, 'input[aria-label="prompt rows"]').value).toBe('0')
+  expect(buttonNamed(mounted, 'Save').disabled).toBe(false)
 })
 
 test("⚠ Enso's ** takes an action change only: it cannot be removed, moved, renamed, or passed by a move", async () => {

@@ -40,6 +40,7 @@ import {
   symlinkSync,
   unlinkSync,
 } from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, sep as pathSeparator, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -82,15 +83,27 @@ export function realpathOrSelf(path: string): string {
  * the root, keep walking" — never a throw.
  */
 function isWorkspaceRoot(directory: string): boolean {
-  const manifestPath = join(directory, 'package.json')
-  if (!existsSync(manifestPath)) return false
+  const manifest = readPackageManifest(directory)
+  if (manifest === undefined || !('workspaces' in manifest)) return false
+  const workspaces = manifest.workspaces
+  return Array.isArray(workspaces) || (typeof workspaces === 'object' && workspaces !== null)
+}
+
+const PACKAGE_MANIFEST_FILENAME = 'package.json'
+
+/**
+ * `directory/package.json` as an object, or `undefined` — absent, unreadable, malformed or not an
+ * object alike. Both walks (`findRepoRoot`, `installedPackageDir`) read manifests they did not write,
+ * and a broken one on the way up means "not this one, keep walking", never a throw.
+ */
+function readPackageManifest(directory: string): Record<string, unknown> | undefined {
+  const manifestPath = join(directory, PACKAGE_MANIFEST_FILENAME)
+  if (!existsSync(manifestPath)) return undefined
   try {
     const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'))
-    if (typeof manifest !== 'object' || manifest === null || !('workspaces' in manifest)) return false
-    const workspaces = (manifest as Record<string, unknown>).workspaces
-    return Array.isArray(workspaces) || (typeof workspaces === 'object' && workspaces !== null)
+    return typeof manifest === 'object' && manifest !== null ? (manifest as Record<string, unknown>) : undefined
   } catch {
-    return false
+    return undefined
   }
 }
 
@@ -141,6 +154,112 @@ export function findRepoRoot(startPathOrFileUrl: string): string {
     if (parent === current) throw new RepoRootNotFoundError(startPath)
     current = parent
   }
+}
+
+/**
+ * The harness package's manifest `name` (`packages/harness/package.json`): what an installed harness
+ * is found by (#950). ⚠ The name is not settled for publishing (#948). A rename changes this
+ * constant and the manifest together, and `paths.test.ts` fails when they differ.
+ *
+ * @group Workspace paths
+ */
+export const HARNESS_PACKAGE_NAME = 'enso'
+
+/**
+ * The web package's manifest `name` (`packages/web/package.json`), pinned the same way.
+ *
+ * @group Workspace paths
+ */
+export const WEB_PACKAGE_NAME = '@enso/web'
+
+/** Where a checkout keeps its workspace packages: `<root>/packages/<package>`. */
+const WORKSPACE_PACKAGES_DIRECTORY = 'packages'
+
+/**
+ * Thrown when no ancestor of the start path is the named package.
+ *
+ * @group Workspace paths
+ */
+export class PackageDirNotFoundError extends Error {
+  constructor(startPath: string, packageName: string) {
+    super(
+      `no ancestor of "${startPath}" holds a package.json named "${packageName}" — is this file inside that package?`,
+    )
+    this.name = 'PackageDirNotFoundError'
+  }
+}
+
+/**
+ * The directory the named package is installed in: the nearest ancestor of the start path whose
+ * `package.json` is named `packageName` (#950). It works the same in this checkout
+ * (`packages/harness`) and in an install (`…/node_modules/enso`). `findRepoRoot` cannot do that: an
+ * installed package has no workspace root above it, so that walk throws.
+ *
+ * Takes a path or a `file://` URL and realpaths first, as `findRepoRoot` does and for the same
+ * reason: the print-harness mirror (`printHarnessDir`) is symlinks back into the real tree.
+ *
+ * ⚠ Matched by NAME, not "the first package.json": a package may hold another manifest below its
+ * root (a fixture, a nested tool), and the first one found would be the wrong directory, with no
+ * error to say so.
+ *
+ * @group Workspace paths
+ */
+export function installedPackageDir(startPathOrFileUrl: string, packageName: string): string {
+  const startPath = isFileUrl(startPathOrFileUrl) ? fileUrlToPath(startPathOrFileUrl) : startPathOrFileUrl
+  let current = realpathOrSelf(startPath)
+  for (;;) {
+    if (readPackageManifest(current)?.name === packageName) return current
+    const parent = dirname(current)
+    if (parent === current) throw new PackageDirNotFoundError(startPath, packageName)
+    current = parent
+  }
+}
+
+/**
+ * The Enso checkout a package directory is a workspace member of, or `undefined` when the package
+ * is installed rather than checked out (#950). A member sits at `<root>/packages/<name>` under a root
+ * whose `package.json` declares `workspaces`. Nothing else counts.
+ *
+ * ⚠ Not "the nearest workspace root above". A package installed into the user's own monorepo has
+ * one of those, and it is the user's: its `.env`, its `.git` and its `.enso/` are not Enso's to read
+ * or to migrate. The layout check is what keeps an install from adopting someone else's checkout.
+ *
+ * @group Workspace paths
+ */
+export function checkoutRootOfPackage(packageDir: string): string | undefined {
+  const packagesDirectory = dirname(packageDir)
+  if (basename(packagesDirectory) !== WORKSPACE_PACKAGES_DIRECTORY) return undefined
+  const candidateRoot = dirname(packagesDirectory)
+  return isWorkspaceRoot(candidateRoot) ? candidateRoot : undefined
+}
+
+/**
+ * Where a package's own files live, for a reader that wants the checkout when there is one: the
+ * Enso checkout root when the package is a workspace member of one, else the directory it is
+ * installed in (#950). The guards' `harnessRoot` is this. In a checkout it stays the root, where
+ * #421's migration leaves what it could not move. Installed, it is the package, the one directory
+ * that is Enso's.
+ *
+ * @group Workspace paths
+ */
+export function checkoutOrInstalledRoot(startPathOrFileUrl: string, packageName: string): string {
+  const packageDir = installedPackageDir(startPathOrFileUrl, packageName)
+  return checkoutRootOfPackage(packageDir) ?? packageDir
+}
+
+/**
+ * The directory of `packageName` as Node resolves it from `fromDirectory`'s package (#950). That is
+ * the workspace link in `node_modules` in a checkout, and a declared dependency in an install.
+ * Realpath'd, so a workspace link lands on the package itself.
+ *
+ * ⚠ Resolves `<name>/package.json`, so a package whose `exports` hides its manifest cannot be
+ * resolved here. Neither Enso package declares `exports` that would.
+ *
+ * @group Workspace paths
+ */
+export function resolvePackageDir(packageName: string, fromDirectory: string): string {
+  const requireFromDirectory = createRequire(join(fromDirectory, PACKAGE_MANIFEST_FILENAME))
+  return realpathOrSelf(dirname(requireFromDirectory.resolve(`${packageName}/${PACKAGE_MANIFEST_FILENAME}`)))
 }
 
 /** The `.enso` runtime dir names, assembled here and nowhere else (the anchor enforces it). */
@@ -660,7 +779,7 @@ export function ensoPermissionRulesPath(home: string): string {
  * @group Workspace paths
  */
 export function harnessPackageDir(repoRoot: string): string {
-  return join(repoRoot, 'packages', 'harness')
+  return join(repoRoot, WORKSPACE_PACKAGES_DIRECTORY, 'harness')
 }
 
 /**
@@ -669,7 +788,7 @@ export function harnessPackageDir(repoRoot: string): string {
  * @group Workspace paths
  */
 export function webPackageDir(repoRoot: string): string {
-  return join(repoRoot, 'packages', 'web')
+  return join(repoRoot, WORKSPACE_PACKAGES_DIRECTORY, 'web')
 }
 
 /**

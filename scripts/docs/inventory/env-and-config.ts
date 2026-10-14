@@ -261,9 +261,12 @@ export const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   {
     field: 'projects',
     required: 'no',
-    defaultWhenOmitted: 'No roots: the launch directory is the only project, and registering another is refused.',
-    reader: '`packages/web/src/server/dev.ts` → `startEnsoServer({ projectRoots })`',
-    check: { file: 'packages/web/src/server/dev.ts', contains: 'config.config.projects?.roots ?? []' },
+    defaultWhenOmitted:
+      'No roots, no fence (#866): a page may add any folder the standing refusals allow — never the home folder or one holding it, never `ENSO_HOME` or anything under it, and no hidden folder unless the person shows them.',
+    reader:
+      '`packages/web/src/server/dev.ts` → `startEnsoServer({ projectRoots })` → `packages/web/src/server/projects.ts#createProjectRegistry`',
+    // The fence's own guard, not the read: a change to what "no roots" means must fail this probe.
+    check: { file: 'packages/web/src/server/projects.ts', contains: 'if (roots.length > 0) return refusalUnderRoots(' },
   },
   {
     field: 'projects.roots',
