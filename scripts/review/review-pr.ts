@@ -27,10 +27,11 @@
  * the workflow, `origin/<base>`, which is the copy GitHub would run, never the pull request's.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
+import type { ToolGrant } from './tool-grant-hook.ts'
 import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow } from './workflow-config.ts'
 
 /** The workflow's status comment marker: the same comment is upserted here, so both reviewers share it. */
@@ -43,6 +44,8 @@ const RUNS_DIRECTORY = join(homedir(), '.cache', 'enso-review')
 const SHARED_BUN_CACHE = join(RUNS_DIRECTORY, 'bun-cache')
 /** The directory the prompt and `.claude/pr-review.md` look in for the comment list and the push's diff. */
 const REVIEW_CONTEXT_DIRECTORY = '.review-context'
+/** The command the review posts with, as the workflow's prompt tells the reviewer to. */
+const POST_COMMAND = 'gh pr comment'
 /** The files the comment-list step writes; the workflow's command writes the list at the tree root. */
 const COMMENT_LIST_FILE = 'touched-comments.md'
 const NEW_COMMITS_DIFF_FILE = 'new-commits.diff'
@@ -97,16 +100,53 @@ export function lastReviewedHeadOf(statusCommentBody: string | undefined): strin
   return statusCommentBody === undefined ? undefined : REVIEWED_HEAD_LINE.exec(statusCommentBody)?.[1]
 }
 
-/** The status comment's body after a run: the workflow's marker first, so both reviewers upsert one comment. */
-export function statusCommentBody(outcome: 'success' | 'failure', headSha: string, scope: string): string {
-  const short = headSha.slice(0, SHORT_SHA_LENGTH)
-  const result =
-    outcome === 'success'
-      ? `✅ **Claude PR review** ran locally on \`${short}\` (${scope}), with docker-agent, configured from \`${REVIEW_WORKFLOW_PATH}\`.`
-      : `❌ **Claude PR review failed** locally on \`${short}\` — no verdict was posted. See the run log on the reviewing machine.`
-  // A failed run records no head, so the next run tries the same head again.
-  const reviewed = outcome === 'success' ? `<!-- local-review head=${headSha} scope=${scope} -->\n` : ''
-  return `${STATUS_MARKER}\n${reviewed}${result}`
+/**
+ * The status comment's body after a run: the workflow's marker first, so both reviewers upsert one
+ * comment. `posted` is whether the review comment went out, read from the hook's decision log, not
+ * from docker-agent's exit code: on #989's first run docker-agent exited 1 (`bufio.Scanner: token
+ * too long`, its reader of Claude Code's output) AFTER the review was posted, and an exit-code
+ * status said "failed, no verdict" under a posted verdict.
+ */
+export function statusCommentBody(run: {
+  readonly posted: boolean
+  readonly headSha: string
+  readonly scope: string
+  readonly agentExitCode: number
+}): string {
+  const short = run.headSha.slice(0, SHORT_SHA_LENGTH)
+  if (!run.posted) {
+    // A run that posted nothing records no head, so the next run tries the same head again.
+    return `${STATUS_MARKER}\n❌ **Claude PR review failed** locally on \`${short}\`: no review comment was posted (docker-agent exited ${run.agentExitCode}). See the run log on the reviewing machine.`
+  }
+  const exitNote =
+    run.agentExitCode === 0
+      ? ''
+      : ` docker-agent exited ${run.agentExitCode} after the review was posted; see the run log.`
+  return `${STATUS_MARKER}\n<!-- local-review head=${run.headSha} scope=${run.scope} -->\n✅ **Claude PR review** ran locally on \`${short}\` (${run.scope}), with docker-agent, configured from \`${REVIEW_WORKFLOW_PATH}\`.${exitNote}`
+}
+
+/** Whether the hook's decision log shows the review comment going out: allowed, or captured on a dry run. */
+export function reviewWasPosted(decisionLogText: string): boolean {
+  return decisionLogText
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as { input?: { command?: unknown }; decision?: { kind?: string } })
+    .some(
+      (toolCallRecord) =>
+        (toolCallRecord.decision?.kind === 'allow' || toolCallRecord.decision?.kind === 'capture') &&
+        typeof toolCallRecord.input?.command === 'string' &&
+        toolCallRecord.input.command.startsWith(POST_COMMAND),
+    )
+}
+
+/**
+ * Claude Code's own folder for a session started in `directory`: where it saves a tool result too
+ * large to return inline, which the reviewer then `Read`s. Claude Code names it by the directory with
+ * every character that is not a letter or digit replaced by `-` (seen on #989:
+ * `…/enso-review/pr-989-…/tree` → `-home-daniel--cache-enso-review-pr-989-…-tree`).
+ */
+export function claudeSessionFolder(directory: string, home: string = homedir()): string {
+  return join(home, '.claude', 'projects', directory.replace(/[^A-Za-z0-9]/g, '-'))
 }
 
 /** The docker-agent configuration for one review: Claude Code on the user's login, nothing else. */
@@ -219,8 +259,16 @@ function buildReviewContext(
   if (existsSync(list)) run(['mv', list, join(contextDirectory, COMMENT_LIST_FILE)])
 }
 
-/** Runs the reviewer; `true` when docker-agent exited cleanly. Its output goes to the terminal and to `review.log`. */
-function runReviewer(tree: string, runDirectory: string, prompt: string): boolean {
+/** Writes the run's grant, and the worktree settings that load the hook with it. */
+function writeGrant(tree: string, runDirectory: string, grant: ToolGrant): void {
+  const grantPath = join(runDirectory, 'grant.json')
+  writeFileSync(grantPath, JSON.stringify(grant))
+  mkdirSync(join(tree, '.claude'), { recursive: true })
+  writeFileSync(join(tree, '.claude', 'settings.local.json'), reviewSettings(grantPath))
+}
+
+/** Runs the reviewer and answers docker-agent's exit code. Its output goes to `review.log`. */
+function runReviewer(tree: string, runDirectory: string, prompt: string): number {
   const configuration = join(runDirectory, 'reviewer.yaml')
   writeFileSync(configuration, agentConfiguration())
   const log = Bun.file(join(runDirectory, 'review.log'))
@@ -228,7 +276,7 @@ function runReviewer(tree: string, runDirectory: string, prompt: string): boolea
     stdout: log,
     stderr: log,
   })
-  return reviewer.exitCode === 0
+  return reviewer.exitCode
 }
 
 interface ReviewOptions {
@@ -260,34 +308,27 @@ function reviewPullRequest(options: ReviewOptions): string {
     const config = readReviewWorkflow(workflowText)
     buildReviewContext(tree, plan, config.listCommand, join(runDirectory, 'home'))
     const capture = join(runDirectory, 'review-comment.md')
-    const grantPath = join(runDirectory, 'grant.json')
     const decisionLog = join(runDirectory, 'tool-calls.jsonl')
-    writeFileSync(
-      grantPath,
-      JSON.stringify({
-        allowedTools: config.allowedTools,
-        decisionLog,
-        ...(options.dryRun ? { captureCommentTo: capture } : {}),
-      }),
-    )
-    mkdirSync(join(tree, '.claude'), { recursive: true })
-    writeFileSync(join(tree, '.claude', 'settings.local.json'), reviewSettings(grantPath))
+    writeGrant(tree, runDirectory, {
+      allowedTools: config.allowedTools,
+      decisionLog,
+      readRoots: [tree, claudeSessionFolder(tree)],
+      ...(options.dryRun ? { captureCommentTo: capture } : {}),
+    })
     const values: PromptValues = {
       repository,
       pullRequestNumber: options.number,
       scope: plan.scope,
       headSha: pullRequest.headRefOid,
     }
-    const succeeded = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values))
+    const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values))
+    const posted = existsSync(decisionLog) && reviewWasPosted(readFileSync(decisionLog, 'utf8'))
     if (!options.dryRun) {
-      upsertStatusComment(
-        repository,
-        options.number,
-        statusCommentBody(succeeded ? 'success' : 'failure', pullRequest.headRefOid, plan.scope),
-      )
+      const body = statusCommentBody({ posted, headSha: pullRequest.headRefOid, scope: plan.scope, agentExitCode })
+      upsertStatusComment(repository, options.number, body)
     }
-    const posted = options.dryRun ? `captured to ${capture}` : 'posted to the pull request'
-    return `#${options.number}: ${succeeded ? 'reviewed' : 'FAILED'} (${plan.scope}); comment ${posted}; log ${join(runDirectory, 'review.log')}`
+    const where = options.dryRun ? `captured to ${capture}` : 'posted to the pull request'
+    return `#${options.number}: ${posted ? `reviewed (${plan.scope}); comment ${where}` : 'FAILED: no review comment was posted'}; docker-agent exited ${agentExitCode}; log ${join(runDirectory, 'review.log')}`
   } finally {
     run(['git', 'worktree', 'remove', '--force', tree], { cwd: REPOSITORY_ROOT })
   }

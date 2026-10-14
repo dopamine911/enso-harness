@@ -28,11 +28,23 @@
  */
 
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { resolve, sep as pathSeparator } from 'node:path'
 
 /** The grant file `review-pr.ts` writes for one run. */
 export interface ToolGrant {
   /** `--allowedTools` entries, as the workflow lists them. */
   readonly allowedTools: readonly string[]
+  /**
+   * The directories `Read`, `Grep` and `Glob` may reach: the review worktree, and Claude Code's own
+   * folder for the session's oversized tool results. Absent: no path limit.
+   *
+   * ⚠ ON GITHUB'S RUNNER A PATH LIMIT WAS NOT NEEDED; HERE IT IS. The runner holds nothing but the
+   * checkout. This machine holds `~/.ssh`, `~/.config/gh` and every other repository, and the grant
+   * also allows `gh pr comment`: a pull request's text could steer the reviewer into reading a secret
+   * and posting it. Measured on #989's first run: a `Read` outside the worktree, of Claude Code's
+   * persisted tool output, which is why that folder is a root too.
+   */
+  readonly readRoots?: readonly string[]
   /**
    * Dry run: a `gh pr comment` is not posted. Its body is written to this file, and the reviewer
    * is told the review is recorded.
@@ -45,7 +57,37 @@ export interface ToolGrant {
 /** What Claude Code hands a `PreToolUse` hook, as much of it as this reads. */
 export interface ToolCall {
   readonly tool_name: string
-  readonly tool_input?: { readonly command?: unknown }
+  /** The session's working directory, which a relative path resolves against. */
+  readonly cwd?: string
+  readonly tool_input?: {
+    readonly command?: unknown
+    /** `Read`'s file. */
+    readonly file_path?: unknown
+    /** `Grep`'s and `Glob`'s directory; the session's working directory when absent. */
+    readonly path?: unknown
+    /** `Glob`'s pattern, which may itself be an absolute path. */
+    readonly pattern?: unknown
+  }
+}
+
+/** The tools whose input names paths, which `readRoots` limits. */
+const PATH_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob'])
+
+/**
+ * The paths a `Read`, `Grep` or `Glob` call reaches, resolved against the session's `cwd` (or the
+ * first root), so `../../.ssh` is judged where it lands, not as written.
+ */
+function pathsNamedBy(call: ToolCall, roots: readonly string[]): string[] {
+  const input = call.tool_input ?? {}
+  const named = [input.file_path, input.path, call.tool_name === 'Glob' ? input.pattern : undefined]
+  const base = call.cwd ?? roots[0] ?? '/'
+  return named
+    .filter((namedPath): namedPath is string => typeof namedPath === 'string')
+    .map((namedPath) => resolve(base, namedPath))
+}
+
+function isUnderARoot(resolvedPath: string, roots: readonly string[]): boolean {
+  return roots.some((root) => resolvedPath === root || resolvedPath.startsWith(`${root}${pathSeparator}`))
 }
 
 export type ToolDecision =
@@ -121,11 +163,18 @@ export function decideToolCall(grant: ToolGrant, call: ToolCall): ToolDecision {
     if (typeof command !== 'string') return { kind: 'block', reason: 'a Bash call with no command' }
     return decideBash(grant, command)
   }
-  if (grant.allowedTools.includes(call.tool_name)) return { kind: 'allow' }
-  return {
-    kind: 'block',
-    reason: `\`${call.tool_name}\` is not in the review's tool grant — this reviewer is read-only by design (#981)`,
+  if (!grant.allowedTools.includes(call.tool_name)) {
+    return {
+      kind: 'block',
+      reason: `\`${call.tool_name}\` is not in the review's tool grant — this reviewer is read-only by design (#981)`,
+    }
   }
+  const roots = grant.readRoots
+  if (roots !== undefined && PATH_TOOLS.has(call.tool_name)) {
+    const outside = pathsNamedBy(call, roots).find((path) => !isUnderARoot(path, roots))
+    if (outside !== undefined) return { kind: 'block', reason: `${outside} is outside the pull request's worktree` }
+  }
+  return { kind: 'allow' }
 }
 
 /** What the hook does for one call: its exit code, what it tells the model, and the files it writes. */

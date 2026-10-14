@@ -147,3 +147,22 @@ test('the outcome of an allow and of a refusal, with no log asked for', () => {
   expect(refused.exitCode).toBe(HOOK_BLOCK_EXIT_CODE)
   expect(refused.message).toStartWith('Blocked:')
 })
+
+/**
+ * ⚠ ON THIS MACHINE, READ IS LIMITED TO THE WORKTREE (#981). The grant also allows `gh pr comment`,
+ * so a reviewer steered by a pull request's text into reading `~/.ssh` could post it.
+ */
+test('⚠ with read roots, Read, Grep and Glob reach only paths inside them — relative ones resolved first', () => {
+  const rooted: ToolGrant = { ...GRANT, readRoots: ['/runs/7/tree', '/home/u/.claude/projects/-runs-7-tree'] }
+  const decide = (tool_name: string, tool_input: object): string =>
+    decideToolCall(rooted, { tool_name, cwd: '/runs/7/tree', tool_input }).kind
+  expect(decide('Read', { file_path: '/runs/7/tree/src/a.ts' })).toBe('allow')
+  expect(decide('Read', { file_path: '/home/u/.claude/projects/-runs-7-tree/tool-results/x.txt' })).toBe('allow')
+  expect(decide('Grep', { pattern: 'TODO' })).toBe('allow')
+  expect(decide('Glob', { pattern: '**/*.ts' })).toBe('allow')
+  expect(decide('Read', { file_path: '/home/u/.ssh/id_ed25519' })).toBe('block')
+  expect(decide('Read', { file_path: '/runs/7/tree-sibling/secret' })).toBe('block')
+  expect(decide('Grep', { pattern: 'token', path: '../../../home/u/.config/gh' })).toBe('block')
+  expect(decide('Glob', { pattern: '/home/u/.ssh/*' })).toBe('block')
+  expect(decide('Glob', { pattern: '../**/*' })).toBe('block')
+})

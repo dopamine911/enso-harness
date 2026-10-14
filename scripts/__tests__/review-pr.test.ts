@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test'
 import {
+  claudeSessionFolder,
   lastReviewedHeadOf,
   parseReviewArguments,
   planReview,
   type PullRequestState,
   reviewSettings,
+  reviewWasPosted,
   STATUS_MARKER,
   statusCommentBody,
 } from '../review/review-pr.ts'
@@ -50,16 +52,51 @@ test('a head already reviewed, a draft and a bot are skipped', () => {
 
 /**
  * ⚠ THE STATUS COMMENT IS THE WORKFLOW'S. It starts with the workflow's marker, so the Actions
- * review and this one upsert one comment, and a success records the head it reviewed — which the
- * next run reads back. A failure records none, so the head is tried again.
+ * review and this one upsert one comment, and a posted review records the head it reviewed — which
+ * the next run reads back. A run that posted nothing records none, so the head is tried again.
  */
-test('⚠ the status comment carries the workflow marker and, on success only, the reviewed head', () => {
-  const success = statusCommentBody('success', HEAD, 'full')
-  expect(success.startsWith(STATUS_MARKER)).toBe(true)
-  expect(lastReviewedHeadOf(success)).toBe(HEAD)
-  expect(lastReviewedHeadOf(statusCommentBody('failure', HEAD, 'full'))).toBeUndefined()
+test('⚠ the status comment carries the workflow marker and, when the review was posted, the reviewed head', () => {
+  const posted = statusCommentBody({ posted: true, headSha: HEAD, scope: 'full', agentExitCode: 0 })
+  expect(posted.startsWith(STATUS_MARKER)).toBe(true)
+  expect(lastReviewedHeadOf(posted)).toBe(HEAD)
+  expect(
+    lastReviewedHeadOf(statusCommentBody({ posted: false, headSha: HEAD, scope: 'full', agentExitCode: 1 })),
+  ).toBeUndefined()
   expect(lastReviewedHeadOf(`${STATUS_MARKER}\n✅ **Claude PR review** ran on \`aaaaaaa\`.`)).toBeUndefined()
   expect(lastReviewedHeadOf(undefined)).toBeUndefined()
+})
+
+/**
+ * ⚠ POSTED IS WHAT THE DECISION LOG SAYS, NOT DOCKER-AGENT'S EXIT CODE. #989's first run: docker-agent
+ * exited 1 after the review went out, and the status said "failed, no verdict" under a verdict.
+ */
+test('⚠ a review posted before docker-agent failed is reported as posted, with the exit noted', () => {
+  const body = statusCommentBody({ posted: true, headSha: HEAD, scope: 'full', agentExitCode: 1 })
+  expect(body).toContain('✅')
+  expect(body).toContain('exited 1 after the review was posted')
+  expect(statusCommentBody({ posted: false, headSha: HEAD, scope: 'full', agentExitCode: 1 })).toContain(
+    'no review comment was posted',
+  )
+})
+
+test('the decision log shows a post when a gh pr comment was allowed or captured, and not otherwise', () => {
+  const line = (command: string, kind: string): string =>
+    JSON.stringify({ tool: 'Bash', input: { command }, decision: { kind } })
+  expect(
+    reviewWasPosted(
+      [line('gh pr diff 1', 'allow'), line("gh pr comment 1 --body-file - <<'EOF'\nx\nEOF", 'allow')].join('\n'),
+    ),
+  ).toBe(true)
+  expect(reviewWasPosted(line("gh pr comment 1 --body-file - <<'EOF'\nx\nEOF", 'capture'))).toBe(true)
+  expect(reviewWasPosted(line('gh pr comment 1 --body x; rm -rf ~', 'block'))).toBe(false)
+  expect(reviewWasPosted(`${line('gh pr diff 1', 'allow')}\n`)).toBe(false)
+  expect(reviewWasPosted('')).toBe(false)
+})
+
+test("Claude Code's session folder for a directory, named as Claude Code names it", () => {
+  expect(claudeSessionFolder('/home/daniel/.cache/enso-review/pr-989-6eb2ed1-1791986401294/tree', '/home/daniel')).toBe(
+    '/home/daniel/.claude/projects/-home-daniel--cache-enso-review-pr-989-6eb2ed1-1791986401294-tree',
+  )
 })
 
 test('the review worktree gets the grant hook on every tool call', () => {

@@ -38,7 +38,7 @@
   {
     "path": "scripts/review/review-pr.ts",
     "function": "reviewPullRequest",
-    "crap": 68.3,
+    "crap": 67.7,
     "reason": "One local PR review end to end: gh pr view, a git worktree at the head, bun install and the comment list in a credential-less subprocess, docker agent run, the status comment upsert. Every branch is a gh, git or docker call against a real pull request; its decisions (planReview, lastReviewedHeadOf, statusCommentBody, readReviewWorkflow, fillPrompt, decideToolCall) are split out and tested, and the whole path ran as a dry run on #958 (#981)."
   }
 ]
