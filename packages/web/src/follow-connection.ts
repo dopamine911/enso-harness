@@ -313,9 +313,11 @@ export interface ComposingCall {
 export interface RequestPulse {
   /** When this page saw the request open (`Date.now()`). */
   readonly startedAt: number
-  /** Characters of thinking, reply text and tool-call arguments streamed so far. */
+  /** Characters of thinking streamed so far. */
   readonly thinking: number
+  /** Characters of reply text streamed so far. */
   readonly text: number
+  /** Characters of tool-call arguments streamed so far. */
   readonly tool: number
 }
 
@@ -327,7 +329,10 @@ export interface RunEnding {
   readonly error: string | undefined
 }
 
-/** What the follow says of the run, for the status bar (#914) — read when the bar renders. */
+/**
+ * What the follow says of the run (#914, #913), read on each render by the status bar and by the
+ * Context, Stats and Diff views (`ThreadViewOverlay`).
+ */
 export interface RunPulse {
   /** When the oldest run open on this page opened (`Date.now()`); undefined while none is. */
   readonly runStartedAt: number | undefined
@@ -351,9 +356,6 @@ function carriesOutput(frame: EnsoFollowFrame): boolean {
   const { observation } = frame
   return observation.kind !== 'extension-ui-request' || observation.blocking
 }
-
-/** Enough of a composing call's arguments to find its subject: pi's tools name it first. */
-export const COMPOSING_HEAD_CHARS = 2048
 
 /** What `abort()` returns: the outcome, and the prompts pi had waiting — handed back to the composer (#75). Empty unless `aborted`. */
 export interface AbortResult {
@@ -864,9 +866,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
-   * What the status bar says of the run (#914): a call the model is writing — ended once pi runs it,
-   * and a new message starts none — and an extension's failure, which ends the client's run now
-   * (`to-agui.ts`); pi's run settles later, and its ending says it too.
+   * What the follow says of the run (#914): the request in flight (`observeRequest`, #913), a call
+   * the model is writing — ended once pi runs it, and a new message starts none — and an
+   * extension's failure, which ends the client's run now (`to-agui.ts`); pi's run settles later,
+   * and its ending says it too. Read through `pulse()` by the status bar and the views.
    */
   function observeRun(observation: EnsoObservation): void {
     observeRequest(observation)

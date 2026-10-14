@@ -678,7 +678,8 @@ function ContextTrend({
               bars={bars}
               requests={requests}
               granularity={granularity}
-              mode={mode}
+              // No bar yet to change from: the request in flight draws whole (PR #996 review).
+              mode={bars.length === 0 ? 'total' : mode}
               pickedIndex={pickedIndex}
               onPick={pick}
               inFlight={inFlight}

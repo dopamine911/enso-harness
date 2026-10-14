@@ -3,7 +3,6 @@ import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, type ChatUISelectedToolPart, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
 import {
-  COMPOSING_HEAD_CHARS,
   type ComposingCall,
   type LiveView,
   type RequestPulse,
@@ -67,6 +66,9 @@ export interface StepReading {
   readonly step: RunStep
   readonly key: string
 }
+
+/** Enough of a composing call's arguments to find its subject: pi's tools name it first. */
+const COMPOSING_HEAD_CHARS = 2048
 
 /** pi's tools name their subject by one of these; a composing call's arguments are cut mid-string. */
 const PARTIAL_SUBJECT = /"(command|pattern|path|query|url)"\s*:\s*"((?:[^"\\]|\\.)*)/g

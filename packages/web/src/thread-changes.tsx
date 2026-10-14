@@ -453,9 +453,11 @@ const PENDING_WORDS: Readonly<Record<PendingWrite['state'], string>> = {
   failed: 'failed — not applied',
 }
 
+const BYTES_PER_KB = 1024
+
 /** `812 B`, `21 KB`: how much of the call's arguments have streamed. */
 function sizeText(size: number): string {
-  return size < 1024 ? `${size} B` : `${Math.round(size / 1024)} KB`
+  return size < BYTES_PER_KB ? `${size} B` : `${Math.round(size / BYTES_PER_KB)} KB`
 }
 
 /**

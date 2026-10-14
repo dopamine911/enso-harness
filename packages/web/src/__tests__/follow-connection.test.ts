@@ -1039,3 +1039,73 @@ test('a prompt answered after the client stopped taking chunks closes no run int
   // The stop raised the page's banner (#919), which latches for the process: later files mount pages.
   clearPageFaultForTest()
 })
+
+// --- the request in flight (#913, PR #996 review): `RequestPulse` holds the page's own character
+// counts only until the assistant message ends, when the provider's count replaces them. Each
+// helper writes a status frame after the observations and waits for its chunk: the follow has
+// then seen everything before it.
+const observe = async (server: ScriptedServer, ...observations: EnsoFollowFrame[]): Promise<void> => {
+  for (const frame of observations) server.frame(frame)
+  const before = server.chunks.length
+  server.frame({ type: 'status', live: true, busy: true, generation: 4 })
+  for (let count = before + 1; ; count += 1) {
+    await server.untilChunks(count)
+    if (server.chunks.slice(before).some((chunk) => chunk.type === EventType.CUSTOM && chunk.name === 'status')) return
+  }
+}
+let seq = 100
+const obs = (observation: Record<string, unknown>): EnsoFollowFrame =>
+  ({ type: 'observation', seq: (seq += 1), observation }) as EnsoFollowFrame
+const toolDelta = (delta: string): EnsoFollowFrame =>
+  obs({ kind: 'unmapped', event: { type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', delta } } })
+
+/** A page that joined a run another client started: a run is open, no request seen yet. */
+async function joinedRun(): Promise<ScriptedServer> {
+  const server = scripted()
+  server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 4 })
+  await server.untilChunks(3)
+  return server
+}
+
+test('turn-start opens the request with zero counts, and a later turn-start resets them', async () => {
+  const server = await joinedRun()
+  await observe(server, obs({ kind: 'turn-start' }), obs({ kind: 'text-delta', contentIndex: 0, delta: 'hello' }))
+  expect(server.connection.pulse().request).toMatchObject({ thinking: 0, text: 5, tool: 0 })
+  await observe(server, obs({ kind: 'turn-start' }))
+  expect(server.connection.pulse().request).toMatchObject({ thinking: 0, text: 0, tool: 0 })
+  server.abort()
+})
+
+test("⚠ an assistant message-end clears the request — the provider's count replaces it; a toolResult message-end does not", async () => {
+  const server = await joinedRun()
+  await observe(server, obs({ kind: 'turn-start' }), obs({ kind: 'thinking-delta', contentIndex: 0, delta: 'hmm' }))
+  await observe(server, obs({ kind: 'message-end', role: 'toolResult' }))
+  expect(server.connection.pulse().request).toMatchObject({ thinking: 3 })
+  await observe(
+    server,
+    obs({ kind: 'message-end', role: 'assistant', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }),
+  )
+  expect(server.connection.pulse().request).toBeUndefined()
+  server.abort()
+})
+
+test('closing the last open run clears the request', async () => {
+  const server = await joinedRun()
+  await observe(server, obs({ kind: 'turn-start' }), obs({ kind: 'text-delta', contentIndex: 0, delta: 'hi' }))
+  expect(server.connection.pulse().request).toBeDefined()
+  server.frame(obs({ kind: 'settled', aborted: false }))
+  await observe(server)
+  expect(server.connection.pulse().request).toBeUndefined()
+  server.abort()
+})
+
+test('a page that joins mid-request opens it on its first delta, and counts tool arguments with no composing call', async () => {
+  const server = await joinedRun()
+  expect(server.connection.pulse().request).toBeUndefined()
+  // No toolcall_start was seen: the page joined mid-call.
+  await observe(server, toolDelta('{"path":"a'))
+  expect(server.connection.pulse()).toMatchObject({ composing: undefined, request: { thinking: 0, text: 0, tool: 10 } })
+  await observe(server, obs({ kind: 'text-delta', contentIndex: 0, delta: 'ok' }))
+  expect(server.connection.pulse().request).toMatchObject({ text: 2, tool: 10 })
+  server.abort()
+})
