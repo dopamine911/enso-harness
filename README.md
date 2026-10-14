@@ -370,6 +370,41 @@ generated).
 
 ---
 
+## Reviewing pull requests
+
+Pull requests are reviewed **on the owner's machine**, not by GitHub Actions (#981). A worker reviews each
+push with the same prompt, tool grant and comment checks as the GitHub workflow, because it reads them from
+that workflow (`.github/workflows/claude-pr-review.yml`). It posts as the review App's bot,
+**enso-local-reviewer-bot**.
+
+```bash
+bun run review-worker        # keep reviewing: the queue every 10s, every open PR's new head every 3 min
+bun run review-notify [n]    # queue a PR for review now (the current branch's PR when n is left out)
+bun run review-status        # the worker, the queue, the review in progress, the recent log
+bun run review <n> [--dry-run]   # review one PR now; --dry-run writes the review to a file instead of posting it
+```
+
+- **One worker per machine.** A second one refuses to start. The worker starts from a baseline: every open
+  PR's current head is counted as seen, and only later pushes and notified PRs are reviewed.
+  `--review-existing` reviews the backlog instead.
+- **A push is reviewed once.** A head already reviewed is skipped. A push after a review is reviewed for
+  its new commits only. A failed review is retried at the next poll, up to 3 attempts per head; after that,
+  `review-notify` retries it.
+- **What the reviewer may do.** It reads; it cannot write. Its tools are the workflow's grant, enforced by a
+  hook (`scripts/review/tool-grant-hook.ts`) and limited to the PR's worktree. Its GitHub token is
+  read-only and covers this repository only. The review it writes is posted by the runner, with a second
+  token the model never holds.
+- **Setup, once per machine:** `~/.config/enso-review/app.json` with the review App's `appId`,
+  `installationId` and `privateKeyPath`. Without that file, reviews post as the machine's own `gh` login.
+- **State** lives in `~/.cache/enso-review/`: one folder per run, holding the review log, every tool
+  decision and the captured review, plus the queue, the worker's lock and its log.
+- **Agent sessions** follow `.claude/skills/working-with-pull-requests/SKILL.md`, and run `review-notify`
+  after every push.
+- **On GitHub**, the workflow now runs only by hand (Actions → Claude PR Review → Run workflow, with the
+  PR's number). It costs Actions minutes, which the automatic trigger spent on every push.
+
+---
+
 ## Security, honestly
 
 Enso's guards are **bars that accrete, not boundaries**.

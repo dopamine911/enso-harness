@@ -168,10 +168,14 @@ export class UnknownPromptExpressionError extends Error {
  * `${{ … }}` text.
  */
 export function fillPrompt(template: string, values: PromptValues): string {
+  // The manual-run workflow (#981 Part 3) reads the pull request in its `pull-request` job; the
+  // `pull_request`-event spellings stay, for a base branch that still has the earlier workflow.
   const known: Record<string, string> = {
     'github.repository': values.repository,
+    'needs.pull-request.outputs.number': String(values.pullRequestNumber),
     'github.event.pull_request.number': String(values.pullRequestNumber),
     "needs.touched-comments.outputs.scope || 'full'": values.scope,
+    'needs.pull-request.outputs.head_sha': values.headSha,
     'github.event.pull_request.head.sha': values.headSha,
   }
   return template
