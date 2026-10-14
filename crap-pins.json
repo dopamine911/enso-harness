@@ -34,5 +34,11 @@
     "function": "observationToAguiEvents",
     "crap": 37,
     "reason": "Fully covered, so its CRAP is its cyclomatic complexity: one `case` per observation kind. `scripts/docs/observations.ts` reads those `case` blocks to generate the observations page, so splitting the switch breaks the generator. Also in complexity-baseline.json."
+  },
+  {
+    "path": "scripts/review/review-pr.ts",
+    "function": "reviewInWorktree",
+    "crap": 51.5,
+    "reason": "One local PR review inside its worktree: the base branch's workflow read with git show, bun install and the comment list in a credential-less subprocess, the base-owned paths restored, the grant written, docker agent run, the captured review posted with the runner's token, the status comment upserted. Every branch is a gh, git or docker call against a real pull request; its decisions (planReview, statusCommentsOf, statusCommentBody, readReviewWorkflow, fillPrompt, decideToolCall) are split out and tested, and the whole path ran on #958 (dry) and #989 (posted) (#981)."
   }
 ]
