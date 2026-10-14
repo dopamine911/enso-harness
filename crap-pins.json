@@ -38,7 +38,7 @@
   {
     "path": "scripts/review/review-pr.ts",
     "function": "reviewInWorktree",
-    "crap": 56,
-    "reason": "One local PR review inside its worktree: the base branch's workflow read with git show, bun install and the comment list in a credential-less subprocess, the base-owned paths restored, the grant written, docker agent run, the post confirmed through gh api, the status comment upserted. Every branch is a gh, git or docker call against a real pull request; its decisions (planReview, lastReviewedHeadOf, statusCommentBody, reviewCommentsSince, readReviewWorkflow, fillPrompt, decideToolCall) are split out and tested, and the whole path ran on #958 (dry) and #989 (posted) (#981)."
+    "crap": 51.5,
+    "reason": "One local PR review inside its worktree: the base branch's workflow read with git show, bun install and the comment list in a credential-less subprocess, the base-owned paths restored, the grant written, docker agent run, the captured review posted with the runner's token, the status comment upserted. Every branch is a gh, git or docker call against a real pull request; its decisions (planReview, statusCommentsOf, statusCommentBody, readReviewWorkflow, fillPrompt, decideToolCall) are split out and tested, and the whole path ran on #958 (dry) and #989 (posted) (#981)."
   }
 ]

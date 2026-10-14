@@ -347,7 +347,7 @@ function runReviewer(tree: string, runDirectory: string, prompt: string, poster:
   return reviewer.exitCode
 }
 
-interface ReviewOptions {
+export interface ReviewOptions {
   readonly number: number
   readonly dryRun: boolean
 }
@@ -437,7 +437,7 @@ function reviewInWorktree(review: ReviewRun): string {
 }
 
 /** One review of one pull request, start to finish. Returns what happened, for the terminal. */
-async function reviewPullRequest(options: ReviewOptions): Promise<string> {
+export async function reviewPullRequest(options: ReviewOptions): Promise<string> {
   const repository = repositoryName()
   const poster = await reviewPoster(repository)
   const pullRequest = readPullRequest(options.number, poster)
