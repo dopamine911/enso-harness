@@ -217,7 +217,7 @@ function dataUrlOf(value: string): [string, string] | undefined {
  * the server kept the stream open (all of a run, keepalives every 5 s), so a subscription that had
  * to stop could not, whatever the `fetch` underneath did with the same signal.
  */
-async function* readSseFrames(
+export async function* readSseFrames(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   heard: () => void,

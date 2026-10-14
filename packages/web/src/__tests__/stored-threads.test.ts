@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { type EnsoThreadHistory, NO_SESSION_INCIDENTS } from '@enso/core'
+import { type EnsoStoredThread, type EnsoThreadHistory, NO_SESSION_INCIDENTS } from '@enso/core'
 import {
   createResumeRequests,
   createStoredThreadsStore,
@@ -52,6 +52,49 @@ test('the resumable-session store validates listings and preserves the last good
   await store.refresh()
   expect(store.get().rows).toHaveLength(1)
   expect(store.get().error).toContain('did not match its schema')
+})
+
+// #911: a listing read just before the server released a thread, answered just after its release
+// frame, would put the row back to running — and nothing would clear it again.
+test('⚠ a run-state frame sets the row at once; a listing that was out while it came is corrected by it, one sent after it is not', async () => {
+  const row = (busy: boolean, waiting = false): EnsoStoredThread => ({
+    threadId: 'elsewhere',
+    projectId: 'p-launch',
+    lastActivityAt: '2026-09-08T12:00:00.000Z',
+    messageCount: 2,
+    busy,
+    waiting,
+  })
+  let answer = Promise.withResolvers<unknown>()
+  const store = createStoredThreadsStore(() => answer.promise)
+  const loaded = store.refresh()
+  answer.resolve([row(true, true)])
+  await loaded
+  expect(store.get().rows[0]).toMatchObject({ busy: true, waiting: true })
+
+  store.applyRunStates({ type: 'run-states', threads: [{ threadId: 'elsewhere', busy: true, waiting: true }] })
+  const before = store.get()
+  store.applyRunStates({ type: 'run-states', threads: [{ threadId: 'elsewhere', busy: true, waiting: true }] })
+  expect(store.get()).toBe(before)
+
+  answer = Promise.withResolvers<unknown>()
+  const stale = store.refresh()
+  store.applyRunStates({ type: 'run-state', threadId: 'elsewhere', busy: false, waiting: false })
+  expect(store.get().rows[0]).toMatchObject({ busy: false, waiting: false })
+  answer.resolve([row(true, true)])
+  await stale
+  expect(store.get().rows[0]).toMatchObject({ busy: false, waiting: false })
+
+  // Asked after the frame, the listing is the newer word: a run that started since.
+  answer = Promise.withResolvers<unknown>()
+  const fresh = store.refresh()
+  answer.resolve([row(true)])
+  await fresh
+  expect(store.get().rows[0]).toMatchObject({ busy: true, waiting: false })
+
+  // A whole snapshot that does not name the thread: no run holds it.
+  store.applyRunStates({ type: 'run-states', threads: [] })
+  expect(store.get().rows[0]).toMatchObject({ busy: false, waiting: false })
 })
 
 test('the earlier list excludes every session already owned by this page', () => {

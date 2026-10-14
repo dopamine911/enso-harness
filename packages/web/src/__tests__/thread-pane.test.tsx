@@ -697,6 +697,30 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode ch
   await pane.unmount()
 })
 
+// #911: the rail must stop saying running on the FIRST frame that says the run is over — the
+// settle, or a released status where nothing settles (an extension command) — not a later one.
+test('⚠ the rail row stops saying running on the one frame that ends the run: a settle alone, or a released status alone (#911)', async () => {
+  const pane = await mountPane()
+  const railState = (): string | undefined =>
+    threadListStore.get().find((thread) => thread.threadId === pane.stores.threadId)?.headline?.state
+  await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
+  await eventually(() => expect(railState()).toBe('working'))
+  await pane.settle({ type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } })
+  await eventually(() => {
+    expect(railBusy(pane.stores.threadId)).toBe(false)
+    expect(railState()).toBe('finished')
+  })
+
+  await pane.settle({ type: 'status', live: true, busy: true, generation: 2 })
+  await eventually(() => expect(railState()).toBe('working'))
+  await pane.settle({ type: 'status', live: true, busy: false, generation: 2 })
+  await eventually(() => {
+    expect(railBusy(pane.stores.threadId)).toBe(false)
+    expect(railState()).toBe('finished')
+  })
+  await pane.unmount()
+})
+
 // #348: a compaction rewrites the branch under the transcript the pane mounted with. The pane re-reads
 // it, but only once the thread is idle: pi compacts on its own when the context overflows, inside the
 // run it then retries, and replacing the transcript under a streaming reply would drop what streamed.
