@@ -180,8 +180,10 @@ the "no physical copy of a host package" rule, but it is deliberate: pi's loader
 
 ### 4. pi's version is pinned by the launcher, and `pi install` bypasses the launcher
 
-`scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS` accepts pi `>= 1.1.0, < 1.2.0` and refuses everything else before the
-spawn, because the guard carries a replica of pi's path resolver (#217). `pi install npm:<name>` loads
+`packages/core/src/supported-pi-versions.ts#SUPPORTED_PI_VERSIONS` accepts pi `>= 1.1.0, < 1.2.0`, and the
+launcher refused everything else before the spawn, because the guard carries a replica of pi's path
+resolver (#217). **Since #953 the guard checks it too**, refusing every tool call under a running pi
+outside the range, so the rest of this section describes the state before that change. `pi install npm:<name>` loads
 the package into **whatever pi the user has**, so the check never runs. A distributed harness would
 need the check moved into the extension itself (refuse at `session_start` outside the supported range)
 or it would be correct only by luck. **Confidence 0.85.** Caveat: pi's package manifest may support an
