@@ -1,6 +1,6 @@
 import { type EnsoGitFileChange, type EnsoGitRepository, EnsoThreadChanges } from '@enso/core'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
-import { useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { type DiffHunk, type DiffLine, hiddenBefore, parsePatch, type SplitRow, splitRows } from './diff-rows.ts'
 import { buildFileTree, filesInOrder, type TreeNode } from './file-tree.ts'
@@ -313,6 +313,23 @@ function toggled(set: ReadonlySet<string>, path: string): ReadonlySet<string> {
 }
 
 /**
+ * The file a tool card asked the Diff view to show (#920), as the call named it — relative to the
+ * thread's folder or absolute — and a fresh object per ask, so asking for the same file again shows it
+ * again. Provided by the views' box (`chat-layout.tsx`).
+ */
+export const DiffFocusContext = createContext<{ readonly path: string } | undefined>(undefined)
+
+/**
+ * Whether a changed file (relative to the repository) is the one a call named: the same path, or
+ * one ending in the other — an absolute path ends in the repository's, and a path relative to a
+ * folder inside the repository is the end of the repository's.
+ */
+function samePath(changed: string, named: string): boolean {
+  const asked = named.replace(/^\.\//, '')
+  return changed === asked || asked.endsWith(`/${changed}`) || changed.endsWith(`/${asked}`)
+}
+
+/**
  * The Diff header — `description` says what the files are compared with — then the changed files
  * as a tree and the chosen file's diff: a repository's and a copy's alike.
  */
@@ -327,12 +344,18 @@ function ChangedFiles({
   readonly truncated: boolean
   readonly nothingText: string
 }): React.ReactNode {
+  const focus = useContext(DiffFocusContext)
   const [chosen, setChosen] = useState<string | undefined>(undefined)
+  // A tool card's "open in Diff" (#920) asks for its file afresh: a click in the tree before it yields.
+  useEffect(() => setChosen(undefined), [focus])
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
   const tree = buildFileTree(files)
   const ordered = filesInOrder(tree)
-  // The chosen file while it still differs; otherwise the first in the tree.
-  const shown = ordered.find((change) => change.path === chosen) ?? ordered[0]
+  // The chosen file while it still differs; else the asked-for file; otherwise the first in the tree.
+  const shown =
+    ordered.find((change) => change.path === chosen) ??
+    (focus === undefined ? undefined : ordered.find((change) => samePath(change.path, focus.path))) ??
+    ordered[0]
   const added = files.reduce((sum, change) => sum + (change.added ?? 0), 0)
   const removed = files.reduce((sum, change) => sum + (change.removed ?? 0), 0)
   return (

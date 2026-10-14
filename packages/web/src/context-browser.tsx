@@ -59,9 +59,10 @@ const matchesKey = (element: EnsoContextElement, key: string): boolean =>
 
 /**
  * Items keyed by their place: a body's parts and images are a fixed list — the element is
- * replaced whole when its request changes — so place is identity here.
+ * replaced whole when its request changes — so place is identity here. A tool card's lists are
+ * the same: a call's arguments and result never change once drawn (#920).
  */
-function keyedByPlace<Item>(items: readonly Item[], prefix: string): Array<{ item: Item; slot: string }> {
+export function keyedByPlace<Item>(items: readonly Item[], prefix: string): Array<{ item: Item; slot: string }> {
   return items.map((placed, place) => ({ item: placed, slot: `${prefix}-${place}` }))
 }
 
