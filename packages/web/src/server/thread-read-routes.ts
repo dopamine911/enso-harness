@@ -98,9 +98,11 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
    *     transport (#112) a resumed pane follows the run in flight, and a prompt to a busy
    *     thread queues through pi (#75) — the 409 that guarded the old per-response run
    *     path guarded nothing here and locked the operator out of their own question.
-   *   • NOT here: the file, with the mode its branch persists. Neither: 404 — the one thing
-   *     this route decides that the follow decides differently (`present`). A page reads a 404
-   *     for its URL's thread as an id nobody has used yet, and starts it (#378).
+   *   • NOT here: the file, with the mode its branch persists. Neither, and no page has named it
+   *     for a project: 404 — the one thing this route decides that the follow decides differently
+   *     (`present`). A page reads a 404 for its URL's thread as an id nobody has used yet, and
+   *     starts it (#378). One a page named (`X-Enso-Project`) and nothing built is a `draft` of
+   *     that project (#897), registered still or not.
    *   • A file in a directory that is no project here: 403, naming the directory — it exists,
    *     so it is not a 404 a page would start afresh (#378).
    *
@@ -144,7 +146,14 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
       response.end(`thread ${threadId} was deleted`)
       return
     }
-    if (!mount.present || mount.projectId === undefined) {
+    // #897: a thread a page named for a project (`X-Enso-Project`) and nothing has built yet is no
+    // id nobody has used — the server builds it in that project. A 404 had a reload mint it again
+    // with no project, naming the launch one over a session built in the claimed one. It is a
+    // draft of the project it was named for; one removed since is still named, so the page says
+    // it is gone (the launch panel's blocked alert) and Start waits.
+    const claimed = mount.present ? undefined : threadRead.projects.claimOf(threadId)
+    const projectId = claimed ?? mount.projectId
+    if ((!mount.present && claimed === undefined) || projectId === undefined) {
       response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end(`no session for thread ${threadId}`)
       return
@@ -156,7 +165,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
     }
     const payload: EnsoThreadHistory = {
       threadId,
-      projectId: mount.projectId,
+      projectId,
       ...page,
       permissionMode: mount.permissionMode,
       sessionRisk: mount.sessionRisk,
@@ -164,7 +173,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
       ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
       ...(mount.stoppedAfter.length === 0 ? {} : { stoppedAfter: mount.stoppedAfter }),
       ...(mount.name === undefined ? {} : { name: mount.name }),
-      ...(mount.draft ? { draft: true as const } : {}),
+      ...(mount.draft || claimed !== undefined ? { draft: true as const } : {}),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
