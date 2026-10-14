@@ -489,6 +489,19 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     builds: 'no',
     logs: 'yes',
   },
+  PROJECT_TITLE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/title',
+    handler: 'respondToProjectRetitle → ProjectRegistry.retitle',
+    input: 'path: `projectId` (sixteen hex digits); body: `EnsoProjectTitleUpdate` — `{ "title": "…" }`, not blank',
+    success:
+      "200 `EnsoProject` JSON as it is now listed — the title, trimmed, stored in `ENSO_HOME/projects.json` (the launch project's too, as an entry for its path); the folder, its path and the id are untouched (#939)",
+    errors:
+      '400 malformed body, a blank title, or one that is not exactly `{ title }`; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   THREAD_MODE_ROUTE: threadControl(
     'respondToModeChange → changeThreadMode',
     'path: `threadId`; body: `EnsoPermissionModeChange`',

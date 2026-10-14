@@ -630,6 +630,47 @@ test('⚠ projects: registered under a root or refused with the reason; an unreg
   expect(requested).toEqual([])
 })
 
+async function putTitle(
+  url: string,
+  projectId: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return await fetch(`${url}/api/projects/${projectId}/title`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+// #939: the project page's rename. The title only, trimmed; a blank one, anything but `{ title }`,
+// an id no project has, and a foreign page (#717) are refused, and the listing is unchanged by them.
+test('⚠ a project is renamed by id: trimmed, listed under the new title; a blank title, another key, an unknown id and a foreign page are refused (#939)', async () => {
+  const { root, app } = projectRoot()
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
+  const project = await registeredProject(url, app)
+  const listed = async (): Promise<EnsoProject[]> =>
+    (await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[]
+
+  for (const body of [{ title: '' }, { title: '   ' }, { title: 'x', path: '/' }, { name: 'x' }, '{ not json']) {
+    expect([body, (await putTitle(url, project.projectId, body)).status]).toEqual([body, 400])
+  }
+  const unknown = await putTitle(url, '0123456789abcdef', { title: 'Nobody' })
+  expect([unknown.status, await unknown.text()]).toEqual([404, 'no registered project has the id 0123456789abcdef'])
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }
+  expect((await putTitle(url, project.projectId, { title: 'Hijacked' }, otherPort)).status).toBe(403)
+  expect((await listed()).find((row) => row.projectId === project.projectId)?.title).toBe('app')
+
+  const renamed = await putTitle(url, project.projectId, { title: '  Ledger app  ' })
+  expect(renamed.status).toBe(200)
+  expect(await renamed.json()).toEqual({ ...project, title: 'Ledger app' })
+  expect(await listed()).toContainEqual({ ...project, title: 'Ledger app' })
+  const [launch] = await listed()
+  if (launch === undefined) throw new Error('expected the launch project first')
+  expect((await putTitle(url, launch.projectId, { title: 'Home base' })).status).toBe(200)
+  expect((await listed())[0]).toEqual({ ...launch, title: 'Home base' })
+})
+
 // A stored session belongs to the project its OWN directory is (pi's header); one whose directory
 // is no project is not served at all — not listed, not read — and forgetting a project takes its
 // threads off the rail without touching them: adding the folder again serves them again. The project

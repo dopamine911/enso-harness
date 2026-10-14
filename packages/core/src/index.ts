@@ -262,6 +262,7 @@ export {
   EnsoProjectRegistration,
   EnsoProjectsConfig,
   EnsoProjectsState,
+  EnsoProjectTitleUpdate,
   isEnsoProjectId,
   THREAD_PROJECT_TRUST,
   threadTrustsProject,

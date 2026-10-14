@@ -1,5 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { ensoLogger, EnsoProjectRegistration, EnsoProjectSettingsUpdate, EnsoProjectTrustUpdate } from '@enso/core'
+import {
+  ensoLogger,
+  EnsoProjectRegistration,
+  EnsoProjectSettingsUpdate,
+  EnsoProjectTitleUpdate,
+  EnsoProjectTrustUpdate,
+} from '@enso/core'
 import type { Static, TSchema } from 'typebox'
 import type { ProjectThreadSettingsSource } from '../host/tree-setup.ts'
 import { createProjectSettingsRoute, type ProjectSettingsAnswer } from './project-settings-route.ts'
@@ -9,8 +15,8 @@ import { answerJson, answerOrFail, MAX_DIALOG_BODY_BYTES, readClosedJsonBody, re
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 
 /**
- * The project routes (#395, #810): the projects listed, registered, browsed and removed, a
- * project's settings (#754) and its trust (#873). ⚠ `scripts/docs/routes.ts` reads the literal routes off the
+ * The project routes (#395, #810): the projects listed, registered, browsed, renamed (#939) and
+ * removed, a project's settings (#754) and its trust (#873). ⚠ `scripts/docs/routes.ts` reads the literal routes off the
  * `request.method === … && url …` conditions below (#174): keep that spelling.
  */
 
@@ -30,6 +36,15 @@ const PROJECT_SETTINGS_WRITE_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/settings
  */
 const PROJECT_TRUST_READ_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/trust$/
 const PROJECT_TRUST_WRITE_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/trust$/
+/** `PUT /api/projects/<projectId>/title` (#939): the name the project is shown by; the folder keeps its own. */
+const PROJECT_TITLE_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/title$/
+/** What `PUT …/title` takes (#939), and how its 400 and 413 say so. */
+const PROJECT_TITLE_BODY = {
+  what: 'project title update',
+  schema: EnsoProjectTitleUpdate,
+  name: 'project title',
+  requirement: 'a project title update takes exactly `title`, a name that is not blank',
+}
 
 /** What the project routes read from the server (#810): the registries, and where project settings come from. */
 export interface ProjectRoutesState {
@@ -129,6 +144,23 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
   }
 
   /**
+   * `PUT /api/projects/<projectId>/title` (#939): `{ title }`, not blank, trimmed and stored in
+   * `projects.json`, answered with the project as it is now listed. Only the name changes: the
+   * folder, its path and the id stay. An id no served project has is a 404.
+   */
+  async function respondToProjectRetitle(
+    projectId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const update = await readProjectBody(request, response, PROJECT_TITLE_BODY)
+    const outcome = update === undefined ? undefined : projects.retitle(projectId, update.title.trim())
+    if (outcome?.kind === 'retitled') answerJson(response, outcome.project)
+    else if (outcome !== undefined)
+      refuseWith(response, { status: 404, reason: `no registered project has the id ${projectId}` })
+  }
+
+  /**
    * The project's live threads here, none of them running — or, when one runs, undefined, its 409
    * answered (`act`: what waits for it to settle). Removal and revoke retire these. `inspect()`
    * decodes a branch (#285); both are rare, explicit acts, and live threads are few.
@@ -204,6 +236,11 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
       return true
     }
     if (dispatchProjectSubroute(request, response, url)) return true
+    const retitled = request.method === 'PUT' ? PROJECT_TITLE_ROUTE.exec(url)?.[1] : undefined
+    if (retitled !== undefined) {
+      answerOrFail(respondToProjectRetitle(retitled, request, response), response)
+      return true
+    }
     const projectId = PROJECT_ROUTE.exec(url)?.[1]
     if (projectId === undefined || request.method !== 'DELETE') return false
     respondToProjectRemoval(projectId, response)

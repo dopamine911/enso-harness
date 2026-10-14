@@ -1,13 +1,15 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { ChevronLeftIcon, PlusIcon, SearchXIcon } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { ChevronLeftIcon, PencilIcon, PlusIcon, SearchXIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { AddProjectPage } from './add-project.tsx'
 import { Button } from './components/ui/button.tsx'
+import { InlineRename, type RenameOutcome } from './inline-rename.tsx'
 import { cn } from './lib/utils.ts'
 import type { ListingState } from './listing-store.ts'
-import { HEADER, RailToggle } from './page-header.tsx'
+import { HEADER, RailToggle, TITLE_PENCIL } from './page-header.tsx'
+import { projectList } from './page-listings.ts'
 import { type PolicyEditor, usePermissionPolicy } from './permissions-settings.tsx'
-import { projectOf } from './project-list.ts'
+import { projectOf, renameProject } from './project-list.ts'
 import { ProjectPage, type ProjectPageActions } from './project-page.tsx'
 import { type ProjectCardActions, ProjectsPage } from './projects-page.tsx'
 import { SettingsPage } from './settings-page.tsx'
@@ -42,6 +44,8 @@ interface PageHeading {
   /** The subtitle is a path, set in the code face as the prototype's project header sets it (#417). */
   readonly subtitleIsPath?: boolean
   readonly back?: PageBack
+  /** A project's page: its title renames the project in place (#939). */
+  readonly project?: EnsoProject
   /** The status strip's name for it. */
   readonly status: string
 }
@@ -66,7 +70,7 @@ const MISSING_PART: Readonly<Record<PageRoute['kind'], string>> = {
 function projectHeading(project: EnsoProject | undefined): PageHeading {
   const back = PAGE_HOMES.project
   if (project === undefined) return { title: 'Project not found', back, status: back.label }
-  return { title: project.title, subtitle: project.path, subtitleIsPath: true, back, status: project.title }
+  return { title: project.title, subtitle: project.path, subtitleIsPath: true, back, status: project.title, project }
 }
 
 /** Each page's heading, the one place a page's name is written. */
@@ -148,11 +152,106 @@ function PageAction({
 }
 
 /**
+ * Rename the project (#939), then read the projects again before the field closes, so the page,
+ * the rail, the switcher and Projects all show the new name at once. Any failure is said under the
+ * field, in the server's words, or the network's.
+ */
+async function saveProjectTitle(projectId: string, title: string): Promise<RenameOutcome> {
+  try {
+    const outcome = await renameProject(projectId, title)
+    if (outcome.kind === 'refused') return outcome
+    await projectList.refresh()
+    return { kind: 'renamed', name: outcome.value.title }
+  } catch (error) {
+    return { kind: 'refused', reason: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * The page's title in its `h1`, and what it is under it: a project's title is a button that renames
+ * it in place (#939), as a thread's title does (#879) — the pencil on hover and focus; Enter saves,
+ * Escape cancels, and the folder keeps its name. While the field is up the `h1` stays, read only by
+ * a screen reader, so the page's region keeps its name, and the field's hint takes the path's line.
+ * Done, focus returns to the title.
+ */
+function PageTitle({
+  heading,
+  titleRef,
+}: {
+  heading: PageHeading
+  titleRef: React.RefObject<HTMLHeadingElement | null>
+}): React.ReactNode {
+  const { project } = heading
+  /** The project whose title is a field; another page or project on screen ends it. */
+  const [renaming, setRenaming] = useState<string | undefined>(undefined)
+  if (renaming !== undefined && renaming !== project?.projectId) setRenaming(undefined)
+  const button = useRef<HTMLButtonElement>(null)
+  const returnFocus = useRef(false)
+  useEffect(() => {
+    if (renaming !== undefined || !returnFocus.current) return
+    returnFocus.current = false
+    button.current?.focus()
+  }, [renaming])
+  const on = project !== undefined && renaming === project.projectId
+  return (
+    <>
+      <h1
+        ref={titleRef}
+        id="page-heading"
+        tabIndex={-1}
+        className={cn(
+          'max-w-full truncate font-heading text-base leading-snug font-semibold focus:outline-none',
+          on && 'sr-only',
+        )}
+      >
+        {project === undefined ? (
+          heading.title
+        ) : (
+          <button
+            ref={button}
+            type="button"
+            aria-label={`Rename project: ${heading.title}`}
+            onClick={() => setRenaming(project.projectId)}
+            className="group flex max-w-full min-w-0 items-center gap-2 rounded-xs text-left focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <span className="truncate">{heading.title}</span>
+            <PencilIcon aria-hidden="true" className={TITLE_PENCIL} />
+          </button>
+        )}
+      </h1>
+      {on ? (
+        <InlineRename
+          label="project name"
+          hint="Enter to save · Escape to cancel · the folder keeps its name"
+          current={project.title}
+          save={(title) => saveProjectTitle(project.projectId, title)}
+          onDone={() => {
+            returnFocus.current = true
+            setRenaming(undefined)
+          }}
+        />
+      ) : null}
+      {on || heading.subtitle === undefined ? null : (
+        <p
+          className={cn(
+            'max-w-full truncate text-xs text-muted-foreground',
+            heading.subtitleIsPath === true && 'font-mono',
+          )}
+          title={heading.subtitleIsPath === true ? heading.subtitle : undefined}
+        >
+          {heading.subtitle}
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
  * A page's header: the threads button (narrow screens), the breadcrumb back where the page has
  * one, its title and what it is, and the page's own action (`PageAction`) — Projects' **Add
  * project** (#870), which opens the Add project page (#872), or a project's **New thread** (#417),
- * started in that project. The thread header's box (`HEADER`), so moving between a thread and a
- * page doesn't jump (#417).
+ * started in that project. A project's title renames it in place (#939). The thread header's box
+ * (`HEADER`), so moving between a thread and a page doesn't jump (#417).
  * Arriving on a page moves focus to its title, so a keyboard or a screen reader starts where the
  * page does; moving within it (a section) leaves focus on the link that moved it.
  */
@@ -181,25 +280,7 @@ export function PageHeader({
       <RailToggle open={rail.open} onToggle={rail.toggle} />
       <div className="grid min-w-0 flex-1 justify-items-start">
         {heading.back === undefined ? null : <BackLink back={heading.back} onOpen={onOpen} />}
-        <h1
-          ref={title}
-          id="page-heading"
-          tabIndex={-1}
-          className="truncate font-heading text-base leading-snug font-semibold focus:outline-none"
-        >
-          {heading.title}
-        </h1>
-        {heading.subtitle === undefined ? null : (
-          <p
-            className={cn(
-              'max-w-full truncate text-xs text-muted-foreground',
-              heading.subtitleIsPath === true && 'font-mono',
-            )}
-            title={heading.subtitleIsPath === true ? heading.subtitle : undefined}
-          >
-            {heading.subtitle}
-          </p>
-        )}
+        <PageTitle heading={heading} titleRef={title} />
       </div>
       <PageAction page={page} projects={projects} onOpen={onOpen} onNewThread={onNewThread} />
     </header>

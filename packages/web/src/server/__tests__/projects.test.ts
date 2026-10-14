@@ -1,5 +1,14 @@
 import { expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { projectIdOf, projectTreesDir } from '@enso/core/paths'
@@ -217,6 +226,41 @@ test('registrations outlive the process; a root taken out of the config hides it
   expect(noRoots.byDirectory(app)?.projectId).toBe(registered.project.projectId)
   const rootBack = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
   expect(rootBack.byDirectory(app)?.projectId).toBe(registered.project.projectId)
+})
+
+// #939: a rename changes the name only — the folder, its path and the id stay — and outlives the
+// process. The launch project renames too, and stays the launch project: first, unremovable.
+test('a rename outlives the process and touches only the title — the folder, path and id stay; the launch project renames too (#939)', () => {
+  const { launch, root, statePath } = layout()
+  const app = join(root, 'app')
+  mkdirSync(app)
+  const first = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+  const registered = first.register({ path: app, title: 'The app' })
+  if (registered.kind === 'refused') throw new Error(registered.reason)
+  const { projectId } = registered.project
+  const launchId = projectIdOf(launch)
+
+  expect(first.retitle(projectId, 'Ledger')).toEqual({
+    kind: 'retitled',
+    project: { projectId, title: 'Ledger', path: app, status: 'ok', launch: false },
+  })
+  expect(first.retitle(launchId, 'Home base')).toMatchObject({ kind: 'retitled', project: { launch: true } })
+  expect(first.retitle('0123456789abcdef', 'Nobody')).toEqual({ kind: 'unknown' })
+
+  const restarted = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+  expect(
+    restarted.list().map(({ projectId: id, title, path, launch: isLaunch }) => [id, title, path, isLaunch]),
+  ).toEqual([
+    [launchId, 'Home base', launch, true],
+    [projectId, 'Ledger', app, false],
+  ])
+  expect(restarted.byDirectory(app)?.title).toBe('Ledger')
+  expect(restarted.remove(launchId)).toBe('launch')
+  expect(readdirSync(root)).toEqual(['app'])
+
+  // Removed, the id is unknown: a stale page cannot rename a project that is gone.
+  expect(restarted.remove(projectId)).toBe('removed')
+  expect(restarted.retitle(projectId, 'Ledger again')).toEqual({ kind: 'unknown' })
 })
 
 test('a new thread is built in the one project a page named for it, else the launch directory; never in a vanished one', () => {

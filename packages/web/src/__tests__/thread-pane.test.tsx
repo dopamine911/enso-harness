@@ -4951,3 +4951,59 @@ test('a project’s page opens at its URL from a card’s Settings, the rail’s
     await page.unmount()
   }
 })
+
+// #939: a project's page renames it in place, as a thread's header does (#879). Escape sends
+// nothing; Enter saves, and the page, the rail and Projects show the name the server now lists.
+test('a project’s title renames it in place: Escape sends nothing, Enter saves — the page, the rail and Projects show the new name (#939)', async () => {
+  const page = await openDeletable({ projects: [LAUNCH_PROJECT, OTHER_PROJECT] })
+  try {
+    await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+    const settings = [...projectCard(page, 'other').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Settings',
+    )
+    if (settings === undefined) throw new Error('expected Settings on the card of other')
+    await page.click(settings)
+    const titleButton = (): HTMLButtonElement | null =>
+      page.container.querySelector<HTMLButtonElement>('#page-heading button[aria-label^="Rename project"]')
+    const field = (): HTMLInputElement | null =>
+      page.container.querySelector<HTMLInputElement>('header input[aria-label="project name"]')
+    const open = async (): Promise<HTMLInputElement> => {
+      const button = titleButton()
+      if (button === null) throw new Error('expected the project title as a button')
+      await page.click(button)
+      return eventually(() => {
+        const found = field()
+        if (found === null) throw new Error('expected the project name field')
+        return found
+      })
+    }
+    const first = await open()
+    expect(document.activeElement).toBe(first)
+    expect(first.value).toBe('other')
+    expect(document.getElementById(first.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'Enter to save · Escape to cancel · the folder keeps its name',
+    )
+    await typeOver(first, 'never sent')
+    await pressKey(first, 'Escape')
+    expect(field()).toBeNull()
+    expect(document.activeElement).toBe(titleButton())
+    expect(page.server.projectTitles).toEqual([])
+
+    const again = await open()
+    await typeOver(again, '  Ledger  ')
+    await pressKey(again, 'Enter')
+    await eventually(() => {
+      expect(field()).toBeNull()
+      expect(pageHeading(page)).toBe('Ledger')
+    })
+    expect(page.server.projectTitles).toEqual([{ projectId: 'p-other', body: { title: 'Ledger' } }])
+    // The path under the title is the folder's, unchanged.
+    expect(page.container.querySelector('header p.font-mono')?.textContent).toBe('/other')
+    expect(page.container.querySelector('button[aria-label="more for Ledger"]')).not.toBeNull()
+    await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+    expect(projectCard(page, 'Ledger')).toBeDefined()
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
