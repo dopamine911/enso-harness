@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import {
+  agentConfiguration,
   claudeSessionFolder,
   type IssueComment,
   lastReviewedHeadOf,
@@ -185,4 +186,16 @@ test('⚠ a failed status keeps the previously reviewed head, so the retry is ne
   expect(
     lastReviewedHeadOf(statusCommentBody({ posted: false, headSha: HEAD, scope: 'full', agentExitCode: 1 })),
   ).toBeUndefined()
+})
+
+test('the reviewer configuration passes the workflow model and effort to the claude-code harness, and omits what is unset', () => {
+  const pinned = agentConfiguration({ model: 'claude-sonnet-5-5', effort: 'medium' })
+  expect(pinned).toContain('      type: claude-code\n      model: claude-sonnet-5-5\n      effort: medium\n')
+  const harness = (Bun.YAML.parse(pinned) as { agents: { root: { harness: Record<string, string> } } }).agents.root
+    .harness
+  expect(harness).toEqual({ type: 'claude-code', model: 'claude-sonnet-5-5', effort: 'medium' })
+  const unpinned = Bun.YAML.parse(agentConfiguration({ model: undefined, effort: undefined })) as {
+    agents: { root: { harness: Record<string, string> } }
+  }
+  expect(unpinned.agents.root.harness).toEqual({ type: 'claude-code' })
 })
