@@ -17,7 +17,7 @@ type Handler = (event: Record<string, unknown>, extensionContext: unknown) => un
 function loaded(cwd: string): {
   call: (id: string, path: string) => void
   result: (id: string, isError?: boolean) => unknown
-  turnEnd: () => void
+  end: (id: string, isError: boolean) => void
 } {
   const handlers = new Map<string, Handler>()
   writeReceipt({ on: (name: string, handler: Handler) => handlers.set(name, handler) } as unknown as ExtensionAPI)
@@ -26,7 +26,7 @@ function loaded(cwd: string): {
     call: (toolCallId, path) =>
       void fire('tool_execution_start', { toolCallId, toolName: 'write', args: { path, content: 'x' } }),
     result: (toolCallId, isError = false) => fire('tool_result', { toolCallId, toolName: 'write', isError }),
-    turnEnd: () => void fire('turn_end', {}),
+    end: (toolCallId, isError) => void fire('tool_execution_end', { toolCallId, toolName: 'write', isError }),
   }
 }
 
@@ -68,11 +68,13 @@ test('a failed write gets no receipt, nor does a result whose call it never saw'
   expect(pi.result('unknown')).toBeUndefined()
 })
 
-test("the turn's end drops a call a guard blocked: no receipt for it, and its path no longer counts as written", () => {
+test("⚠ a parallel batch: a write a guard blocked is dropped at its end, before the batch's next call starts", () => {
   const pi = loaded(mkdtempSync(join(tmpdir(), 'enso-write-receipt-')))
-  pi.call('blocked', 'a.md')
-  pi.turnEnd()
+  // pi prepares each call — the guards' `tool_call` — right after starting it; a blocked one ends there.
+  pi.call('blocked', 'x.md')
+  pi.end('blocked', true)
+  pi.call('next', 'x.md')
+  // The blocked write never made x.md: the next one creates it, and gets no stale receipt either.
   expect(pi.result('blocked')).toBeUndefined()
-  pi.call('next', 'a.md')
   expect(pi.result('next')).toEqual(receipt(false))
 })

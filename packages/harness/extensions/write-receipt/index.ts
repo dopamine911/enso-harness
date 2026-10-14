@@ -16,14 +16,16 @@ import { resolvePathLikePi } from '../../core/paths.ts'
  * the assistant message before running any, so the look is at the folder as it stood before the
  * whole batch, not before this call. One case is answered here: a write to a path an earlier write
  * of the same batch is still to make counts as an overwrite — pi's `withFileMutationQueue` runs
- * writes to one file in call order, so the earlier one lands first (unless it fails, which this
- * cannot know at the start). Another tool of the batch making the file (`bash` writing it) is not
- * seen: that write says "new".
+ * writes to one file in call order, so the earlier one lands first (unless it fails as it runs,
+ * which this cannot know at the start). An earlier write a guard blocked does not count: pi
+ * prepares each call — the guards' `tool_call` — right after starting it, and a call refused there
+ * ends (`tool_execution_end`) before the next call starts, which drops it. Another tool of the batch
+ * making the file (`bash` writing it) is not seen: that write says "new".
  *
  * Only a successful write gets one: a refused or failed write wrote nothing, and its error is the
  * card's story. The path is resolved as pi's own tools resolve it (`resolvePathLikePi`), against the
  * session's working directory. A call a guard blocked never reaches `tool_result`
- * (`docs/flows/guarded-tool-call.md`), so what the turn left unclaimed is dropped at its end.
+ * (`docs/flows/guarded-tool-call.md`), so every call is dropped at its `tool_execution_end`.
  */
 export default function writeReceipt(pi: ExtensionAPI): void {
   const pendingByCall = new Map<string, { readonly path: string; readonly existed: boolean }>()
@@ -41,5 +43,5 @@ export default function writeReceipt(pi: ExtensionAPI): void {
     const props: EnsoWriteReceiptProps = { existed: pending.existed }
     return { details: { [ENSO_TOOL_RESULT_KEY]: { kind: ENSO_WRITE_RECEIPT_KIND, props } } }
   })
-  pi.on('turn_end', () => pendingByCall.clear())
+  pi.on('tool_execution_end', (event) => void pendingByCall.delete(event.toolCallId))
 }

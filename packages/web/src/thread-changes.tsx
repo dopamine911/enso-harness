@@ -330,11 +330,12 @@ interface FilesPlace {
 }
 
 /**
- * The changed file a call's path names (#920). The path is made relative to `place.root` — an
- * absolute one under the root loses it, a relative one gains the thread's `scope` — and the file at
- * exactly that path wins. Only when none is there (a root reached through a symlink, a `..`) does
- * a path sharing a suffix count, and then the longest such file: two paths share a suffix as often
- * as a repository holds two `package.json`s, so a suffix alone never outranks the exact file.
+ * The changed file a call's path names (#920). A path that places cleanly under `place.root` — an
+ * absolute one under the root loses it, a relative one without a `..` gains the thread's `scope` —
+ * names exactly the file at that path, or none: a same-named file elsewhere is a different file,
+ * even when the named one is missing from the list (truncated, or written back to its baseline).
+ * Only a path that cannot be placed (a root reached through a symlink, a `..`) falls back to a
+ * shared suffix, and then the longest such file.
  */
 function namedFile(
   ordered: readonly EnsoGitFileChange[],
@@ -344,10 +345,11 @@ function namedFile(
   const asked = named.replace(/^\.\//, '')
   const rootPrefix = `${place.root.replace(/\/$/, '')}/`
   const absolute = asked.startsWith('/')
-  const relative = absolute ? asked.slice(rootPrefix.length) : `${place.scope}${asked}`
-  const exact =
-    absolute && !asked.startsWith(rootPrefix) ? undefined : ordered.find((change) => change.path === relative)
-  if (exact !== undefined) return exact
+  const underRoot = !absolute || asked.startsWith(rootPrefix)
+  if (underRoot && !asked.split('/').includes('..')) {
+    const relative = absolute ? asked.slice(rootPrefix.length) : `${place.scope}${asked}`
+    return ordered.find((change) => change.path === relative)
+  }
   const sharing = ordered.filter((change) => asked.endsWith(`/${change.path}`) || change.path.endsWith(`/${asked}`))
   return sharing.reduce<EnsoGitFileChange | undefined>(
     (longest, change) => (longest === undefined || change.path.length > longest.path.length ? change : longest),

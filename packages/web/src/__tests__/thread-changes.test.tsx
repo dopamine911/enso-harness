@@ -137,6 +137,28 @@ test('#920: a path outside the known root falls back to the longest file it ends
   expect(shownFor(outcome, 'nowhere.md')).toBe('packages/web/package.json')
 })
 
+test('#920: a path placed cleanly under the root names that file or none — never a same-named file elsewhere', () => {
+  // The named file is missing from the list (truncated, or written back to its baseline): Diff
+  // opens the first file in the tree, not a deeper file that merely ends the same way.
+  const top = read([changed('packages/web/package.json'), changed('docs/a.md')], true)
+  expect(shownFor(top, 'package.json')).toBe('docs/a.md')
+  expect(shownFor(top, '/work/shop-api/package.json')).toBe('docs/a.md')
+  const scoped: ChangesOutcome = {
+    kind: 'read',
+    payload: {
+      threadId: 't1',
+      cwd: '/work/shop-api/packages',
+      git: { ...CHANGES_REPOSITORY, scope: 'packages/' },
+      files: [changed('package.json'), changed('src/app.ts')],
+      truncated: true,
+      copy: null,
+    },
+  }
+  // `web/package.json` here is `packages/web/package.json`, not listed: the root one is a different file.
+  expect(shownFor(scoped, 'web/package.json')).toBe('src/app.ts')
+  expect(shownFor(scoped, '/work/shop-api/packages/web/package.json')).toBe('src/app.ts')
+})
+
 // ── #847: what a screen reader is given of the diff ─────────────────────────────────────────
 
 /** The diff's table in a render, parsed into a throwaway DOM (no globals, as `static-markup.ts`). */

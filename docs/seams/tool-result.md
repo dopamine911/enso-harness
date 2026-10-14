@@ -166,8 +166,9 @@ The web's half — renderers keyed by kind, and the one definition of what state
 ```ts
 /**
  * Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. A renderer
- * declines a descriptor by drawing nothing — `null`, `undefined`, a boolean or `''`, anything React
- * shows as no output — and the text is shown instead, never a blank box.
+ * declines a descriptor by returning `null`, `undefined`, a boolean or `''`, and the text is shown
+ * instead of a blank box. Only those values are seen: an empty array or fragment, or an element
+ * whose component renders `null`, is drawn as given — a renderer that declines returns `null`.
  */
 export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
 ```
@@ -228,7 +229,8 @@ Three things are mapped (#920). **A tool's own descriptor**, under `ENSO_TOOL_RE
 `details`, is taken as it stands: `ask_user` emits `enso.questionnaire-answers` (the questions beside
 the answers, `ask-user/index.ts#textResult`), and the `write-receipt` extension adds `enso.write-receipt`
 (whether the file existed when the call started — in a parallel batch, before any call of the batch
-ran, an earlier write of the batch to the same path counting as there; `write-receipt/index.ts#writeReceipt`)
+ran, an earlier write of the batch to the same path counting as there unless a guard blocked it;
+`write-receipt/index.ts#writeReceipt`)
 to pi's `write`, whose own `details` are empty. **An image the tool returned** in its `content` becomes
 `enso.images` — its bytes, never a URL — unless the tool emitted its own descriptor, which stands.
 **Truncation** goes on whichever of these it is, else on `pi.tool.<toolName>` with
