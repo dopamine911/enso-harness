@@ -9,7 +9,13 @@ import {
   type EnsoThreadDeletePreview,
   type EnsoTreesListing,
 } from '@enso/core'
-import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
+import {
+  checkoutRootOfPackage,
+  ensoHome,
+  ensoSecretsPath,
+  installedPackageDir,
+  WEB_PACKAGE_NAME,
+} from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { readCopyChanges } from '@enso/core/snapshot-store'
@@ -330,9 +336,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   // The secrets file is the USER's (`ENSO_HOME`, #421), and the root `.env` bun autoloads is THIS
   // checkout's — neither is about the trees pi operates in (a session may run anywhere, a tmpdir
   // in tests). Both resolve from the environment and the harness, never from a session's cwd.
+  // Installed rather than checked out (#950) there is no checkout, so no root `.env` to report.
   const environment = options.environment ?? process.env
   const quarantine = quarantineSecrets(environment, {
-    repoRoot: findRepoRoot(import.meta.url),
+    repoRoot: checkoutRootOfPackage(installedPackageDir(import.meta.url, WEB_PACKAGE_NAME)),
     home: ensoHome(environment),
   })
   if (quarantine.removed.length > 0) {

@@ -14,7 +14,7 @@ import {
   transcriptOf,
   unsupportedPiVersionReason,
 } from '@enso/core'
-import { ensoHome, ensoLogsDir, ensoProjectsDir, findRepoRoot } from '@enso/core/paths'
+import { checkoutOrInstalledRoot, ensoHome, ensoLogsDir, ensoProjectsDir, HARNESS_PACKAGE_NAME } from '@enso/core/paths'
 import { knownSecretValuesTracking, readSecret } from '@enso/core/secrets'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
@@ -85,7 +85,8 @@ export interface GuardDependencies {
    * The harness's own root — one of the places a search over a directory above it is refused for
    * when it holds a credential location (#160 §4, `CredentialPlaces`). Since #421 its `.enso/` is
    * migrated into `ENSO_HOME` (in home, so always a place); what the migration leaves behind — a
-   * login `ENSO_HOME` already had — is still here, and still refused.
+   * login `ENSO_HOME` already had — is still here, and still refused. Installed rather than checked
+   * out (#950), it is the harness package's own directory: there is no checkout, and so no `.enso/`.
    */
   harnessRoot: string
   /** Whether an incident halts, and the risk thresholds — read at every `session_start` (#466). */
@@ -279,10 +280,12 @@ function productionCommandJudge(): CommandJudge | undefined {
   return createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: JUDGE_TIMEOUT_MS })
 }
 
-/** The pi entry point — the real analyzer, this checkout's root, the user's config and the running pi's version, wired at the composition root. */
+/** The pi entry point — the real analyzer, this checkout's root (or the installed package's), the user's config and the running pi's version, wired at the composition root. */
 export default createGuards({
   analyzeBashCommand: checkCommand,
-  harnessRoot: findRepoRoot(import.meta.url),
+  // Not the workspace-root walk (#950): an installed harness has no workspace root above it, so
+  // that walk throws at load, and the whole guard suite goes with it.
+  harnessRoot: checkoutOrInstalledRoot(import.meta.url, HARNESS_PACKAGE_NAME),
   incidentPolicy: productionIncidentPolicy,
   logsDirectory: ensoLogsDir(ensoHome(process.env)),
   projectsDirectory: ensoProjectsDir(ensoHome(process.env)),

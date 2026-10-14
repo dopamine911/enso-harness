@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startLauncher } from '@enso/core/log-process'
-import { findRepoRoot, webPackageDir } from '@enso/core/paths'
+import { checkoutRootOfPackage, installedPackageDir, WEB_PACKAGE_NAME } from '@enso/core/paths'
 // A SECOND entry, not a route inside the first (#144 slice 2): the observation surface — a
 // read-only view of the day's log — is its own page, so the page that controls pi and the
 // page that only watches it cannot drift into one bundle.
@@ -29,19 +29,21 @@ import { createFontFileRoute } from './font-files.ts'
 const WEB_PORT = 5178
 const API_UPSTREAM_ORIGIN = 'http://127.0.0.1:5179'
 
-const repoRoot = findRepoRoot(import.meta.url)
-const publicDir = join(webPackageDir(repoRoot), 'public')
+// The web package's own directory, found by name (#950): the same in this checkout and in an install,
+// where there is no workspace root above it to walk to.
+const webDir = installedPackageDir(import.meta.url, WEB_PACKAGE_NAME)
+const publicDir = join(webDir, 'public')
 // The page's fonts, from the installed `@fontsource` packages, unbundled (`font-files.ts`, #407).
 const webPackage: { dependencies?: Record<string, string> } = JSON.parse(
-  readFileSync(join(webPackageDir(repoRoot), 'package.json'), 'utf8'),
+  readFileSync(join(webDir, 'package.json'), 'utf8'),
 )
-const fontFiles = createFontFileRoute(webPackageDir(repoRoot), Object.keys(webPackage.dependencies ?? {}))
+const fontFiles = createFontFileRoute(webDir, Object.keys(webPackage.dependencies ?? {}))
 
 // Its own process, the same day's file (#132) — nothing of substance happens here, but a
 // proxy that cannot reach the enso server is exactly the line a bundle needs. `bun run dev` starts
 // this beside the server: either may migrate the checkout's old `.enso/` first (#421).
 const { log, dispose: disposeLogging } = await startLauncher({
-  repoRoot,
+  repoRoot: checkoutRootOfPackage(webDir),
   environment: process.env,
   process: 'web',
   logger: ['server', 'web'],
