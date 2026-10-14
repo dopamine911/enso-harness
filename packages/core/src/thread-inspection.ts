@@ -304,7 +304,7 @@ export type EnsoThreadRunState = Static<typeof EnsoThreadRunState>
 /**
  * One frame of `GET /api/run-states` (#911): first `run-states`, every thread the server holds and
  * its run — a thread it does not hold is neither busy nor waiting — then a `run-state` each time a
- * thread is taken by a run, released or dropped. How a page hears that a thread it has not opened
+ * thread is built, taken by a run, released or dropped. How a page hears that a thread it has not opened
  * stopped running, at the moment the server says so.
  *
  * @group Thread inspection

@@ -29,12 +29,18 @@ export function createStoredThreadsStore(
   let frames = 0
   /** The frame count at the last `run-states`: a thread it did not name was held by no run then. */
   let wholeAt = 0
-  /** `row` as the frames after the `since`-th say it; the same object when they say nothing new. */
+  /**
+   * `row` as the frames after the `since`-th say it; the same object when they say nothing new.
+   * ⚠ A frame's `waiting` is read at a take, a release or a drop — at a take, before any question
+   * could open — and a question opening mid-run sends no frame. So while the frame says busy, a
+   * listing that says waiting is kept: a question it saw opened after the take the frame reports.
+   */
   const corrected = (row: EnsoStoredThread, since: number): EnsoStoredThread => {
     const said = heard.get(row.threadId) ?? (wholeAt > since ? { busy: false, waiting: false, at: wholeAt } : undefined)
     if (said === undefined || said.at <= since) return row
-    if (row.busy === said.busy && row.waiting === said.waiting) return row
-    return { ...row, busy: said.busy, waiting: said.waiting }
+    const waiting = said.busy ? row.waiting || said.waiting : said.waiting
+    if (row.busy === said.busy && row.waiting === waiting) return row
+    return { ...row, busy: said.busy, waiting }
   }
   const listing = createListingStore(EnsoStoredThread, 'session listing', fetchStoredThreads, () => {
     const since = frames

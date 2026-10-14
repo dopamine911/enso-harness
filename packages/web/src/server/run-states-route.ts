@@ -14,7 +14,7 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * running until the page's own run settled or it reloaded — measured, never within 20 s.
  *
  * One `run-states` frame of every thread the server holds, read in the same tick as the watch, so
- * no change falls between; then one `run-state` per take, release or drop
+ * no change falls between; then one `run-state` per build, take, release or drop
  * (`ThreadRegistry.watchRunStates`). Only reads: builds nothing, writes no record.
  */
 export function followRunStates(threads: ThreadRegistry, response: ServerResponse, sseKeepaliveMs: number): void {

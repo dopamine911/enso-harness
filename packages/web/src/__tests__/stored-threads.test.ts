@@ -97,6 +97,38 @@ test('⚠ a run-state frame sets the row at once; a listing that was out while i
   expect(store.get().rows[0]).toMatchObject({ busy: false, waiting: false })
 })
 
+// PR #995 review: a take's frame says `waiting: false` because no question can be open yet; a
+// question that opens mid-run sends no frame, so a listing out across the take that saw it knows better.
+test('a listing out across a take that saw a question open keeps its waiting; a release clears it', async () => {
+  const row = (busy: boolean, waiting: boolean): EnsoStoredThread => ({
+    threadId: 'elsewhere',
+    projectId: 'p-launch',
+    lastActivityAt: '2026-09-08T12:00:00.000Z',
+    messageCount: 2,
+    busy,
+    waiting,
+  })
+  let answer = Promise.withResolvers<unknown>()
+  const store = createStoredThreadsStore(() => answer.promise)
+  const loaded = store.refresh()
+  answer.resolve([row(false, false)])
+  await loaded
+
+  answer = Promise.withResolvers<unknown>()
+  const straddling = store.refresh()
+  store.applyRunStates({ type: 'run-state', threadId: 'elsewhere', busy: true, waiting: false })
+  answer.resolve([row(true, true)])
+  await straddling
+  expect(store.get().rows[0]).toMatchObject({ busy: true, waiting: true })
+
+  answer = Promise.withResolvers<unknown>()
+  const released = store.refresh()
+  store.applyRunStates({ type: 'run-state', threadId: 'elsewhere', busy: false, waiting: false })
+  answer.resolve([row(true, true)])
+  await released
+  expect(store.get().rows[0]).toMatchObject({ busy: false, waiting: false })
+})
+
 test('the earlier list excludes every session already owned by this page', () => {
   const stored = [
     {
