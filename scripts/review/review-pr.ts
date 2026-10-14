@@ -36,7 +36,14 @@ import { dirname, join } from 'node:path'
 import { gitChildEnvironment } from '../../packages/core/src/git.ts'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { readReviewAppConfig, reviewAppIdentity, reviewAppPostToken } from './app-token.ts'
-import { RUNS_DIRECTORY, runFolderName, runFolderOf } from './review-paths.ts'
+import {
+  claimRun,
+  RUNS_DIRECTORY,
+  runFolderName,
+  runFolderOf,
+  runOwnerIsAlive,
+  SHORT_HEAD_LENGTH,
+} from './review-paths.ts'
 import type { ToolGrant } from './tool-grant-hook.ts'
 import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow } from './workflow-config.ts'
 
@@ -56,11 +63,13 @@ const COMMENT_LIST_FILE = 'touched-comments.md'
 const NEW_COMMITS_DIFF_FILE = 'new-commits.diff'
 /** Paths a pull request must not supply to its own reviewer: replaced with the base branch's. */
 const BASE_OWNED_PATHS = ['.claude', '.mcp.json'] as const
+/** The reviewer's log, and its retry's (`runReviewerWithRetry`). */
+const FIRST_ATTEMPT_LOG = 'review.log'
+const RETRY_ATTEMPT_LOG = 'review-retry.log'
 /** What the reviewer is told when its post is captured on a real run: the runner posts it next. */
 const CAPTURE_REPLY =
   'Recorded: the review comment will be posted to the pull request by the runner. The review is complete; stop here.'
 /** A short SHA, as the workflow's comments print one. */
-const SHORT_SHA_LENGTH = 7
 /** The system directories the credential-less steps need beside bun's own: git, sh, coreutils. */
 const SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin'
 const REPOSITORY_ROOT = findRepoRoot(import.meta.url)
@@ -95,7 +104,7 @@ export function planReview(
   if (pullRequest.author.is_bot === true)
     return { kind: 'skip', reason: `a bot's pull request (${pullRequest.author.login})` }
   if (lastReviewedHead === pullRequest.headRefOid) {
-    return { kind: 'skip', reason: `head ${pullRequest.headRefOid.slice(0, SHORT_SHA_LENGTH)} is already reviewed` }
+    return { kind: 'skip', reason: `head ${pullRequest.headRefOid.slice(0, SHORT_HEAD_LENGTH)} is already reviewed` }
   }
   if (lastReviewedHead !== undefined && isAncestorOfHead(lastReviewedHead)) {
     return { kind: 'review', scope: 'new-commits', from: lastReviewedHead }
@@ -148,7 +157,7 @@ export function statusCommentBody(run: {
   readonly agentExitCode: number
   readonly previouslyReviewedHead?: string | undefined
 }): string {
-  const short = run.headSha.slice(0, SHORT_SHA_LENGTH)
+  const short = run.headSha.slice(0, SHORT_HEAD_LENGTH)
   if (!run.posted) {
     const kept =
       run.previouslyReviewedHead === undefined
@@ -360,10 +369,11 @@ export function shouldRetryReviewer(agentExitCode: number, captured: boolean): b
 }
 
 /** Runs the reviewer, and once more when it failed before capturing anything (`shouldRetryReviewer`). Answers the last exit code. */
-function runReviewerWithRetry(reviewer: ReviewerRun, capture: string): number {
-  const first = runReviewer(reviewer, 'review.log')
-  if (!shouldRetryReviewer(first, existsSync(capture))) return first
-  return runReviewer(reviewer, 'review-retry.log')
+function runReviewerWithRetry(reviewer: ReviewerRun, capture: string): { exitCode: number; logName: string } {
+  const first = runReviewer(reviewer, FIRST_ATTEMPT_LOG)
+  if (!shouldRetryReviewer(first, existsSync(capture))) return { exitCode: first, logName: FIRST_ATTEMPT_LOG }
+  // The summary names this log: its exit code is the one reported (#997's review).
+  return { exitCode: runReviewer(reviewer, RETRY_ATTEMPT_LOG), logName: RETRY_ATTEMPT_LOG }
 }
 
 /** One reviewer run's inputs: where it reviews, where its files go, what it is told, who it reads as. */
@@ -458,32 +468,50 @@ interface ReviewRun {
   readonly lastReviewedHead: string | undefined
 }
 
-/** The terminal line for one run: what was posted (or that nothing was), docker-agent's exit, a missing comment list, the log. */
+/** The terminal line for one run: what was posted (or that nothing was), docker-agent's exit, what it could not do, the log. */
 export function runSummary(run: {
   readonly number: number
   readonly posted: boolean
   readonly where: string
   readonly scope: string
   readonly agentExitCode: number
-  readonly listProblem: string | undefined
+  /** Anything the run could not do, said after the outcome: a missing comment list, an unminted token. */
+  readonly notes: string | undefined
   readonly log: string
 }): string {
   const outcome = run.posted ? `reviewed (${run.scope}); comment ${run.where}` : 'FAILED: no review comment was posted'
-  const listNote = run.listProblem === undefined ? '' : `; ${run.listProblem}`
-  return `#${run.number}: ${outcome}; docker-agent exited ${run.agentExitCode}${listNote}; log ${run.log}`
+  const notes = run.notes === undefined ? '' : `; ${run.notes}`
+  return `#${run.number}: ${outcome}; docker-agent exited ${run.agentExitCode}${notes}; log ${run.log}`
+}
+
+/**
+ * The runner's posting environment, minted now; or why it could not be. ⚠ A failure here comes after
+ * the whole review ran: it must not throw the review away, so it is answered, and the summary names the
+ * captured file for a person to post (#997's review).
+ */
+export async function mintPostEnvironment(
+  poster: Pick<Poster, 'postEnvironment'>,
+): Promise<{ readonly environment: Record<string, string> | undefined } | { readonly problem: string }> {
+  try {
+    return { environment: await poster.postEnvironment() }
+  } catch (error: unknown) {
+    return { problem: `the posting token could not be minted: ${String(error)}` }
+  }
 }
 
 /**
  * Posts the captured review and the status comment, with the posting token minted now. Answers whether
- * the review reached the pull request.
+ * the review reached the pull request, and why not when the token could not be minted (the status
+ * comment cannot be updated then either).
  */
 async function publishReview(
   review: ReviewRun,
   run: { readonly capture: string; readonly agentExitCode: number; readonly scope: string },
-): Promise<boolean> {
+): Promise<{ readonly posted: boolean; readonly problem: string | undefined }> {
   const { poster, options, pullRequest, repository } = review
-  const postEnvironment = await poster.postEnvironment()
-  const posted = postCapturedReview(repository, options.number, run.capture, postEnvironment)
+  const minted = await mintPostEnvironment(poster)
+  if ('problem' in minted) return { posted: false, problem: `${minted.problem}; the review is in ${run.capture}` }
+  const posted = postCapturedReview(repository, options.number, run.capture, minted.environment)
   const body = statusCommentBody({
     posted,
     headSha: pullRequest.headRefOid,
@@ -491,8 +519,8 @@ async function publishReview(
     agentExitCode: run.agentExitCode,
     previouslyReviewedHead: review.lastReviewedHead,
   })
-  upsertStatusComment({ repository, number: options.number }, body, poster, postEnvironment)
-  return posted
+  upsertStatusComment({ repository, number: options.number }, body, poster, minted.environment)
+  return { posted, problem: undefined }
 }
 
 /** Everything after the worktree exists: context, settings, the reviewer, the status. */
@@ -519,18 +547,19 @@ async function reviewInWorktree(review: ReviewRun): Promise<ReviewResult> {
     headSha: pullRequest.headRefOid,
   }
   const prompt = fillPrompt(config.promptTemplate, values)
-  const agentExitCode = runReviewerWithRetry({ tree, runDirectory, prompt, poster }, capture)
-  const posted = options.dryRun
-    ? existsSync(capture)
-    : await publishReview(review, { capture, agentExitCode, scope: plan.scope })
+  const attempt = runReviewerWithRetry({ tree, runDirectory, prompt, poster }, capture)
+  const published = options.dryRun
+    ? { posted: existsSync(capture), problem: undefined }
+    : await publishReview(review, { capture, agentExitCode: attempt.exitCode, scope: plan.scope })
+  const posted = published.posted
   const summary = runSummary({
     number: options.number,
     posted,
     where: options.dryRun ? `captured to ${capture}` : `posted to the pull request as ${poster.login}`,
     scope: plan.scope,
-    agentExitCode,
-    listProblem,
-    log: join(runDirectory, 'review.log'),
+    agentExitCode: attempt.exitCode,
+    notes: [listProblem, published.problem].filter((note) => note !== undefined).join('; ') || undefined,
+    log: join(runDirectory, attempt.logName),
   })
   return { summary, failed: !posted, head: pullRequest.headRefOid }
 }
@@ -558,6 +587,7 @@ export async function reviewPullRequest(options: ReviewOptions): Promise<ReviewR
   }
   const runDirectory = join(RUNS_DIRECTORY, runFolderName(options.number, pullRequest.headRefOid, Date.now()))
   mkdirSync(runDirectory, { recursive: true })
+  claimRun(runDirectory)
   const tree = join(runDirectory, 'tree')
   addWorktree(pullRequest, tree)
   try {
@@ -579,8 +609,9 @@ export async function reviewPullRequest(options: ReviewOptions): Promise<ReviewR
 /**
  * Removes the worktrees runs left behind when their worker died mid-review (SIGKILL, a closed terminal,
  * a reboot): `reviewPullRequest`'s `finally` never ran, and `git worktree prune` keeps a worktree whose
- * directory still exists (#993's review). ⚠ Call it only while holding the worker lock: no review is
- * in progress then, so every run folder that still has a `tree/` is abandoned. Answers the folders cleaned.
+ * directory still exists (#993's review). A run whose process is still alive is skipped: the worker
+ * lock does not cover `bun run review <n>`, which runs without it, and a worker starting during such a
+ * run must not take its worktree (#997's review). Answers the folders cleaned.
  */
 export function removeAbandonedWorktrees(
   runsDirectory: string = RUNS_DIRECTORY,
@@ -588,7 +619,10 @@ export function removeAbandonedWorktrees(
 ): string[] {
   if (!existsSync(runsDirectory)) return []
   const abandoned = readdirSync(runsDirectory).filter(
-    (folderName) => runFolderOf(folderName) !== undefined && existsSync(join(runsDirectory, folderName, 'tree')),
+    (folderName) =>
+      runFolderOf(folderName) !== undefined &&
+      existsSync(join(runsDirectory, folderName, 'tree')) &&
+      !runOwnerIsAlive(join(runsDirectory, folderName)),
   )
   // git in `repositoryRoot`, not in whatever repository an inherited `GIT_DIR` names (a git hook sets one).
   const environment = gitChildEnvironment()

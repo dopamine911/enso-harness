@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitChildEnvironment } from '../../packages/core/src/git.ts'
@@ -10,6 +10,7 @@ import {
   parseReviewArguments,
   planReview,
   type PullRequestState,
+  mintPostEnvironment,
   removeAbandonedWorktrees,
   reviewSettings,
   runSummary,
@@ -156,15 +157,13 @@ test('the run summary says what was posted, or that nothing was, with the exit c
     where: 'posted as reviewer[bot]',
     scope: 'full',
     agentExitCode: 0,
-    listProblem: undefined,
+    notes: undefined,
     log: '/r/review.log',
   }
   expect(runSummary({ ...base, posted: true })).toBe(
     '#7: reviewed (full); comment posted as reviewer[bot]; docker-agent exited 0; log /r/review.log',
   )
-  expect(
-    runSummary({ ...base, posted: false, agentExitCode: 1, listProblem: 'the comment list was not built: x' }),
-  ).toBe(
+  expect(runSummary({ ...base, posted: false, agentExitCode: 1, notes: 'the comment list was not built: x' })).toBe(
     '#7: FAILED: no review comment was posted; docker-agent exited 1; the comment list was not built: x; log /r/review.log',
   )
 })
@@ -206,7 +205,7 @@ test('the reviewer is run once more only when docker-agent failed and nothing wa
  * repository: one run folder whose worktree git knows, one whose tree is a plain directory, and one
  * folder that is not a run.
  */
-test('⚠ abandoned run worktrees are removed, registered or not, and nothing else is touched', () => {
+test('⚠ abandoned run worktrees are removed, registered or not; a live run and anything else are left alone', () => {
   const repository = mkdtempSync(join(tmpdir(), 'review-abandoned-repo-'))
   const git = (...command: string[]): void => {
     const answer = Bun.spawnSync(['git', ...command], {
@@ -226,7 +225,14 @@ test('⚠ abandoned run worktrees are removed, registered or not, and nothing el
   const plain = join(runs, 'pr-2-abcdef0-2000')
   mkdirSync(join(plain, 'tree'), { recursive: true })
   mkdirSync(join(runs, 'queue'))
+  // A run whose process is alive is a review in progress, here this test's own process: it stays.
+  const live = join(runs, 'pr-3-abcdef0-3000')
+  mkdirSync(join(live, 'tree'), { recursive: true })
+  writeFileSync(join(live, 'pid'), String(process.pid))
+  // A run whose process is gone is abandoned: a pid that has exited.
+  writeFileSync(join(plain, 'pid'), String(Bun.spawnSync(['true']).pid))
   expect(removeAbandonedWorktrees(runs, repository).toSorted()).toEqual(['pr-1-abcdef0-1000', 'pr-2-abcdef0-2000'])
+  expect(existsSync(join(live, 'tree'))).toBe(true)
   expect(existsSync(join(registered, 'tree'))).toBe(false)
   expect(existsSync(join(plain, 'tree'))).toBe(false)
   expect(existsSync(join(runs, 'queue'))).toBe(true)
@@ -236,4 +242,17 @@ test('⚠ abandoned run worktrees are removed, registered or not, and nothing el
     stdout: 'pipe',
   }).stdout.toString()
   expect(worktrees.trim().split('\n')).toHaveLength(1)
+})
+
+/** ⚠ A token that cannot be minted after a whole review is reported, not thrown: the review is kept (#997's review). */
+test('⚠ a posting token that cannot be minted is answered as a problem, not thrown', async () => {
+  const failing = {
+    postEnvironment: (): Promise<Record<string, string> | undefined> => Promise.reject(new Error('502 from GitHub')),
+  }
+  const minted = await mintPostEnvironment(failing)
+  expect(minted).toEqual({ problem: 'the posting token could not be minted: Error: 502 from GitHub' })
+  const working = {
+    postEnvironment: (): Promise<Record<string, string> | undefined> => Promise.resolve({ GH_TOKEN: 't' }),
+  }
+  expect(await mintPostEnvironment(working)).toEqual({ environment: { GH_TOKEN: 't' } })
 })

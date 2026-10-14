@@ -10,19 +10,27 @@
  *   - THE WORKER: the lock's pid, whether that process is alive, how long it has run, and which
  *     checkout (and commit) it runs from. Its code is that checkout's: a worker started before a merge
  *     runs the old code until restarted.
- *   - THE QUEUE: the pull requests notified and not yet taken.
- *   - IN PROGRESS: a run folder whose `tree/` worktree still exists is a review under way (the worktree
- *     is removed when a review ends, unless its worker was killed), with its elapsed time and its last
- *     tool call. With no worker running, such a folder is shown as abandoned.
+ *   - THE QUEUE: the pull requests notified whose review has not ended: an entry stays until its
+ *     review ends, so the review in progress is listed too.
+ *   - IN PROGRESS: a run folder whose `tree/` worktree still exists, and whose owning process (its
+ *     `pid` file: the worker, or a `bun run review`) is alive, with its elapsed time and its last tool
+ *     call. A folder that kept its worktree after its process died is shown as abandoned; the next
+ *     worker removes it at start.
  *   - RECENT: the last lines of `worker.log`, which the worker appends every line it prints to.
  */
 
 import { existsSync, readdirSync, readFileSync, readlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { type RunFolder, RUNS_DIRECTORY, runFolderOf, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
+import {
+  type RunFolder,
+  RUNS_DIRECTORY,
+  runFolderOf,
+  runOwnerIsAlive,
+  WORKER_LOCK,
+  WORKER_LOG,
+} from './review-paths.ts'
 import { queuedReviews } from './review-queue.ts'
 
-/** A run folder's name, as `review-pr.ts` makes it: `pr-<number>-<short head>-<start, epoch ms>`. */
 const RECENT_LOG_LINES = 8
 const MILLISECONDS_PER_SECOND = 1000
 const SECONDS_PER_MINUTE = 60
@@ -75,14 +83,14 @@ export interface ReviewStatus {
         readonly pid: number
         readonly uptime: string
         readonly checkout: string
-        /** When the worker started (epoch ms): a run folder older than this is not its review. */
-        readonly startedAt: number
       }
   readonly queued: readonly number[]
   readonly inProgress: readonly {
     readonly run: RunFolder
     readonly elapsed: string
     readonly lastCall: string | undefined
+    /** Whether the process that owns the run is alive; a dead owner's leftover is abandoned. */
+    readonly live: boolean
   }[]
   readonly recent: readonly string[]
 }
@@ -93,16 +101,6 @@ function workerLine(worker: ReviewStatus['worker']): string {
   return `worker:      running, pid ${worker.pid}, up ${worker.uptime}, from ${worker.checkout}`
 }
 
-/**
- * A run folder that still has its worktree is a review in progress only when a worker is running AND the
- * folder started after it did. Otherwise its worker died mid-review (SIGKILL, a closed terminal, a
- * reboot) and its `finally` never removed the worktree (#993's reviews); the next worker removes it at
- * start (`review-pr.ts#removeAbandonedWorktrees`).
- */
-function runLabel(worker: ReviewStatus['worker'], run: RunFolder): string {
-  return worker.kind === 'running' && run.startedAt >= worker.startedAt ? 'in progress' : 'abandoned  '
-}
-
 /** The status as the terminal shows it. */
 export function renderReviewStatus(status: ReviewStatus): string {
   const queued = status.queued.length === 0 ? 'empty' : status.queued.map((number) => `#${number}`).join(' ')
@@ -111,7 +109,7 @@ export function renderReviewStatus(status: ReviewStatus): string {
       ? ['in progress: nothing']
       : status.inProgress.map(
           (current) =>
-            `${runLabel(status.worker, current.run)}: #${current.run.number} at ${current.run.shortHead}, started ${current.elapsed} ago; last call: ${current.lastCall ?? 'none yet'}`,
+            `${current.live ? 'in progress' : 'abandoned  '}: #${current.run.number} at ${current.run.shortHead}, started ${current.elapsed} ago; last call: ${current.lastCall ?? 'none yet'}`,
         )
   const recent = status.recent.length === 0 ? ['  (no worker.log yet)'] : status.recent.map((line) => `  ${line}`)
   return [workerLine(status.worker), `queue:       ${queued}`, ...inProgress, 'recent:', ...recent, ''].join('\n')
@@ -133,7 +131,6 @@ export function workerFrom(
   lockText: string | undefined,
   elapsedSeconds: string | undefined,
   checkout: string,
-  now: number,
 ): ReviewStatus['worker'] {
   if (lockText === undefined) return { kind: 'none' }
   const pid = Number(lockText)
@@ -141,8 +138,7 @@ export function workerFrom(
   if (elapsedSeconds === undefined || elapsedSeconds.trim().length === 0 || !Number.isFinite(seconds)) {
     return { kind: 'stale', pid }
   }
-  const elapsed = seconds * MILLISECONDS_PER_SECOND
-  return { kind: 'running', pid, uptime: readableDuration(elapsed), checkout, startedAt: now - elapsed }
+  return { kind: 'running', pid, uptime: readableDuration(seconds * MILLISECONDS_PER_SECOND), checkout }
 }
 
 /** The checkout a process runs from, and its commit; read from `/proc`, so Linux only. */
@@ -155,11 +151,11 @@ function checkoutOf(pid: number): string {
   }
 }
 
-function readWorker(now: number): ReviewStatus['worker'] {
+function readWorker(): ReviewStatus['worker'] {
   const lockText = existsSync(WORKER_LOCK) ? readFileSync(WORKER_LOCK, 'utf8') : undefined
   const pid = Number(lockText)
   const elapsedSeconds = lockText === undefined ? undefined : run(['ps', '-o', 'etimes=', '-p', String(pid)])
-  return workerFrom(lockText, elapsedSeconds, elapsedSeconds === undefined ? '' : checkoutOf(pid), now)
+  return workerFrom(lockText, elapsedSeconds, elapsedSeconds === undefined ? '' : checkoutOf(pid))
 }
 
 function readInProgress(now: number): ReviewStatus['inProgress'] {
@@ -169,7 +165,14 @@ function readInProgress(now: number): ReviewStatus['inProgress'] {
     if (runFolder === undefined || !existsSync(join(RUNS_DIRECTORY, folderName, 'tree'))) return []
     const decisionLog = join(RUNS_DIRECTORY, folderName, 'tool-calls.jsonl')
     const lastCall = existsSync(decisionLog) ? lastToolCall(readFileSync(decisionLog, 'utf8')) : undefined
-    return [{ run: runFolder, elapsed: readableDuration(now - runFolder.startedAt), lastCall }]
+    return [
+      {
+        run: runFolder,
+        elapsed: readableDuration(now - runFolder.startedAt),
+        lastCall,
+        live: runOwnerIsAlive(join(RUNS_DIRECTORY, folderName)),
+      },
+    ]
   })
 }
 
@@ -185,7 +188,7 @@ if (import.meta.main) {
   const now = Date.now()
   process.stdout.write(
     renderReviewStatus({
-      worker: readWorker(now),
+      worker: readWorker(),
       queued: queuedReviews(),
       inProgress: readInProgress(now),
       recent: readRecent(),

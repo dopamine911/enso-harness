@@ -27,7 +27,7 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { RUNS_DIRECTORY, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
+import { RUNS_DIRECTORY, SHORT_HEAD_LENGTH, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
 import { removeAbandonedWorktrees, reviewPullRequest } from './review-pr.ts'
 import { finishQueuedReview, type QueuedReview, takeQueuedReviews } from './review-queue.ts'
 
@@ -120,7 +120,6 @@ async function reviewEach(numbers: readonly number[], taken: readonly QueuedRevi
 
 /** How many times a review may fail at one head before the worker stops trying it by itself. */
 export const MAXIMUM_ATTEMPTS_PER_HEAD = 3
-const SHORT_SHA_LENGTH = 7
 
 /** Failed attempts so far, per pull request, at the head they failed at. */
 export type FailureCounts = Map<number, { readonly head: string | undefined; readonly count: number }>
@@ -168,7 +167,7 @@ export function afterReviews(
     }
     lastSeenHeads.set(outcome.number, head)
     givenUp.push(
-      `#${outcome.number}: giving up at ${head.slice(0, SHORT_SHA_LENGTH)} after ${count} failed reviews; bun run review-notify ${outcome.number} to retry`,
+      `#${outcome.number}: giving up at ${head.slice(0, SHORT_HEAD_LENGTH)} after ${count} failed reviews; bun run review-notify ${outcome.number} to retry`,
     )
   }
   return givenUp

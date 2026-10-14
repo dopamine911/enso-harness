@@ -1,6 +1,6 @@
 /**
- * The local review queue (#981): a directory with one empty file per pull request number waiting
- * for review. `review-notify.ts` adds one; `review-worker.ts` takes them, and removes each when its
+ * The local review queue (#981): a directory with one file per pull request number waiting for
+ * review, holding its notify's stamp. `review-notify.ts` adds one; `review-worker.ts` takes them, and removes each when its
  * review ends.
  *
  * WHY A DIRECTORY, NOT A SERVER. It needs no process to be running when a session notifies, it
