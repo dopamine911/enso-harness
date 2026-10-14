@@ -14,7 +14,6 @@
  * `src/generated/landing-features.json`. Links into the docs go through the site's base.
  */
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
-import { Image } from 'astro:assets'
 import context from '../assets/landing/captured/context-now-trend.png'
 import diff from '../assets/landing/captured/diff.png'
 import guardReceipt from '../assets/landing/captured/guards-receipt.png'
@@ -23,7 +22,8 @@ import forkPoint from '../assets/landing/captured/lineage-fork-point.png'
 import prompts from '../assets/landing/captured/prompts-manager.png'
 import questions from '../assets/landing/captured/questions-ask-user.png'
 import startSession from '../assets/landing/captured/sessions-start.png'
-import smile from '../assets/landing/enso-smile.png'
+import Closing from '../components/Closing.astro'
+import Pairs from '../components/Pairs.astro'
 import Shot from '../components/Shot.astro'
 import landingFeatureGroups from '../generated/landing-features.json'
 import '../styles/landing.css'
@@ -102,6 +102,9 @@ const outcomes = [
           Sometimes the agent misunderstood. Sometimes you left something important unsaid. Sometimes your own assumption was
           wrong. Enso gives you somewhere to look when the result and the intent part ways.
         </p>
+        <nav class="chapter-links" aria-label="Where Enso came from">
+          <a href={`${base}/origin/`}>Where Enso came from →</a>
+        </nav>
       </div>
     </section>
 
@@ -291,16 +294,7 @@ const outcomes = [
             improve.
           </div>
         </div>
-        <div class="factory-list">
-          {
-            factory.map(([name, question]) => (
-              <div class="factory-item">
-                <span>{name}</span>
-                <strong>{question}</strong>
-              </div>
-            ))
-          }
-        </div>
+        <Pairs rows={factory} />
       </div>
     </section>
 
@@ -432,17 +426,15 @@ const outcomes = [
       </div>
     </section>
 
-    <div class="smile-divider"><Image class="enso-smile" src={smile} alt="" width={54} height={54} /></div>
-    <hr class="rule" />
-    <section class="final">
-      <Image class="enso-smile" src={smile} alt="" width={74} height={74} />
+    <Closing>
       <h2>I check your work.<br />You check mine.<br />The system keeps the receipts.</h2>
       <p>Enso is for developers who want capable agents to do real work without making the process disappear.</p>
       <div class="hero-actions">
         <a class="button primary" href={github}>View on GitHub</a>
         <a class="button" href={`${base}/features/`}>Read the docs</a>
+        <a class="button" href={`${base}/origin/`}>Where it came from</a>
       </div>
-    </section>
+    </Closing>
   </div>
 
   <div class="landing-lightbox" role="dialog" aria-modal="true" aria-label="Expanded product screenshot" data-lightbox>

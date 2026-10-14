@@ -1,0 +1,309 @@
+---
+/**
+ * Where Enso came from (#574): the investigation that produced it, told as one story rather than a
+ * list of projects. It wears the landing's design (`src/styles/landing.css`) so the two read as
+ * one site; the few shapes only this page has live in `src/styles/origin.css`.
+ *
+ * The narrative, the project names and every outbound link are the owner's, from #574. Keep it
+ * that way: this is a first-person history, and nothing here should be added that the owner did
+ * not write down.
+ */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
+import Closing from '../components/Closing.astro'
+import Pairs from '../components/Pairs.astro'
+import SectionHead from '../components/SectionHead.astro'
+import '../styles/landing.css'
+import '../styles/origin.css'
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+const github = 'https://github.com/dopamine911/zen-harness-foundation'
+
+const trail = [
+  {
+    name: 'ArgusForge',
+    theme: 'Autonomy',
+    href: 'https://www.viaanix.com/ai/argusforge',
+    question: 'How much of the software-development process can agents own?',
+    found:
+      'Pushing toward substantial autonomy turned agent reliability into an engineering problem rather than an abstract concern.',
+    lives: 'Agents should have meaningful autonomy. The answer is not reducing them to autocomplete.',
+  },
+  {
+    name: 'flaky-tests',
+    theme: 'Evidence across time',
+    href: 'https://github.com/brewpirate/flaky-tests',
+    question: 'What do you do when the current observation looks healthy but the system is intermittently broken?',
+    found:
+      'It mechanically captures failures across CI runs, persists them, detects new intermittent patterns and produces structured investigation material for an agent.',
+    lives:
+      'A single snapshot can lie. Durable receipts across executions make intermittent behavior investigable. Time and trajectory are part of the evidence.',
+  },
+  {
+    name: 'Claude Code System Prompt Time Machine',
+    theme: 'Harness visibility',
+    href: 'https://github.com/brewpirate/cc-sys-prompt-time-machine',
+    question: 'What is actually shaping agent behavior beneath the apparent model interface?',
+    lives: 'The harness is part of the agent system. It cannot be treated as an invisible implementation detail.',
+  },
+  {
+    name: 'ACME Frontier AI',
+    theme: 'Context, memory, posture, verification',
+    href: 'https://github.com/brewpirate/acme-frontier-ai/tree/main/catalog',
+    found:
+      'Representative experiments: Total Recall, Field Notes, Context Refresh, The Craft, checking, reviewer and test-quality skills, and hooks that restore context or make sure canonical instructions actually enter it.',
+    lives:
+      'Context is state. Memory needs provenance and currency. Explanations are claims, not evidence. Human and agent should challenge each other, and verification needs receipts.',
+  },
+  {
+    name: 'Slop Factory',
+    theme: 'Physical gates',
+    href: 'https://github.com/vx-daniel/slop-factory/tree/main/examples/node-npm',
+    question:
+      'What happens when important expectations stop being instructions and become properties the environment mechanically enforces?',
+    lives: "Where a boundary can be enforced mechanically, don't depend on the agent remembering prose.",
+  },
+  {
+    name: 'Magpie',
+    theme: 'Telemetry and observation',
+    href: 'https://github.com/brewpirate/magpie-cc',
+    question: 'What are the agents actually doing?',
+    found:
+      'It independently ingests Claude Code session JSONL, OTEL and hook activity, and builds a local command center around sessions, tool activity, latency, tasks, decisions, field notes and live state.',
+    lives:
+      'Independent telemetry and observability. And its limit pointed at Enso: reconstructing another harness from downstream artifacts is not the same as owning an observation and control boundary around execution.',
+  },
+] as const satisfies readonly { name: string; theme: string; href: string; question?: string; found?: string; lives: string }[]
+
+/** The layers as #574 draws them, in its order. */
+const layers = 'model · harness · prompt · context · memory · tools · filesystem · codebase · tests · telemetry · agent · human'.split(' · ')
+
+const loop = [
+  { step: 'Unexpected outcome', meaning: 'The result is not what you meant.' },
+  { step: 'Locate the divergence', meaning: 'Find where the run stopped heading where you wanted.' },
+  {
+    step: 'Inspect the receipts',
+    meaning: 'Look at what the agent was given and what actually happened, not what anyone says happened.',
+  },
+  {
+    step: 'Choose a lever',
+    meaning: 'Pick the one condition you think caused it: a prompt, a piece of context, a tool, a gate.',
+  },
+  { step: 'Rewind or fork', meaning: 'Go back to the point before the divergence, without destroying the original path.' },
+  { step: 'Change the condition', meaning: 'Throw the lever you chose, and only that one.' },
+  { step: 'Rerun', meaning: 'Let the work happen again under the new condition.' },
+  { step: 'Compare the receipts', meaning: 'Did changing the lever change the outcome? Now you know, instead of guessing.' },
+]
+
+const primitives = [
+  ['Context inspection', 'exposes an input to behavior.'],
+  ['Telemetry', 'records what actually happened.'],
+  ['Filesystem and state history', 'preserves the trajectory.'],
+  ['Rewind', 'restores an earlier experimental state.'],
+  ['Fork', 'changes a condition without destroying the original path.'],
+  ['Gates', 'turn assumptions into enforced properties.'],
+  ['Scorecards and comparison', 'show whether changing the lever changed the outcome.'],
+] as const
+
+/** The system being debugged, as #574 draws it. */
+const stack = 'human → harness → model → context → tools → filesystem → program'.split(' → ')
+
+const receipts = [
+  'Tool output',
+  'File and filesystem state',
+  'Test behavior',
+  'Runtime observation',
+  'The context actually presented',
+  'Provenance: cwd, branch, commit',
+  'Independent records of what occurred',
+] as const
+
+const inheritance = [
+  ['ArgusForge', 'autonomy'],
+  ['flaky-tests', 'durable evidence across time and intermittent failure'],
+  ['Time Machine', 'harness visibility'],
+  ['Total Recall · Field Notes', 'context, continuity and history'],
+  ['The Craft', 'mutual verification'],
+  ['Slop Factory', 'physical gates'],
+  ['Magpie', 'telemetry and observability'],
+  ['Enso', 'the system where those ideas converge'],
+] as const
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Where Enso came from',
+    description:
+      'How Enso emerged from a series of experiments into agent autonomy, context, memory, verification, gates and telemetry, and why there was no magic bullet.',
+    template: 'splash',
+    tableOfContents: false,
+    prev: false,
+    next: false,
+    editUrl: false,
+  }}
+>
+  <div class="landing origin not-content">
+    <header class="origin-intro">
+      <h2>There wasn't a magic bullet.</h2>
+      <p class="section-intro">
+        Enso didn't start as a product idea. It started as an investigation into why agents behave the way they do, and it ran
+        through a string of experiments. Each one found part of the answer. None of them was the whole answer, and every one of
+        them lives on here.
+      </p>
+    </header>
+
+    <hr class="rule" />
+
+    <section class="section" id="start" aria-labelledby="start-title">
+      <SectionHead kicker="Where it started" title="Autonomy made reliability an engineering problem." id="start-title">
+        <p class="section-intro">
+          ArgusForge pushed toward substantial autonomy: how much of software development can agents own? Once agents were
+          doing real work, whether they did it reliably stopped being an abstract worry and became something I had to engineer
+          for.
+        </p>
+        <p class="section-intro">
+          That started a deeper question: what actually shapes agent behavior? The model, the harness, the system prompt, the
+          context, memory, tools, the codebase, the tests, telemetry, and the human. I went looking for the layer I could trust
+          and fix.
+        </p>
+      </SectionHead>
+    </section>
+
+    <section class="section proof" id="trail" aria-labelledby="trail-title">
+      <SectionHead kicker="The research trail" title="Each experiment asked one question." id="trail-title">
+        <p class="section-intro">
+          These weren't failures. They were hypotheses. Some assumptions didn't hold, but each one left a lesson or a mechanism
+          that survived. The projects are linked as receipts, if you want to dig deeper.
+        </p>
+      </SectionHead>
+      <ol class="trail">
+        {
+          trail.map((step) => (
+            <li class="trail-step">
+              <div class="trail-name">
+                <div class="kicker">{step.theme}</div>
+                <h3>
+                  <a href={step.href}>{step.name} ↗</a>
+                </h3>
+              </div>
+              <div class="trail-body">
+                {'question' in step && <p class="trail-question">{step.question}</p>}
+                {'found' in step && <p>{step.found}</p>}
+                <p class="trail-lives">
+                  <strong>What lives on.</strong> {step.lives}
+                </p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <section class="section" id="no-magic-bullet" aria-labelledby="layers-title">
+      <div class="layers-panel">
+        <div class="kicker">The layers I investigated</div>
+        <ul class="layers" aria-label="Layers that shape agent behavior">
+          {layers.map((layer) => <li>{layer}</li>)}
+        </ul>
+        <h2 id="layers-title">Every layer helped.<br />Every layer could also be wrong.</h2>
+        <p class="section-intro">
+          The investigation never turned up a single trusted layer. Every one of them mattered, and every one of them could
+          fail, including layers outside the developer's control. Behavior emerges across all of them together.
+        </p>
+        <p class="assume">Assume everything is broken.</p>
+        <p class="section-intro">
+          Not because everything is broken. Because no layer gets unconditional trust just because it normally works. So,
+          piece by piece, important expectations moved out of prose and into physical gates, independent telemetry, observable
+          state and evidence.
+        </p>
+      </div>
+    </section>
+
+    <section class="section proof" id="debugger" aria-labelledby="debugger-title">
+      <SectionHead
+        kicker="Debug the development process"
+        title="Enso is the missing debugger for developing with agents."
+        id="debugger-title"
+      >
+        <p class="section-intro">
+          If no single lever reliably fixes agent behavior, the job isn't finding the one right configuration. It's knowing
+          <strong>which lever to throw, when, and whether it changed the outcome.</strong> That's a debugging problem, and it
+          gets a debugger's loop.
+        </p>
+      </SectionHead>
+      <ol class="loop" aria-label="The debugger loop">
+        {
+          loop.map(({ step, meaning }, index) => (
+            <li>
+              <span class="loop-num" aria-hidden="true">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <strong>{step}</strong>
+              <span>{meaning}</span>
+            </li>
+          ))
+        }
+      </ol>
+      <p class="loop-return quiet">…and if it didn't, go back to the receipts and choose a different lever.</p>
+      <div class="debugger-grid">
+        <div>
+          <h3>Why these pieces belong together</h3>
+          <p>Each step of the loop needs something to stand on. That's what Enso's parts are for:</p>
+          <Pairs rows={primitives} />
+        </div>
+        <div>
+          <h3>Debugging the whole system, not just the program</h3>
+          <p>The thing being debugged is bigger than the code the agent writes:</p>
+          <ol class="stack" aria-label="The system being debugged, from human to program">
+            {stack.map((part) => <li>{part}</li>)}
+          </ol>
+          <p>
+            Developer tooling is strong near the program. Agent interfaces expose some of the conversation. Enso fills the
+            missing middle, so the human and the agent can experiment deliberately instead of prompting randomly.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="receipts" aria-labelledby="receipts-title">
+      <SectionHead kicker="Receipts are the common ground" title="A claim isn't a receipt." id="receipts-title">
+        <p class="section-intro">
+          A human saying the code is correct is a claim. An agent saying the code is correct is a claim. A receipt is evidence
+          outside the claim, and it belongs to neither participant. Both can inspect it.
+        </p>
+      </SectionHead>
+      <div class="receipts-grid">
+        <ul class="receipt-list" aria-label="Examples of receipts">
+          {receipts.map((receipt) => <li>{receipt}</li>)}
+        </ul>
+        <div class="receipts-copy">
+          <p class="assume">I check your work.<br />You check mine.</p>
+          <p>
+            Neither the human nor the agent is the trusted root. This isn't a human in the loop approving steps. It's mutual
+            verification, and receipts are what makes it possible.
+          </p>
+          <p class="assume">Equals, not superiors.</p>
+          <p>
+            Equals doesn't mean equal capabilities. It means neither participant substitutes authority for evidence.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section proof" id="inheritance" aria-labelledby="inheritance-title">
+      <SectionHead
+        kicker="Those experiments became Enso"
+        title="Enso isn't a replacement. It's where they converge."
+        id="inheritance-title"
+      />
+      <Pairs rows={inheritance} highlightLast />
+    </section>
+
+    <Closing>
+      <h2>None of these projects disappeared.<br />They live here now.</h2>
+      <div class="hero-actions">
+        <a class="button primary" href={`${base}/`}>See what Enso does</a>
+        <a class="button" href={github}>View on GitHub</a>
+      </div>
+    </Closing>
+  </div>
+</StarlightPage>
