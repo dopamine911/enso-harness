@@ -32,6 +32,8 @@ const LEGEND = Object.entries(STATUS_LETTER)
 
 /** The most files the Changes route sends (`git.ts`). */
 const MAX_CHANGED_FILES = numberIn('packages/core/src/git.ts', 'MAX_CHANGED_FILES')
+/** The largest file the Diff view reads whole to expand, either side, in KiB (`git.ts`). */
+const MAX_FILE_TEXT_KIB = numberIn('packages/core/src/git.ts', 'MAX_FILE_TEXT_BYTES') / 1024
 
 const PANEL: MarkTarget = { role: 'tabpanel', name: 'Diff' }
 /** pi's one edit, as the diff shows its new line. */
@@ -97,20 +99,22 @@ export const DIFF: FeatureSpec = {
   ],
   lookFor: [
     `pi changed one line of \`src/config.ts\`: \`Bun.env.DATABASE_URL\` became \`${EDITED_LINE}\`. The tree has that one file, and the diff pairs the old line with the new one, so an edit reads as one row, not a deletion and an addition.`,
-    "The row above the lines, `{unchangedLines}`, is git's summary of what it left out before this part of the file. git sends three lines of context around each change. The tab shows those and counts the rest, rather than reading the whole file.",
+    "The row above the lines, `{unchangedLines}`, is git's summary of what it left out before this part of the file. git sends three lines of context around each change, and the tab counts the rest. Click the count to show those lines, numbered on both sides, and click it again to hide them. The lines after the last change get a count of their own. The code is coloured by its language, in the theme's own colours.",
     'Hover the comparison line at the top to see that it is what this copy of the repository last saw of the remote. The status bar says the same in short: `{gitReadout}`.',
   ],
   limits: [
     'It never fetches, pushes or changes anything in git. "The last push" is what this copy last saw of the remote; run `git fetch` yourself to update it. How the baseline is chosen is in [Sessions and projects](./sessions-and-projects.md).',
     "It shows what differs, not who changed it. An edit you made before the session appears beside pi's.",
     `A binary file, one too large to send to the page, or one git did not produce a diff for is listed without a diff, and says why. Past ${MAX_CHANGED_FILES} files the list stops and says so.`,
-    "It can't expand the unchanged lines between two parts of a file. Run `git diff` for the whole file.",
+    `A file larger than ${MAX_FILE_TEXT_KIB} KiB keeps its unchanged lines as counts, marked \`too large to expand\`. A file that changed again after its diff was read is marked \`changed since this diff\` until the tab reads again. Run \`git diff\` on the file to see it whole.`,
+    'Only a file inside the project is read whole. A project inside a larger repository never reads a file outside its own folder.',
+    'Syntax colours cover common languages, such as TypeScript, JavaScript, Python, Go, Rust, shell, JSON, YAML, CSS, HTML and Markdown. A file in any other language is shown uncoloured, and so is a line longer than 1000 characters.',
   ],
   see: [
     {
       path: 'docs/reference/routes.md',
       label: 'Routes',
-      why: '`GET /api/threads/:threadId/changes`, and `GET /api/threads/:threadId/git` for the state the status bar shows',
+      why: '`GET /api/threads/:threadId/changes`, `GET /api/threads/:threadId/changes/file` for one file whole, and `GET /api/threads/:threadId/git` for the state the status bar shows',
     },
     {
       path: 'docs/features/sessions-and-projects.md',

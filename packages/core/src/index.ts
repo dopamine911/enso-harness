@@ -75,9 +75,11 @@ export {
   EnsoGitBaselineRule,
   EnsoGitFileChange,
   EnsoGitFileStatus,
+  EnsoGitFileText,
   EnsoGitOperation,
   EnsoGitRepository,
   EnsoGitState,
+  EnsoThreadChangedFile,
   EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'

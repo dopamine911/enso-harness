@@ -189,6 +189,16 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     "200 `EnsoThreadChanges` JSON — git's state in the thread's cwd and every file that differs from its last-push baseline (#452): unpushed commits, staged and unstaged edits, deletions, renames and untracked files, each with its unified diff unless binary or too large; `truncated` past 500 files. A thread whose tree is a copy (#650) answers its copy's files changed since the copy was made, read from its snapshot store, with `copy` naming the project and `base`. A diff git cannot produce, or a copy's store that cannot be read, reads as `unavailable`. Read-only, no fetch",
     GIT_READ_ERRORS,
   ),
+  THREAD_CHANGED_FILE_ROUTE: threadRead(
+    'respondWithChangedFile',
+    "200 `EnsoThreadChangedFile` JSON (#461) — one changed file whole, both sides: `oldText` at the baseline commit (a rename's at `oldPath`; a copy's at its `base`, from its store) read as stored, so no textconv or filter runs, and `newText` in the work tree, never through a symbolic link and only for a file the changes would list (an ignored one is not read). Each side is `text`, `none`, `too-large` past 512 KiB with its `bytes`, `binary`, or `unavailable` with why. What the Diff view expands the unchanged lines between hunks from, and highlights. Read-only",
+    "400 malformed thread id, no `path`, or a path (either) that is not a file under the repository's `scope` — absolute, with an empty, `.` or `..` segment, or outside the project's directory (#456); 403 untrusted origin; 404 no session, or its project is no longer served; 409 git could not answer, or the cwd is in no repository and the tree is no copy; 500 handler failure",
+    {
+      path: '/api/threads/:threadId/changes/file',
+      input:
+        'path: `threadId`; query: `path` (the file now, from the repository root), optional `oldPath` (a rename or copy’s path at the baseline)',
+    },
+  ),
   THREAD_PAGES_ROUTE: threadRead(
     'respondWithThreadPages',
     "200 `EnsoThreadPages` JSON (#619) — the directory the thread works in (its tree, #551), the HTML files at its top two levels, at most 50 (`truncated` past them; `.git` and `node_modules` are not walked), and, once there is a page, `previewOrigin`: the thread's preview, an origin of its own (#713) — a loopback listener started on that first read, serving the tree at `/`, GET and HEAD only, to a loopback `Host` only, files at most 10 MiB, typed by extension, `nosniff`, `no-referrer`, `no-store`, nothing outside the tree (`..` or a symlink is a 404). Read-only",

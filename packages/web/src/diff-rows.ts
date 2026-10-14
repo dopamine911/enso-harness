@@ -10,6 +10,10 @@
  * ⚠ PAIRED THE WAY A READER PAIRS THEM. Inside a hunk, a run of removed lines followed by a run of
  * added lines is one edit: the Nth removed line sits beside the Nth added one, and the longer run
  * continues against an empty cell. A context line sits on both sides at its own two numbers.
+ *
+ * The unchanged lines git left out — before each hunk, and after the last — are runs numbered from
+ * the hunks themselves (`hiddenBefore`, `hiddenAfter`), shown from the file read whole (#461,
+ * `changed-file.ts`) and only while it agrees with the patch (`agreesWith`).
  */
 
 /** One line of a hunk: kept on both sides, removed from the old file, or added to the new one. */
@@ -120,12 +124,92 @@ export function splitRows(hunk: DiffHunk): SplitRow[] {
   return rows
 }
 
+/** Which file a number or a text is of: the old one, at the baseline, or the new one. */
+export type Side = 'old' | 'new'
+
+/**
+ * A run of unchanged lines git left out of the patch (#461): its first line's number on each side,
+ * and how many. The lines are the same on both sides; only their numbers differ.
+ */
+export interface HiddenRun {
+  readonly oldStart: number
+  readonly newStart: number
+  readonly count: number
+}
+
+/**
+ * A side of a hunk as line numbers: its first line and the one after its last. git numbers a side
+ * with no lines (`-2,0`) from the line BEFORE where they would be, so its first is the next one.
+ */
+function spanOf(start: number, count: number): { readonly first: number; readonly end: number } {
+  const first = count === 0 ? start + 1 : start
+  return { first, end: first + count }
+}
+
+/** A hunk's two sides as line numbers. */
+function spans(hunk: DiffHunk): Readonly<Record<Side, { readonly first: number; readonly end: number }>> {
+  const added = hunk.lines.filter((line) => line.kind === 'added').length
+  const removed = hunk.lines.filter((line) => line.kind === 'removed').length
+  return {
+    old: spanOf(hunk.oldStart, hunk.lines.length - added),
+    new: spanOf(hunk.newStart, hunk.lines.length - removed),
+  }
+}
+
 /**
  * The unchanged lines git left out before `hunk` — between the previous hunk (or the file's start)
- * and this one, on the old side. 0 when the hunks touch.
+ * and this one. A count of 0 when the hunks touch.
  */
-export function hiddenBefore(hunk: DiffHunk, previous: DiffHunk | undefined): number {
-  if (previous === undefined) return Math.max(0, hunk.oldStart - 1)
-  const previousEnd = previous.oldStart + previous.lines.filter((line) => line.kind !== 'added').length
-  return Math.max(0, hunk.oldStart - previousEnd)
+export function hiddenBefore(hunk: DiffHunk, previous: DiffHunk | undefined): HiddenRun {
+  const here = spans(hunk)
+  const after = previous === undefined ? { old: { end: 1 }, new: { end: 1 } } : spans(previous)
+  return { oldStart: after.old.end, newStart: after.new.end, count: Math.max(0, here.old.first - after.old.end) }
+}
+
+/** The unchanged lines after the last hunk, to the end of the file whose `lines` are `side`'s. */
+export function hiddenAfter(last: DiffHunk, lines: readonly string[], side: Side): HiddenRun {
+  const after = spans(last)
+  return { oldStart: after.old.end, newStart: after.new.end, count: Math.max(0, lines.length + 1 - after[side].end) }
+}
+
+/**
+ * A file's text as its lines: line N at index N − 1, and none in an empty file. A final newline ends
+ * the last line rather than opening another, and a line's `\r` is dropped — git's patch shows a
+ * CRLF file's lines without it when an attribute normalises them, and with it otherwise, so neither
+ * side keeps it to compare.
+ */
+export function linesOf(text: string): string[] {
+  if (text === '') return []
+  const lines = text.split('\n')
+  if (text.endsWith('\n')) lines.pop()
+  return lines.map((line) => line.replace(/\r$/, ''))
+}
+
+/**
+ * Whether `lines` are the file the hunks were cut from on `side`: every line the hunks show of
+ * that side is the file's line at its number. A file read after the patch, and changed between,
+ * is not — and its lines would be shown under the wrong numbers.
+ */
+export function agreesWith(hunks: readonly DiffHunk[], lines: readonly string[], side: Side): boolean {
+  return hunks.every((hunk) =>
+    hunk.lines.every((line) => {
+      const number = side === 'old' ? line.oldNumber : line.newNumber
+      return number === null || lines[number - 1] === line.text.replace(/\r$/, '')
+    }),
+  )
+}
+
+/** A hidden run's rows, each line on both sides at its two numbers, its text from `side`'s `lines`. */
+export function hiddenRows(run: HiddenRun, lines: readonly string[], side: Side): SplitRow[] {
+  const first = side === 'old' ? run.oldStart : run.newStart
+  return Array.from({ length: run.count }, (_, offset) => {
+    const line: DiffLine = {
+      kind: 'context',
+      text: lines[first + offset - 1] ?? '',
+      oldNumber: run.oldStart + offset,
+      newNumber: run.newStart + offset,
+      noNewline: false,
+    }
+    return { left: line, right: line }
+  })
 }
