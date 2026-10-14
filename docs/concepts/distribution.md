@@ -140,6 +140,22 @@ route fails at extension load until `packages/harness/extensions/guards/index.ts
 `scripts/enso.ts`, `scripts/dev.ts` and `scripts/link-vendor-packages.ts` also call it; they are the
 launchers and would be replaced, not ported.
 
+**Since #950** the five callers find their package by name instead:
+
+- `packages/core/src/paths.ts#installedPackageDir` finds the nearest ancestor whose `package.json`
+  has the package's name.
+- `packages/core/src/paths.ts#checkoutRootOfPackage` says whether that package is a workspace member
+  of an Enso checkout.
+- In a checkout every caller behaves as before. Installed:
+  - the guards' `harnessRoot` is the harness package;
+  - no root `.env` is judged;
+  - the bundle names `name@version (installed)`;
+  - the dev launchers skip the #421 checkout migration;
+  - `dev.ts` resolves the harness by name (`packages/core/src/paths.ts#resolvePackageDir`).
+
+A sixth dependency on the checkout turned up there: `startLauncher`'s #421 migration took the
+checkout root as well. It is now optional.
+
 ### 2. `@enso/core` is private and ships as TypeScript source
 
 `packages/core/package.json`: `"private": true`, `"main": "./src/index.ts"`, and its `exports` include

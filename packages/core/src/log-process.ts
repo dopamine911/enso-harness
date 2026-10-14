@@ -454,7 +454,8 @@ export function reportSessionMigration(log: EnsoLogger, sessions: SessionMigrati
  * @group Logging
  */
 export async function startLauncher(options: {
-  readonly repoRoot: string
+  /** The Enso checkout whose old `.enso/` is migrated (#421); `undefined` when installed, with nothing to migrate (#950). */
+  readonly repoRoot: string | undefined
   readonly environment: Readonly<Record<string, string | undefined>>
   /** The `process` field on this launcher's records: `server`, `web`. */
   readonly process: string
@@ -470,7 +471,8 @@ export async function startLauncher(options: {
   readonly dispose: () => Promise<void>
 }> {
   const home = ensoHome(options.environment)
-  const migration = migrateCheckoutEnsoOnLaunch(options.repoRoot, options.environment)
+  const migration =
+    options.repoRoot === undefined ? undefined : migrateCheckoutEnsoOnLaunch(options.repoRoot, options.environment)
   const logsDir = ensoLogsDir(home)
   const dispose = await configureProcessLogging({
     logsDir,
@@ -483,7 +485,7 @@ export async function startLauncher(options: {
   installLoggingShutdown(dispose, options.beforeStop)
   const [layer, ...subcategory] = options.logger
   const log = ensoLogger(layer, ...subcategory)
-  reportHomeMigration(log, migration)
+  if (migration !== undefined) reportHomeMigration(log, migration)
   // The sessions pi filed by cwd move into their project folders (#552), after the `.enso` move
   // above put the agent dir where it now lives.
   const projectsDir = ensoProjectsDir(home)

@@ -145,7 +145,8 @@ export interface GuardDependencies {
    * The harness's own root — one of the places a search over a directory above it is refused for
    * when it holds a credential location (#160 §4, `CredentialPlaces`). Since #421 its `.enso/` is
    * migrated into `ENSO_HOME` (in home, so always a place); what the migration leaves behind — a
-   * login `ENSO_HOME` already had — is still here, and still refused.
+   * login `ENSO_HOME` already had — is still here, and still refused. Installed rather than checked
+   * out (#950), it is the harness package's own directory: there is no checkout, and so no `.enso/`.
    */
   harnessRoot: string
   /** Whether an incident halts, and the risk thresholds — read at every `session_start` (#466). */
