@@ -19,7 +19,7 @@ import { reloadKeepingDrafts } from '../page-reload.ts'
 import { ThreadPane } from '../thread-pane.tsx'
 import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
-import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
+import { createScriptedFetch, requestedUrl, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 import { waitUntil } from './wait-until.ts'
 
 // ⚠ Loaded after the DOM, as every mounting file does (`dom-environment.ts` says why).
@@ -95,6 +95,16 @@ function shippedFaults(): Array<{ page: string; properties: Record<string, unkno
     batch.records
       .filter((record) => record.logger === 'enso.browser.page')
       .map((record) => ({ page: batch.page, properties: record.properties })),
+  )
+}
+
+/** Every shipped line of one logger, as the server would get it. */
+function shippedLines(logger: string): Array<{ level: string; message: string; properties: Record<string, unknown> }> {
+  shipper?.flush()
+  return shipped.flatMap((batch) =>
+    batch.records
+      .filter((record) => record.logger === logger)
+      .map(({ level, message, properties }) => ({ level, message, properties })),
   )
 }
 
@@ -175,6 +185,62 @@ test('a listing that moves with the page applying as it goes raises nothing', as
   expect(banner(container)).toBeNull()
 })
 
+test('⚠ a listing read slower than the slack, straddling the run’s last change the page applied at once, raises nothing', async () => {
+  const rows: EnsoStoredThread[] = []
+  const server = createScriptedFetch({ storedThreads: rows })
+  const readStarted: Array<() => void> = []
+  // The server answers as of the request, and the answer takes longer than `applySlackMs` to arrive.
+  const slow: typeof fetch = Object.assign(
+    async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      if (!requestedUrl(input).endsWith('/api/stored-threads')) return server.fetch(input, init)
+      const answer = await server.fetch(input, init)
+      for (const started of readStarted.splice(0)) started()
+      await sleep(150)
+      return answer
+    },
+    { preconnect: server.fetch.preconnect },
+  )
+  const { container, stores } = await mountPage({ ...server, fetch: slow })
+  rows.push(listed(stores.threadId, 2, true))
+  await act(() => sleep(400))
+  // While a read is out, the run's last change lands on the server and the page applies it.
+  const { promise: inFlight, resolve } = Promise.withResolvers<void>()
+  readStarted.push(resolve)
+  await inFlight
+  await act(async () => {
+    rows[0] = listed(stores.threadId, 3, false)
+    server.frame({ type: 'status', live: true, busy: false, generation: 1 })
+    await tick()
+  })
+  // Then the thread is quiet, past `staleMs` and several reads.
+  await act(() => sleep(800))
+  expect(pageFault.get()).toBeUndefined()
+  expect(banner(container)).toBeNull()
+})
+
+test('a check whose reads fail says so once, and once more when they succeed again', async () => {
+  const rows: EnsoStoredThread[] = []
+  const server = createScriptedFetch({ storedThreads: rows })
+  let failing = true
+  const flaky: typeof fetch = Object.assign(
+    (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+      failing && requestedUrl(input).endsWith('/api/stored-threads')
+        ? Promise.resolve(new Response('the listing broke', { status: 503 }))
+        : server.fetch(input, init),
+    { preconnect: server.fetch.preconnect },
+  )
+  const { stores } = await mountPage({ ...server, fetch: flaky })
+  rows.push(listed(stores.threadId, 2, false))
+  await act(() => sleep(200))
+  failing = false
+  await act(() => sleep(100))
+  expect(shippedLines('enso.browser.page.check').map(({ level, message }) => [level, message])).toEqual([
+    ['warning', expect.stringContaining('the server check cannot read the listing')],
+    ['info', 'the server check reads the listing again'],
+  ])
+  expect(pageFault.get()).toBeUndefined()
+})
+
 function Throws(): React.ReactNode {
   throw new Error('a part this page cannot draw')
 }
@@ -250,6 +316,25 @@ test('an unhandled rejection and an uncaught error each leave a line naming the 
   ])
 })
 
+test('an error event with no error behind it — another origin’s "Script error." — is logged, and raises no banner', async () => {
+  const container = await mount(<PageFaultBanner />)
+  const unwatch = watchPageFaults(window, () => 't-screen')
+  await act(async () => {
+    window.dispatchEvent(new ErrorEvent('error', { message: 'Script error.' }))
+    await tick()
+  })
+  unwatch()
+  expect(pageFault.get()).toBeUndefined()
+  expect(banner(container)).toBeNull()
+  expect(shippedLines('enso.browser.page')).toEqual([
+    {
+      level: 'warning',
+      message: expect.stringContaining('not from this page'),
+      properties: expect.objectContaining({ error: 'Script error.' }),
+    },
+  ])
+})
+
 test('⚠ a chunk handed to the client and never taken back is a stall: the banner, and a line naming the chunk and the thread', async () => {
   const container = await mount(<PageFaultBanner />)
   const server = createScriptedFetch()
@@ -295,6 +380,54 @@ test('a client that throws on a chunk stops the subscription and raises the bann
     properties: expect.objectContaining({ trigger: 'stalled', threadId: 't-throw' }),
   })
   connection.close()
+})
+
+test('⚠ a follow the server closed applies nothing: appliedAt is undefined once the client has taken its end', async () => {
+  const server = createScriptedFetch()
+  const connection = createFollowConnection({ threadId: 't-closed', fetch: server.fetch })
+  const chunks = connection.subscribe()[Symbol.asyncIterator]()
+  const first = chunks.next()
+  await tick()
+  server.frame({ ...SNAPSHOT_IDLE, threadId: 't-closed' })
+  await first
+  expect(connection.appliedAt()).toBeNumber()
+  server.closeFollow()
+  // The client takes every chunk to the follow's end, and asks once more.
+  let taken = await chunks.next()
+  while (taken.done !== true) taken = await chunks.next()
+  expect(connection.appliedAt()).toBeUndefined()
+  connection.close()
+})
+
+test('a frame off the wire schema applies nothing: appliedAt does not move for it', async () => {
+  const server = createScriptedFetch()
+  const connection = createFollowConnection({ threadId: 't-skew', fetch: server.fetch })
+  // The client takes every chunk as it comes, as TanStack does.
+  const draining = (async () => {
+    for await (const _chunk of connection.subscribe()) await Promise.resolve()
+  })()
+  await tick()
+  server.frame({ ...SNAPSHOT_IDLE, threadId: 't-skew' })
+  await tick()
+  const applied = connection.appliedAt()
+  expect(applied).toBeNumber()
+  await sleep(30)
+  // A newer server's frame this page cannot read: dropped, as a version skew drops it.
+  server.frame(JSON.parse('{"type":"from-a-newer-server","threadId":"t-skew"}'))
+  await tick()
+  expect(connection.appliedAt()).toBe(applied)
+  connection.close()
+  await draining.catch(() => undefined)
+})
+
+test('Reload’s kept drafts in a shape this page did not write open no composer with them', async () => {
+  globalThis.sessionStorage.setItem('enso.reload-drafts', JSON.stringify({ 't-odd': { text: 42, files: 'none' } }))
+  const server = createScriptedFetch()
+  globalThis.fetch = server.fetch
+  const stores = mintThread(server.fetch, undefined, 't-odd')
+  stores.launch.set(false)
+  const container = await mount(<ThreadPane threadId={stores.threadId} active debugOpen={false} />)
+  expect(container.querySelector<HTMLTextAreaElement>('textarea[name="message"]')?.value).toBe('')
 })
 
 test('⚠ Reload keeps the composer’s draft: the thread’s composer opens holding it after the reload', async () => {

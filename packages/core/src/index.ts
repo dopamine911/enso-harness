@@ -64,6 +64,7 @@ export {
   EnsoFollowSnapshot,
   EnsoFollowStatus,
   EnsoImageMimeType,
+  EnsoKeptDrafts,
   EnsoPromptBody,
   EnsoPromptImage,
   EnsoPromptReceipt,

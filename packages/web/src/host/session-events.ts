@@ -12,8 +12,9 @@ import type { RuntimeEvent } from './runtime-event.ts'
  *
  * What the wire shape drops, and why (pi's own rationale, `json-event.d.ts`): every
  * `message_update` carries a CUMULATIVE `partial` snapshot of the assistant message. On a
- * pipe that is bandwidth; in-process it is a reference — but the mapper reads `usage` and
- * `assistantMessageEvent` off the top level, so the shape is what matters, not the cost.
+ * pipe that is bandwidth; in-process it is a reference — but the mapper reads `assistantMessageEvent`
+ * off the top level (and drops the `usage` pi puts beside it, #915), so the shape is what matters,
+ * not the cost.
  * `message_start` supplies the initial message and `message_end` the final one, so nothing
  * is lost. `toolcall_start` keeps the tool id and name hoisted off the partial, because those
  * are constant-size and the mapper's tool-call observation needs them.
