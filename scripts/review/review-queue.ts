@@ -8,7 +8,7 @@
  * request has when its turn comes.
  */
 
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -24,10 +24,18 @@ export function enqueueReview(number: number, directory: string = REVIEW_QUEUE_D
   writeFileSync(join(directory, String(number)), '')
 }
 
+/** The queued pull request numbers, lowest first, left on the queue. Anything else in the directory is ignored. */
+export function queuedReviews(directory: string = REVIEW_QUEUE_DIRECTORY): number[] {
+  if (!existsSync(directory)) return []
+  return readdirSync(directory)
+    .filter((entryName) => QUEUE_ENTRY.test(entryName))
+    .map(Number)
+    .toSorted((first, second) => first - second)
+}
+
 /** Takes every queued pull request number off the queue, lowest first. Anything else in the directory is left alone. */
 export function drainReviewQueue(directory: string = REVIEW_QUEUE_DIRECTORY): number[] {
-  mkdirSync(directory, { recursive: true })
-  const entries = readdirSync(directory).filter((entryName) => QUEUE_ENTRY.test(entryName))
-  for (const queueEntry of entries) rmSync(join(directory, queueEntry), { force: true })
-  return entries.map(Number).toSorted((first, second) => first - second)
+  const queued = queuedReviews(directory)
+  for (const number of queued) rmSync(join(directory, String(number)), { force: true })
+  return queued
 }

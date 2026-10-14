@@ -79,9 +79,10 @@ about 10 seconds; a busy one finishes the review in progress first. Each review 
   But a push made **while the worker is stopped** is reviewed only if it was notified: the queue
   survives a restart, and the worker starts from a baseline of the current heads, which counts an
   un-notified push as already seen. When in doubt, notify again; a head already reviewed is skipped.
-- **To check the worker is running:** `cat ~/.cache/enso-review/worker.lock` names its pid, and
-  `kill -0 <pid>` succeeds. If no worker is running, **tell the owner; do not start one.** There is one
-  per machine, run from `../zhf-review-worker`. The review happens when it starts.
+- **To see what the worker is doing:** `bun run review-status`. It shows whether a worker is running
+  (its pid, uptime and the checkout and commit it runs from), the queue, the review in progress with
+  its elapsed time and last tool call, and the worker's recent log. If no worker is running, **tell the
+  owner; do not start one.** There is one per machine. The review happens when it starts.
 - **Do not run `bun run review <n>` yourself** unless the owner asks. It posts as the bot.
 
 ## 5. Read the review

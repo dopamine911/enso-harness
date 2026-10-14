@@ -26,11 +26,12 @@
  * One worker per machine: a second one refuses to start while the first's lock names a live process.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { reviewPullRequest } from './review-pr.ts'
 import { drainReviewQueue } from './review-queue.ts'
+import { WORKER_LOG } from './review-status.ts'
 
 const WORKER_LOCK = join(homedir(), '.cache', 'enso-review', 'worker.lock')
 const DEFAULT_POLL_SECONDS = 180
@@ -69,8 +70,11 @@ function openPullRequests(): OpenPullRequest[] {
   return JSON.parse(answer.stdout.toString()) as OpenPullRequest[]
 }
 
+/** A line on the terminal, and in `worker.log`, which `review-status` reads, so a worker run in the background is not silent. */
 function log(line: string): void {
-  process.stdout.write(`${new Date().toISOString()} ${line}\n`)
+  const stamped = `${new Date().toISOString()} ${line}\n`
+  process.stdout.write(stamped)
+  appendFileSync(WORKER_LOG, stamped)
 }
 
 /** Takes the worker lock, or answers the pid of the live worker that holds it. */
