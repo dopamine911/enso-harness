@@ -6,6 +6,7 @@ import {
   ensoLogger,
   isPublicIpAddress,
   readWebFetchHostInput,
+  TAVILY_API_KEY_VARIABLE,
   TavilyKeyChange,
   WEB_FETCH_TOOL_NAME,
   WEB_FETCH_USER_AGENT,
@@ -47,14 +48,13 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * off the `request.method === … && url === …` conditions below (#174): keep that spelling.
  *
  * ⚠ The page is the only writer here, guarded like every route (#717, `fromTrustedOrigin`); the
- * agent still cannot write the file (the guards refuse writes into `ENSO_HOME`). Only
- * `webFetch.allowedHosts` changes (`@enso/core/web-fetch-allowlist`).
+ * agent still cannot write the files (the guards refuse writes into `ENSO_HOME`). Only
+ * `webFetch.allowedHosts` (`@enso/core/web-fetch-allowlist`), `webSearch.backend` and
+ * `webSearch.tavily.*` (`@enso/core/web-search-settings`) change in `config.json`, and only the
+ * `TAVILY_API_KEY` line of `secrets.env` (`writeSecret`).
  */
 
 const log = ensoLogger('server', 'http')
-
-/** The secret web_search's Tavily fallback reads per call (`TAVILY_API_KEY_VARIABLE` in the harness). */
-const TAVILY_KEY_NAME = 'TAVILY_API_KEY'
 
 /** The check's whole deadline: one request, never held open by a slow host. */
 const HOST_CHECK_TIMEOUT_MS = 10_000
@@ -214,10 +214,13 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
         excludeDomains: config.webSearch?.tavily?.excludeDomains ?? [],
       }))
     let tavilyKeySet = false
+    let secretsUnreadable: string | undefined
     try {
-      tavilyKeySet = (readDotenvFile(secretsPath).get(TAVILY_KEY_NAME) ?? '') !== ''
+      tavilyKeySet = (readDotenvFile(secretsPath).get(TAVILY_API_KEY_VARIABLE) ?? '') !== ''
     } catch (error: unknown) {
-      log.warn('secrets file unreadable for Settings: {error}', { error: String(error), path: secretsPath })
+      // Unknown, not "no key": the page says the file can't be read rather than that there is no fallback.
+      secretsUnreadable = String(error)
+      log.warn('secrets file unreadable for Settings: {error}', { error: secretsUnreadable, path: secretsPath })
     }
     return {
       path,
@@ -227,6 +230,7 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
       ...(read.kind === 'unreadable' ? { unreadable: read.reason } : {}),
       secretsPath,
       tavilyKeySet,
+      ...(secretsUnreadable === undefined ? {} : { secretsUnreadable }),
       projects: projectSearch,
       staleThreads: stillOn(onOldSearch),
     }
@@ -261,10 +265,11 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
       readonly body: { readonly schema: Schema; readonly name: string; readonly requirement: string }
       /** What changed, for the log: "web_fetch allowlist". */
       readonly what: string
-      readonly write: (body: Static<Schema>) => {
-        readonly kind: 'written' | 'unchanged' | 'refused'
-        readonly reason?: string
-      }
+      /** The file the change is written to, for the log. */
+      readonly path: string
+      readonly write: (
+        body: Static<Schema>,
+      ) => { readonly kind: 'written' | 'unchanged' } | { readonly kind: 'refused'; readonly reason: string }
       readonly onWritten: (live: Map<string, HostedThread>) => void
       readonly answer: () => unknown
     },
@@ -273,12 +278,12 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
     if (body === undefined) return
     const written = change.write(body)
     if (written.kind === 'written') {
-      log.info('{what} changed from Settings: {change}', { what: change.what, change: body })
+      log.info('{what} changed from Settings: {change}', { what: change.what, change: body, path: change.path })
       change.onWritten(new Map(threads.list().map((thread) => [thread.threadId, thread.hosted])))
     }
     if (written.kind !== 'refused') return answerJson(response, change.answer())
     log.warn('{what} change refused: {reason}', { what: change.what, reason: written.reason })
-    refuseWith(response, { status: 422, reason: written.reason ?? 'refused' })
+    refuseWith(response, { status: 422, reason: written.reason })
   }
 
   /** `POST /api/settings/web-fetch`: `{ add }` or `{ remove }`, answered with the list as it now stands. */
@@ -290,6 +295,7 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
         requirement: 'an allowlist change takes exactly `add` or `remove`, a host name',
       },
       what: 'web_fetch allowlist',
+      path,
       write: (change) => changeUserAllowedHosts(path, change),
       onWritten: (live) => {
         onOldList = live
@@ -327,6 +333,7 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
           'a web search change takes exactly `backend` (`model` or `deepseek`), or `list` (`includeDomains` or `excludeDomains`) with `add` or `remove`, a domain',
       },
       what: 'web_search settings',
+      path: paths.config,
       write: (change) => changeUserWebSearch(paths.config, change),
       onWritten: (live) => {
         onOldSearch = live
@@ -361,7 +368,7 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
       },
     })
     if (change === undefined) return
-    const written = writeSecret(paths.secrets, TAVILY_KEY_NAME, 'set' in change ? change.set : undefined)
+    const written = writeSecret(paths.secrets, TAVILY_API_KEY_VARIABLE, 'set' in change ? change.set : undefined)
     if (written.kind === 'refused') {
       log.warn('Tavily key change refused: {reason}', { reason: written.reason })
       return refuseWith(response, { status: 422, reason: written.reason })

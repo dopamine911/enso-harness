@@ -81,6 +81,7 @@ export function WebSearchSettingsEditor({ fetch, stored, onOpenProject }: WebToo
       <TavilyKeyField
         secretsPath={settings.secretsPath}
         keySet={settings.tavilyKeySet}
+        unreadable={settings.secretsUnreadable}
         busy={writing}
         onChange={(body) => post(body, '/api/settings/web-search/tavily-key')}
       />
@@ -182,15 +183,18 @@ function BackendField({ path, backend, busy, onChoose }: BackendFieldProps): Rea
 interface TavilyKeyFieldProps {
   readonly secretsPath: string
   readonly keySet: boolean
+  /** Why the secrets file can't be read: then whether a key is set is unknown, not "no key". */
+  readonly unreadable: string | undefined
   readonly busy: boolean
   readonly onChange: (body: TavilyKeyChange) => Promise<boolean>
 }
 
 /** The Tavily key: whether one is set, a field to set or replace it, and Remove. The key itself is never shown. */
-function TavilyKeyField({ secretsPath, keySet, busy, onChange }: TavilyKeyFieldProps): React.ReactNode {
+function TavilyKeyField({ secretsPath, keySet, unreadable, busy, onChange }: TavilyKeyFieldProps): React.ReactNode {
   const [typed, setTyped] = useState('')
   async function setKey(): Promise<void> {
-    if (await onChange({ set: typed })) setTyped('')
+    // Trimmed: a pasted key's stray space would be refused as "no spaces", which points nowhere.
+    if (await onChange({ set: typed.trim() })) setTyped('')
   }
   return (
     <form
@@ -206,10 +210,20 @@ function TavilyKeyField({ secretsPath, keySet, busy, onChange }: TavilyKeyFieldP
       <span className="font-mono text-meta font-semibold tracking-wider text-muted-foreground uppercase">
         <span className="normal-case">TAVILY_API_KEY · {secretsPath}</span>
       </span>
-      <p className="flex items-center gap-2 text-sm" aria-live="polite">
-        <KeyRoundIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-        {keySet ? 'A key is set: Tavily answers when the backend can’t.' : 'No key: there is no Tavily fallback.'}
-      </p>
+      {unreadable === undefined ? (
+        <p className="flex items-center gap-2 text-sm" aria-live="polite">
+          <KeyRoundIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+          {keySet ? 'A key is set: Tavily answers when the backend can’t.' : 'No key: there is no Tavily fallback.'}
+        </p>
+      ) : (
+        <p role="alert" className="flex items-start gap-2 text-sm text-refuse">
+          <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {secretsPath} can't be read ({unreadable}), so whether a key is set is unknown, and web_search can't read
+            one either until it is fixed by hand.
+          </span>
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <input
           id="settings-tavily-key"

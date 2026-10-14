@@ -58,6 +58,7 @@ async function mountSection(options: {
   readonly check?: WebFetchHostCheck
   readonly stored?: WebToolsSectionProps['stored']
   readonly unreadable?: string
+  readonly secretsUnreadable?: string
 }): Promise<Mounted> {
   let hosts = options.hosts ?? []
   const posted: string[] = []
@@ -77,6 +78,7 @@ async function mountSection(options: {
     tavilyKeySet: false,
     projects: [],
     staleThreads: [],
+    ...(options.secretsUnreadable === undefined ? {} : { secretsUnreadable: options.secretsUnreadable }),
   }
   const fetchImpl: FetchLike = async (url, init) => {
     const searching = url.startsWith('/api/settings/web-search')
@@ -271,4 +273,22 @@ test('a user file that can’t be read is said so, with its path and the reason 
   expect(mounted.root.querySelector('[role="alert"]')?.textContent).toContain(
     `${PATH} can't be read (config.json is not valid JSON), so nothing is fetchable and nothing is written here`,
   )
+})
+
+test('a secrets file that can’t be read is said so, never as "No key" (#978 review)', async () => {
+  const mounted = await mountSection({ secretsUnreadable: 'Error: EACCES: permission denied' })
+  await eventually(() =>
+    expect(mounted.root.textContent).toContain(
+      "/home/person/.enso/secrets.env can't be read (Error: EACCES: permission denied), so whether a key is set is unknown",
+    ),
+  )
+  expect(mounted.root.textContent).not.toContain('No key')
+})
+
+test('a pasted key is sent trimmed: a stray space is not the key’s (#978 review)', async () => {
+  const mounted = await mountSection({})
+  await eventually(() => expect(mounted.root.textContent).toContain('No key: there is no Tavily fallback.'))
+  await type(mounted, '  tvly-dev-0123456789abcdef \n', 'settings-tavily-key')
+  await submit(mounted, 'settings-tavily-key')
+  expect(mounted.posted).toEqual(['/api/settings/web-search/tavily-key {"set":"tvly-dev-0123456789abcdef"}'])
 })

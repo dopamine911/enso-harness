@@ -47,11 +47,7 @@ export {
 } from './web-search/providers/deepseek.ts'
 export { runGoogleProviderSearch } from './web-search/providers/google.ts'
 export { runOpenAiProviderSearch } from './web-search/providers/openai.ts'
-export {
-  runTavilyProviderSearch,
-  TAVILY_API_KEY_VARIABLE,
-  type TavilySearchRequest,
-} from './web-search/providers/tavily.ts'
+export { runTavilyProviderSearch, type TavilySearchRequest } from './web-search/providers/tavily.ts'
 export {
   type FetchUrlInit,
   type ModelSearchRequest,

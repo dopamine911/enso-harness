@@ -1271,8 +1271,32 @@ test('Searching round trip: the backend and a domain changed from the page, only
     ...JSON.parse(userText),
     webSearch: { backend: 'deepseek', tavily: { excludeDomains: ['spam.example'] } },
   })
+  // The record says which file changed (#978 review).
+  const changed = logs.records.find((record) => record.properties.what === 'web_search settings')
+  expect(changed?.properties.path).toBe(userPath)
   expect((await postSearch(url, '', { list: 'excludeDomains', add: 'https://spam.example/' })).status).toBe(422)
   expect((await postSearch(url, '', { backend: 'tavily' })).status).toBe(400)
+  // Back again over HTTP (#978 review): the domain removed, and `model` — the default — takes the key out.
+  await searchOf(await postSearch(url, '', { list: 'excludeDomains', remove: 'spam.example' }))
+  const back = await searchOf(await postSearch(url, '', { backend: 'model' }))
+  expect(back).toMatchObject({ backend: 'model', excludeDomains: [] })
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual({
+    ...JSON.parse(userText),
+    webSearch: { tavily: { excludeDomains: [] } },
+  })
+})
+
+test('a secrets file that can’t be read is said so: whether a key is set is unknown, not "no key" (#978 review)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  // A directory where the file should be: reading it fails.
+  const secretsPath = join(home, 'secrets.env')
+  mkdirSync(secretsPath)
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: secretsPath,
+  })
+  const read = await searchOf(await fetch(`${url}/api/settings/web-search`))
+  expect(read).toMatchObject({ tavilyKeySet: false, secretsUnreadable: expect.stringContaining('EISDIR') })
 })
 
 test('⚠ the Tavily key: set from the page, then in no answer and no log line — only whether one is set (#932)', async () => {

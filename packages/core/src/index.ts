@@ -567,6 +567,7 @@ export {
   WebToolsProject,
 } from './web-fetch.ts'
 export {
+  TAVILY_API_KEY_VARIABLE,
   TavilyKeyChange,
   WEB_SEARCH_TIMEOUT_MS,
   WEB_SEARCH_TOOL_NAME,

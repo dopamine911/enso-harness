@@ -120,6 +120,14 @@ export const WebSearchSettingsChange = Type.Union([
 export type WebSearchSettingsChange = Static<typeof WebSearchSettingsChange>
 
 /**
+ * The secret that arms web_search's Tavily fallback: read per call by the harness from
+ * `ENSO_HOME/secrets.env`, and set there by Settings (#932). One name for both, so neither can drift.
+ *
+ * @group Web tools
+ */
+export const TAVILY_API_KEY_VARIABLE = 'TAVILY_API_KEY'
+
+/**
  * The `TAVILY_API_KEY` change from Settings (#932): a key to set (or replace), or the key removed.
  * ⚠ The key travels this way only, once; nothing answers it back.
  *
@@ -164,7 +172,10 @@ export const WebSearchSettings = Type.Object({
   unreadable: Type.Optional(Type.String()),
   /** `ENSO_HOME/secrets.env`, where the key is kept. */
   secretsPath: Type.String(),
+  /** False when the secrets file holds no key — or could not be read, and then `secretsUnreadable` says why. */
   tavilyKeySet: Type.Boolean(),
+  /** Why the secrets file could not be read: whether a key is set is unknown, and none is read at call time either. */
+  secretsUnreadable: Type.Optional(Type.String()),
   projects: Type.Array(WebSearchProjectSettings),
   /** Thread ids still running on the settings as they were before the last change made here. */
   staleThreads: Type.Array(Type.String()),

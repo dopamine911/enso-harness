@@ -38,8 +38,8 @@
  * @module
  */
 
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { ensoSecretsPath, rootDotenvPath } from './paths.ts'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { ensoSecretsPath, replaceFileText, rootDotenvPath } from './paths.ts'
 
 /**
  * The words a secret-shaped name carries (whole, underscore-delimited, singular or plural), named
@@ -142,9 +142,10 @@ export type SecretWrite =
 
 /**
  * Set (`value`) or remove (`undefined`) one secret in the dotenv file at `path` — Settings' write
- * path (#932). Every other line keeps its text; the name's line is replaced where it stood, or
- * appended. The file is written owner-only beside the old one and renamed over it, and only once
- * `parseDotenv` reads the value back exactly.
+ * path (#932). Every other line keeps its text, and the file its line endings (CRLF stays CRLF);
+ * the name's line is replaced where it stood, or appended. The file is written owner-only, only
+ * once `parseDotenv` reads the value back exactly, through `replaceFileText`: a `secrets.env` kept
+ * as a symlink (a dotfiles or password-store setup) stays a link, and the file behind it changes.
  *
  * ⚠ The value is never in a reason: a refusal says what is wrong with its shape, not what it was.
  *
@@ -162,17 +163,16 @@ export function writeSecret(path: string, name: string, value: string | undefine
     return { kind: 'refused', reason: `${path} could not be read (${String(error)}); nothing was changed` }
   }
   if (parseDotenv(text).get(name) === value) return { kind: 'unchanged' }
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const lines = text.length === 0 ? [] : text.replace(/\r?\n$/, '').split(/\r?\n/)
   const named = lines.map((line) => parseDotenv(line).has(name))
   const at = named.indexOf(true)
   const kept = lines.filter((_line, index) => !named[index])
   if (value !== undefined) kept.splice(at === -1 ? kept.length : at, 0, `${name}=${value}`)
-  const after = kept.length === 0 ? '' : `${kept.join('\n')}\n`
+  const after = kept.length === 0 ? '' : `${kept.join(eol)}${eol}`
   if (parseDotenv(after).get(name) !== value)
     return { kind: 'refused', reason: `the file would not read the ${name} it was given back; nothing was changed` }
-  const staged = `${path}.${process.pid}.tmp`
-  writeFileSync(staged, after, { mode: 0o600 })
-  renameSync(staged, path)
+  replaceFileText(path, after, { mode: 0o600, forceMode: true })
   return { kind: 'written' }
 }
 

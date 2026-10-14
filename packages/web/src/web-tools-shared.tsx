@@ -16,6 +16,7 @@ import { describeFailedResponse } from './stored-threads.ts'
 /** What the section reads of a stored thread: its id, and the title it is named by. */
 type StoredTitle = Pick<EnsoStoredThread, 'threadId' | 'title'>
 
+/** What both Web tools groups are given by Settings: the page's `fetch`, the stored threads, and the way to a project. */
 export interface WebToolsSectionProps {
   readonly fetch?: FetchLike | undefined
   /** The stored listing: a thread still on the old settings is named by its title. */
@@ -27,10 +28,12 @@ export interface WebToolsSectionProps {
 /** The page's `fetch`, called as a function (a browser's refuses any `this` but the window). */
 const pageFetch: FetchLike = (input, init) => fetch(input, init)
 
+/** `body` POSTed to `url` as JSON through the page's `fetch` — every Web tools change goes this way. */
 export async function postJson(fetchNow: FetchLike, url: string, body: unknown): Promise<Response> {
   return fetchNow(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 }
 
+/** A settings answer as a group holds it: still loading, read (checked against its schema), or why it could not be. */
 export type SettingsRead<T> =
   | { readonly kind: 'loading' }
   | { readonly kind: 'read'; readonly value: T }
@@ -190,10 +193,7 @@ export function RemovableList({
   )
 }
 
-/**
- * Each trusted project's own settings, read only, under `heading` (#421): a card per project with
- * its name, its file and the way to its page, and what it sets (`render`). Nothing when none does.
- */
+/** What {@link TrustedProjects} draws, and how. */
 interface TrustedProjectsProps<Project extends WebToolsProject> {
   readonly heading: string
   readonly projects: readonly Project[]
@@ -203,6 +203,10 @@ interface TrustedProjectsProps<Project extends WebToolsProject> {
   readonly render: (project: Project) => React.ReactNode
 }
 
+/**
+ * Each trusted project's own settings, read only, under `heading` (#421): a card per project with
+ * its name, its file and the way to its page, and what it sets (`render`). Nothing when none does.
+ */
 export function TrustedProjects<Project extends WebToolsProject>(
   props: TrustedProjectsProps<Project>,
 ): React.ReactNode {
