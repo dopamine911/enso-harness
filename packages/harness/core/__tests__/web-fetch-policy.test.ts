@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test'
 import { WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
-import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from '../web-fetch-policy.ts'
+import {
+  isFetchableContentType,
+  isHostAllowed,
+  isHtmlContentType,
+  isPublicIpAddress,
+  parseWebFetchUrl,
+} from '../web-fetch-policy.ts'
 
 /**
  * web_fetch's pure policy (#54). Vectors are organised by EVASION DIMENSION (the #55
@@ -112,6 +118,15 @@ test('binary and absent content types are refused — absent fails closed', () =
   expect(isFetchableContentType('image/png')).toBe(false)
   expect(isFetchableContentType('application/pdf')).toBe(false)
   expect(isFetchableContentType(null)).toBe(false)
+})
+
+test('only text/html is converted to readable text — case and parameters ignored, other markup left as sent (#927)', () => {
+  expect(isHtmlContentType('text/html')).toBe(true)
+  expect(isHtmlContentType('Text/HTML; charset=utf-8')).toBe(true)
+  expect(isHtmlContentType('application/xhtml+xml')).toBe(false)
+  expect(isHtmlContentType('text/plain')).toBe(false)
+  expect(isHtmlContentType('text/markdown')).toBe(false)
+  expect(isHtmlContentType(null)).toBe(false)
 })
 
 // --- isPublicIpAddress: the address dimension ------------------------------------------

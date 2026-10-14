@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test'
-import { ENSO_CONFIG_FILENAME, parseEnsoConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
+import {
+  ENSO_CONFIG_FILENAME,
+  EXTERNAL_WEB_CONTENT_NOTICE,
+  parseEnsoConfig,
+  WEB_FETCH_MAX_RESPONSE_BYTES,
+  WEB_FETCH_TOOL_NAME,
+} from '@enso/core'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { SessionEnsoConfig } from '../../../core/index.ts'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
@@ -429,6 +435,40 @@ test('a non-2xx status is still returned — a 404 body is information', async (
   const text = await run(loaded, 'https://docs.example.com/missing')
   expect(text).toContain('HTTP 404')
   expect(text).toContain('not here')
+})
+
+// --- what the model reads of the body (#927) ------------------------------------------------
+
+test('an HTML page comes back as its readable text, the header naming the conversion and the raw size', async () => {
+  const page =
+    '<html><head><script>SCRIPT_SECRET()</script></head><body><nav>NAV-SECRET</nav>' +
+    `<main><h1>Guide</h1><p>Read <a href="/api/">the API</a>.</p>${'<span class="pad"></span>'.repeat(40)}</main></body></html>`
+  const loaded = loadWebFetch({
+    fetchUrl: async () => textResponse(page, { contentType: 'text/html; charset=utf-8' }),
+  })
+  const text = await run(loaded, 'https://docs.example.com/guide')
+  const readable = '# Guide\n\nRead the API <https://docs.example.com/api/>.'
+  const share = ((readable.length / page.length) * 100).toFixed(1)
+  expect(text).toBe(
+    `Fetched https://docs.example.com/guide — HTTP 200, text/html; charset=utf-8 → text ` +
+      `(${share}% of ${page.length.toLocaleString('en-US')} chars).\n\n` +
+      // The notice stays where it was: before the page's words, never after.
+      `${EXTERNAL_WEB_CONTENT_NOTICE}\n\n${readable}`,
+  )
+})
+
+test('⚠ a non-HTML text body is returned byte-identical — markup in plain text, markdown or JSON is not touched', async () => {
+  for (const [contentType, body] of [
+    ['text/plain', '<script>not stripped</script>\n  <nav>kept</nav>  &amp;\n'],
+    ['text/markdown; charset=utf-8', '# Title\n\n<div hidden>kept</div>\n'],
+    ['application/json', '{"html": "<p>kept</p>"}'],
+    ['application/xhtml+xml', '<html><body><nav>kept</nav></body></html>'],
+  ] as const) {
+    const loaded = loadWebFetch({ fetchUrl: async () => textResponse(body, { contentType }) })
+    expect(await run(loaded, 'https://docs.example.com/raw')).toBe(
+      `Fetched https://docs.example.com/raw — HTTP 200, ${contentType}.\n\n${EXTERNAL_WEB_CONTENT_NOTICE}\n\n${body}`,
+    )
+  }
 })
 
 test('a network failure comes back as a refusal, not a throw', async () => {
