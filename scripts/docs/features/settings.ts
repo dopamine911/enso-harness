@@ -56,20 +56,21 @@ const [FIRST_ROLE = ''] = ROLE_LABELS
 const PAGE: MarkTarget = { role: 'region', name: 'Settings' }
 const SECTIONS: MarkTarget = { role: 'navigation', name: 'Settings sections' }
 
-/** Settings (#407, #869): the look of the page, (#474) the permission rules pi runs under, and (#578) what trees take on disk. */
+/** Settings (#407, #869): the look of the page, (#474) the permission rules pi runs under, (#924) what web_fetch may reach, and (#578) what trees take on disk. */
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts · permissions · storage',
+  landingTagline: 'themes · fonts · permissions · web tools · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
     "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, set the file's other keys under **Behaviour**, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
+    "**Web tools**: what `web_fetch` may reach, for every project. **Fetching pages** lists the hosts on your allowlist (`webFetch.allowedHosts` in `ENSO_HOME/config.json`), with **Add**, **Check** and **Remove**, and below them the hosts each trusted project adds in its own `.enso/config.json`, read only, under the project's name. See [Web access](./web-access.md).",
     '**Storage**: the totals across every project (trees, what they take, and what the snapshot stores take), then each project with what it takes on disk (its trees plus its snapshot store, the number its card on the Projects page says), every thread tree with what it takes, and a Delete for each. See [Thread trees](./thread-trees.md).',
     "A project's own settings are on the project's page, not here: **Project settings…** in its menu on the rail. See [Thread trees](./thread-trees.md).",
   ],
   opens: [
     '{steps}, at the foot of the rail. Settings opens as a page in place of the thread, which keeps running behind it; opening a thread from the rail leaves the page.',
-    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
+    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions`, `web-tools` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
   ],
   shots: [
     {
@@ -85,7 +86,7 @@ export const SETTINGS: FeatureSpec = {
       marks: [
         {
           target: SECTIONS,
-          says: 'The sections: **Appearance**, **Permissions** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
+          says: 'The sections: **Appearance**, **Permissions**, **Web tools** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
         },
         {
           // A card's name is its label then its scheme (`Tokyo Dark, dark`).

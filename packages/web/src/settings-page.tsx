@@ -1,5 +1,5 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { CheckIcon, ChevronRightIcon, FolderIcon, LayersIcon, LockIcon } from 'lucide-react'
+import { CheckIcon, ChevronRightIcon, FolderIcon, GlobeIcon, LayersIcon, LockIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
@@ -20,6 +20,7 @@ import { PermissionsSection, type PolicyEditor } from './permissions-settings.ts
 import { applyTheme, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
 import { SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
 import { TreesSection } from './trees-settings.tsx'
+import { WebToolsSection } from './web-tools-settings.tsx'
 
 /**
  * Settings, a page (#869; the header's dialog before it), in three sections, each its own route.
@@ -217,6 +218,7 @@ function AppearanceFields(): React.ReactNode {
 const SECTION_LINKS: Readonly<Record<SettingsSection, { readonly label: string; readonly icon: React.ReactNode }>> = {
   appearance: { label: 'Appearance', icon: <LayersIcon /> },
   permissions: { label: 'Permissions', icon: <LockIcon /> },
+  'web-tools': { label: 'Web tools', icon: <GlobeIcon /> },
   storage: { label: 'Storage', icon: <FolderIcon /> },
 }
 
@@ -305,6 +307,7 @@ function SectionBody({
 }: SettingsPageProps): React.ReactNode {
   if (section === 'appearance') return <AppearanceFields />
   if (section === 'permissions') return <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
+  if (section === 'web-tools') return <WebToolsSection fetch={fetch} stored={stored} onOpenProject={onOpenProject} />
   return (
     <TreesSection
       fetch={fetch}
@@ -318,11 +321,12 @@ function SectionBody({
 
 /**
  * Where a section is kept, beside its title (the prototype's pill): this browser for Appearance, the
- * server's file for Permissions — its real path once read — and Storage measured on the server.
+ * server's file for Permissions — its real path once read — and for Web tools, and Storage measured on the server.
  */
 function savedWhere(section: SettingsSection, permissions: PolicyEditor): string {
   if (section === 'appearance') return 'Saved in this browser'
   if (section === 'storage') return 'Measured on the server when you open this'
+  if (section === 'web-tools') return 'Saved on the server · ENSO_HOME/config.json'
   const { state } = permissions
   return state.kind === 'loaded' ? `Saved on the server · ${state.policy.path}` : 'Saved on the server'
 }

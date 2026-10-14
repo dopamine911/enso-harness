@@ -105,6 +105,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'snapshot-store.ts': 'Thread, Record',
     'thread-tree.ts': 'Thread, Record',
     'tree-setup.ts': 'Thread, Record',
+    'web-fetch-allowlist.ts': 'Permission, Control',
   },
   'host contract': { 'thread-runtime.ts': 'Thread, Control' },
 }

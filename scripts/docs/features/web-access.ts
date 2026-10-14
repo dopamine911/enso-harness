@@ -46,14 +46,15 @@ export const WEB_ACCESS: FeatureSpec = {
     `\`curl\`, \`wget\` and other network clients in the shell are refused by a guard, and the refusal tells pi to use \`${WEB_FETCH_TOOL_NAME}\` instead.`,
   ],
   opens: [
+    'Open **Settings**, then **Web tools**. Under **Fetching pages**, type a host and choose **Add**; **Remove** takes one off. A pasted URL is reduced to its host, after you confirm; a wildcard, a path, a port or a login is refused, saying why. **Check** asks `https://<host>/` once, from the server, and when the host only redirects, offers the host it redirects to: allowing `enso.engineer`, which redirects to `www.enso.engineer`, would fetch nothing.',
     [
-      'The allowlist lives in your config, `ENSO_HOME/config.json` (`~/.enso/config.json` by default). Name each host exactly:',
+      'The allowlist lives in your config, `ENSO_HOME/config.json` (`~/.enso/config.json` by default), and Settings changes only that key in it. By hand, name each host exactly:',
       '',
       '```json',
       ENSO_CONFIG_EXAMPLE,
       '```',
     ].join('\n'),
-    'A project you trust can add hosts for its own threads in its `.enso/config.json`. Either way, the list is read when a session starts, so restart the thread after you change it.',
+    'A project you trust can add hosts for its own threads in its `.enso/config.json`; Settings lists them under the project, read only. Either way, the list is read when a session starts, so restart the thread after you change it. Settings names the threads still running on the old list.',
     'For the Tavily fallback, put `TAVILY_API_KEY` in `ENSO_HOME/secrets.env`. It is read on every call, so no restart is needed.',
   ],
   shots: [
@@ -92,7 +93,7 @@ export const WEB_ACCESS: FeatureSpec = {
   limits: [
     `\`${WEB_FETCH_TOOL_NAME}\` never follows a redirect. It reports where the redirect points, so you can allow that host too.`,
     `It fetches text only, at most ${WEB_FETCH_MAX_RESPONSE_BYTES / 1024} KB, within ${WEB_FETCH_TIMEOUT_MS / 1000} seconds, over ${PROTOCOL_WORDS}, and never a URL with a password in it.`,
-    "pi cannot widen its own allowlist. Writes into `ENSO_HOME` and into a project's `.enso/` are refused by the guards, shell redirects included.",
+    "pi cannot widen its own allowlist. Writes into `ENSO_HOME` and into a project's `.enso/` are refused by the guards, shell redirects included. Settings writes it through the server, which answers only Enso's own page.",
     "A page's text is marked as untrusted before pi reads it. That is a warning to the model, not a filter: a fetched page can still try to give pi instructions.",
     "Text a page hides is left out: comments, templates, and elements hidden by an attribute or an inline style. Text hidden by the page's stylesheet is not recognised as hidden, and comes through.",
     'The check that a host resolves to a public address is advisory. It is not a network boundary.',

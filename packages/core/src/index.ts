@@ -549,11 +549,18 @@ export {
 export { contentToText, customEntriesOf, shellExitCodeOf, transcriptEntryOf, transcriptOf } from './runtime-entries.ts'
 export {
   EXTERNAL_WEB_CONTENT_NOTICE,
+  readWebFetchHostInput,
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_MAX_URL_LENGTH,
   WEB_FETCH_TIMEOUT_MS,
   WEB_FETCH_TOOL_NAME,
+  WebFetchAllowlist,
+  WebFetchAllowlistChange,
   WebFetchConfig,
+  WebFetchHostCheck,
+  WebFetchHostCheckRequest,
+  type WebFetchHostInput,
+  WebFetchProjectHosts,
   WebFetchToolParameters,
 } from './web-fetch.ts'
 export { WEB_SEARCH_TIMEOUT_MS, WEB_SEARCH_TOOL_NAME, WebSearchConfig, WebSearchToolParameters } from './web-search.ts'

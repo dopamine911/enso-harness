@@ -89,6 +89,8 @@ const { listening } = startEnsoServer({
   projectsStatePath: ensoProjectsPath(home),
   promptsDir: ensoPromptsDir(home),
   projectsDir: ensoProjectsDir(home),
+  // Settings › Web tools edits the user's allowlist here (#924).
+  userConfigPath: configPath,
   // Each new thread in its own tree (#551), prepared by its project's settings (#754): the user's
   // `threads` is their lowest tier, a trusted project's own files override it.
   threadSettings: { user: config.config, userPath: configPath, canonical: (key) => canonicalConfigPath(key) },

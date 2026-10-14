@@ -34,6 +34,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   //   `snapshot-store.ts` `node:child_process`, `node:fs` — a thread's bare repository of its tree (#551)
   //   `thread-tree.ts`  `node:child_process`, `node:fs` — a thread's own worktree or copy, minted and disposed (#551)
   //   `tree-setup.ts`   `node:child_process`, `node:fs` — a new tree's files copied and setup run (#754)
+  //   `web-fetch-allowlist.ts` `node:fs` — the user's web_fetch allowlist, changed from Settings (#924)
   //
   // ⚠ Tree-shaking does not save a bundle from a bare `node:*` specifier: it is resolved at
   // link time, before anything is shaken, so a node-only module ON the barrel breaks a
@@ -65,6 +66,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
     'snapshot-store.ts',
     'thread-tree.ts',
     'tree-setup.ts',
+    'web-fetch-allowlist.ts',
   ])
   // ⚠ The barrel's RE-EXPORTS, not its text: `barrel.includes(module)` read a filename in a
   // comment as an export, so this assertion passed on prose (#211 — the new header names the

@@ -44,6 +44,7 @@ import {
   type ThreadRuntime,
   readEnsoThreadIncidents,
   readEnsoThreadJudgeCases,
+  WebFetchAllowlist,
 } from '@enso/core'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
 import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
@@ -58,6 +59,7 @@ import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'
 import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
 import { HISTORY_PAGE_MESSAGES } from '../thread-read.ts'
+import type { HostCheckFetch } from '../web-tools-routes.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -229,7 +231,13 @@ async function startWith(
     launch = tmpdir(),
     agentDir = mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     threadSettings,
+    userConfigPath,
+    hostCheckFetch,
   }: {
+    /** The user's config Settings › Web tools edits (#924); absent, those routes refuse. */
+    readonly userConfigPath?: string
+    /** The Web tools host check's one request (#924); absent, the real `fetch`. */
+    readonly hostCheckFetch?: HostCheckFetch
     readonly projectRoots?: readonly string[]
     readonly promptsDir?: string
     readonly permissionRulesPath?: string
@@ -251,6 +259,8 @@ async function startWith(
     projectRoots,
     ...(promptsDir === undefined ? {} : { promptsDir }),
     ...(threadSettings === undefined ? {} : { threadSettings }),
+    ...(userConfigPath === undefined ? {} : { userConfigPath }),
+    ...(hostCheckFetch === undefined ? {} : { hostCheckFetch }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir,
     permissionRulesPath,
@@ -1043,6 +1053,106 @@ test('⚠ a foreign page cannot trust a project or read its trust; Enso’s own 
   expect(trustFile(agentDir)).toEqual({ [project]: false })
   const ownPage = { Origin: 'http://127.0.0.1:5178', 'Sec-Fetch-Site': 'same-origin' }
   expect((await trustOf(await putTrust(url, projectId, { trusted: true }, ownPage))).trusted).toBe(true)
+})
+
+// ── Settings › Web tools (#924): the web_fetch allowlist, edited from the page ─────────────────
+
+function postAllowlist(
+  url: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/settings/web-fetch${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  })
+}
+
+async function allowlistOf(response: Response): Promise<WebFetchAllowlist> {
+  const answered: unknown = await response.json()
+  if (!Check(WebFetchAllowlist, answered)) throw new Error('the answer is not WebFetchAllowlist')
+  return answered
+}
+
+async function allowlistServer(userText: string): Promise<{ url: string; userPath: string; project: string }> {
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  writeFileSync(userPath, userText)
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-allowlist-project-')))
+  mkdirSync(join(project, '.enso'))
+  writeFileSync(
+    join(project, '.enso', 'config.json'),
+    JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example'] } }),
+  )
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-allowlist-agent-'))
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: true }))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, userConfigPath: userPath })
+  return { url, userPath, project }
+}
+
+test('the allowlist round trip: added and removed from the page, the file holding exactly that change (#924)', async () => {
+  const userText = '{\n  "projects": { "roots": ["/srv"] },\n  "webFetch": { "allowedHosts": ["a.example"] }\n}\n'
+  const { url, userPath } = await allowlistServer(userText)
+  // A thread live before the change reads the old list until its session is built again.
+  expect(await prompt(url, 'before-change', 'hi')).toBe(202)
+  const added = await allowlistOf(await postAllowlist(url, '', { add: 'www.enso.engineer' }))
+  expect(added.hosts).toEqual(['a.example', 'www.enso.engineer'])
+  expect(added.staleThreads).toEqual(['before-change'])
+  expect(readFileSync(userPath, 'utf8')).toStartWith('{\n  "projects": { "roots": ["/srv"] },\n')
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual({
+    projects: { roots: ['/srv'] },
+    webFetch: { allowedHosts: ['a.example', 'www.enso.engineer'] },
+  })
+  const removed = await allowlistOf(await postAllowlist(url, '', { remove: 'www.enso.engineer' }))
+  expect(removed.hosts).toEqual(['a.example'])
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual(JSON.parse(userText))
+  // A form the list cannot hold is refused with its reason, the file untouched.
+  const refused = await postAllowlist(url, '', { add: 'https://www.enso.engineer/' })
+  expect(refused.status).toBe(422)
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual(JSON.parse(userText))
+})
+
+test('a trusted project’s own hosts are listed under it, apart from the user’s (#924)', async () => {
+  const { url, userPath, project } = await allowlistServer('{}')
+  const read = await allowlistOf(await fetch(`${url}/api/settings/web-fetch`))
+  expect(read).toMatchObject({ path: userPath, hosts: [] })
+  expect(read.projects).toEqual([
+    expect.objectContaining({ path: join(project, '.enso', 'config.json'), hosts: ['docs.project.example'] }),
+  ])
+})
+
+test('the host check: one request, redirects reported, the target’s host offered (#924)', async () => {
+  const asked: { url: string; redirect: string }[] = []
+  const hostCheckFetch: HostCheckFetch = async (asking, init) => {
+    asked.push({ url: asking, redirect: init.redirect })
+    return new Response(null, { status: 301, headers: { location: 'https://www.enso.engineer/' } })
+  }
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { userConfigPath: userPath, hostCheckFetch })
+  const checked: unknown = await (await postAllowlist(url, '/check', { host: 'enso.engineer' })).json()
+  expect(checked).toEqual({
+    kind: 'redirect',
+    status: 301,
+    target: 'https://www.enso.engineer/',
+    suggestedHost: 'www.enso.engineer',
+  })
+  expect(asked).toEqual([{ url: 'https://enso.engineer/', redirect: 'manual' }])
+  // Only a host is asked about: never a URL a page chose.
+  expect((await postAllowlist(url, '/check', { host: 'https://evil.example/x' })).status).toBe(422)
+  expect(asked).toHaveLength(1)
+})
+
+test('⚠ a foreign page can neither change the allowlist nor read it (#924, #717)', async () => {
+  const userText = '{"webFetch":{"allowedHosts":[]}}'
+  const { url, userPath } = await allowlistServer(userText)
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }
+  expect((await postAllowlist(url, '', { add: 'evil.example' }, otherPort)).status).toBe(403)
+  expect((await postAllowlist(url, '/check', { host: 'evil.example' }, otherPort)).status).toBe(403)
+  expect((await fetch(`${url}/api/settings/web-fetch`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(
+    403,
+  )
+  expect(readFileSync(userPath, 'utf8')).toBe(userText)
 })
 
 // A revoke fails closed AT ONCE, as removal does: never under a running thread of the project, and

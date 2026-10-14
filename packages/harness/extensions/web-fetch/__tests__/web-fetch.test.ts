@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   ENSO_CONFIG_FILENAME,
   EXTERNAL_WEB_CONTENT_NOTICE,
@@ -6,6 +9,7 @@ import {
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
+import { changeUserAllowedHosts } from '@enso/core/web-fetch-allowlist'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { SessionEnsoConfig } from '../../../core/index.ts'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
@@ -124,6 +128,25 @@ test(`registers a tool named ${WEB_FETCH_TOOL_NAME}, naming the allowed hosts in
 test('with an empty allowlist the description says EMPTY instead of listing hosts', () => {
   const loaded = loadWebFetch({ readConfigText: () => configWith([]) })
   expect(loaded.tool.description).toContain('EMPTY')
+})
+
+// #924: Settings writes the user's file; the next session's tool reads that file at its start.
+test('a host added from Settings is in the next session’s tool description; one removed is gone', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'enso-web-fetch-settings-')), ENSO_CONFIG_FILENAME)
+  const fromFile = (): Partial<WebFetchDependencies> => ({
+    locateConfigFile: () => path,
+    readConfigText: () => readFileSync(path, 'utf8'),
+    resolveSessionConfig: () =>
+      Promise.resolve({ result: parseEnsoConfig(readFileSync(path, 'utf8')), path, sources: [path] }),
+  })
+  changeUserAllowedHosts(path, { add: 'www.enso.engineer' })
+  const next = loadWebFetch(fromFile())
+  await next.startSession()
+  expect(next.tool.description).toContain('(currently: www.enso.engineer)')
+  changeUserAllowedHosts(path, { remove: 'www.enso.engineer' })
+  const after = loadWebFetch(fromFile())
+  await after.startSession()
+  expect(after.tool.description).toContain('currently EMPTY')
 })
 
 // --- the empty-allowlist refusal is the product (#54): it must carry everything a human
