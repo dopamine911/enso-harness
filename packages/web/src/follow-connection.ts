@@ -482,8 +482,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return run
   }
 
+  /**
+   * End a run: its closing chunk, once. A run no longer open says nothing — closed already, or
+   * forgotten when the client stopped taking chunks (`consumerStopped`): TanStack reset it, and a
+   * late receipt's chunk would be yielded ahead of the next subscription's snapshot.
+   */
   function closeRun(run: OpenRun, chunk: StreamChunk): void {
-    runs.delete(run.runId)
+    if (!runs.delete(run.runId)) return
     if (current === run) current = undefined
     push(chunk)
   }
