@@ -325,7 +325,7 @@ export const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   incidentField('', 'Incidents alert and suspend nothing; the default risk thresholds.', 'security?.incidents'),
   incidentField(
     '.incidents',
-    'As above. User-only: a trusted project’s `security` is ignored with a notice.',
+    'As above. A trusted project’s approved `.enso/config.json` may only tighten it — halting on, a threshold reached sooner, a wider window — and what would loosen it is ignored with a notice (#753).',
     'security?.incidents',
   ),
   incidentField(

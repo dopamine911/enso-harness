@@ -262,9 +262,10 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   Only a resolution resets it.
 - **security signal** — one observed fact of the session risk, named for what was seen, never for
   intent: `denial-retry`, `command-obfuscation`, `alternate-execution-path`,
-  `tool-substitution-after-denial`, `policy-introspection`, `protected-record-touch`. Every one but the
-  last needs an earlier refusal in its window, so no single command is a signal on its own; a shell
-  command naming the session or log directory is one by itself (#466).
+  `tool-substitution-after-denial`, `policy-introspection`, `protected-record-touch`,
+  `config-tier-touch`. Every one but the last two needs an earlier refusal in its window, so no single
+  command is a signal on its own; a shell command naming the session or log directory is one by itself
+  (#466), and so is a write, edit or shell command reaching a config tier file (#753).
 - **incident** — the record a session's risk reaching `incident` opens (#466, phase 3 of #189):
   `enso-incident-opened`, with the signals it rests on, whether it **halted**, and what it suspended.
   With `security.incidents.halt` off (the default) it is an alert. Open until a human **resolves** it —

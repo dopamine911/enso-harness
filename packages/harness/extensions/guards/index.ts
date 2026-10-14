@@ -1,6 +1,8 @@
 import {
   type ExtensionAPI,
   type ExtensionContext,
+  ProjectTrustStore,
+  SettingsManager,
   type ToolCallEventResult,
   type ToolResultEvent,
   type TruncationResult,
@@ -20,10 +22,13 @@ import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
   createGuardSession,
+  decidedProjectTrust,
+  type GuardProject,
   type GuardSession,
   inputRecordOf,
   type ShellAnalyzerDenial,
-  userIncidentPolicy,
+  sessionConfigEnvironment,
+  sessionIncidentPolicy,
   userJudgeConfig,
 } from '../../core/index.ts'
 import { createJevJudge, createLocalJudge, JEV_KEY_NAME } from './judge-backends.ts'
@@ -88,8 +93,11 @@ export interface GuardDependencies {
    * login `ENSO_HOME` already had — is still here, and still refused.
    */
   harnessRoot: string
-  /** Whether an incident halts, and the risk thresholds — read at every `session_start` (#466). */
-  incidentPolicy: () => EnsoIncidentPolicy
+  /**
+   * Whether an incident halts, and the risk thresholds, for the session's project — read at every
+   * `session_start` (#466): the user's, tightened by the project's approved tier once trusted (#753).
+   */
+  incidentPolicy: (project: GuardProject | undefined) => EnsoIncidentPolicy
   /** The log directory `protected-records` refuses a shell command naming (#466). */
   logsDirectory: string
   /**
@@ -207,6 +215,16 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
       session.start({
         recordDirectory: () => extensionContext.sessionManager.getSessionDir(),
         transcript: () => transcriptOf(extensionContext.sessionManager.getBranch()),
+        project: () => ({
+          cwd: extensionContext.cwd,
+          // pi's own trust store and settings (#509): `harness/core` may not import them.
+          trusted:
+            decidedProjectTrust({
+              ...sessionConfigEnvironment(process.env, { ProjectTrustStore, SettingsManager }),
+              cwd: extensionContext.cwd,
+              isProjectTrusted: () => extensionContext.isProjectTrusted(),
+            }) === true,
+        }),
       })
     })
 
@@ -241,11 +259,11 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
   }
 }
 
-/** The user's incident policy; an unreadable `config.json` fails closed and says so (#466). */
-function productionIncidentPolicy(): EnsoIncidentPolicy {
-  const { policy, problem } = userIncidentPolicy(ensoHome(process.env))
+/** The session's incident policy; an unreadable config fails closed and says so (#466, #753). */
+function productionIncidentPolicy(project: GuardProject | undefined): EnsoIncidentPolicy {
+  const { policy, problem } = sessionIncidentPolicy(ensoHome(process.env), project)
   if (problem !== undefined) {
-    log.error('config.json is unreadable, so incidents halt with the default thresholds: {problem}', { problem })
+    log.error('a config is unreadable, so incidents halt with the default thresholds: {problem}', { problem })
   }
   return policy
 }

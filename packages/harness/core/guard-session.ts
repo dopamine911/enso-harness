@@ -215,7 +215,11 @@ export interface GuardSessionDependencies {
   /** The bash analyzer's refusal of a command, in our words; never throws (its glue applies the library's contract). */
   analyzeShell: (input: { command: string; cwd: string }) => ShellAnalyzerDenial | undefined
   harnessRoot: string
-  incidentPolicy: () => EnsoIncidentPolicy
+  /**
+   * The incident policy for the session's project (#466, #753): the user's, tightened by the
+   * project's approved tier once it is trusted; `undefined` before a start names one, the user's alone.
+   */
+  incidentPolicy: (project: GuardProject | undefined) => EnsoIncidentPolicy
   logsDirectory: string
   projectsDirectory: string
   commandJudge: () => CommandJudge | undefined
@@ -223,13 +227,25 @@ export interface GuardSessionDependencies {
 }
 
 /**
- * What a thread starts with: the directory its log is in, and its branch as our transcript. Both may throw.
+ * The session's project as the incident policy reads it (#753): its directory, and whether it is trusted.
+ *
+ * @group Guards
+ */
+export interface GuardProject {
+  readonly cwd: string
+  readonly trusted: boolean
+}
+
+/**
+ * What a thread starts with: the directory its log is in, its branch as our transcript, and its
+ * project (#753). Each may throw.
  *
  * @group Guards
  */
 export interface GuardStart {
   readonly recordDirectory: () => string
   readonly transcript: () => readonly EnsoTranscriptEntry[]
+  readonly project: () => GuardProject
 }
 
 /**
@@ -317,8 +333,9 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
   // which also fires for "reload" and "resume", where the runtime survives — resets it.
   const readTracker = createSessionReadTracker()
   // #464, #466: the session's security risk and incidents, observed beside what it has read;
-  // rebuilt on every start.
-  const security = observeSessionSecurity(runtime, dependencies.incidentPolicy)
+  // rebuilt on every start, under the policy of the project that start names (#753).
+  let sessionProject: GuardProject | undefined
+  const security = observeSessionSecurity(runtime, () => dependencies.incidentPolicy(sessionProject))
   // The session and log directories `protected-records` refuses a shell command naming (#466):
   // this project's session directory, read off the session at each start, and the log directory.
   let recordDirectories: readonly string[] = [dependencies.logsDirectory]
@@ -425,6 +442,13 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
         error,
       })
       recordDirectories = [dependencies.logsDirectory]
+    }
+    try {
+      sessionProject = facts.project()
+    } catch (error) {
+      // The user's policy alone: a project's tier can only tighten it, so this is the floor it raises.
+      log.error("the session's project could not be read; incidents follow the user's policy: {error}", { error })
+      sessionProject = undefined
     }
     security.resume(facts.transcript)
     sessionJudge = readJudge()

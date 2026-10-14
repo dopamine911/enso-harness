@@ -150,8 +150,11 @@ export interface GuardDependencies {
    * login `ENSO_HOME` already had — is still here, and still refused.
    */
   harnessRoot: string
-  /** Whether an incident halts, and the risk thresholds — read at every `session_start` (#466). */
-  incidentPolicy: () => EnsoIncidentPolicy
+  /**
+   * Whether an incident halts, and the risk thresholds, for the session's project — read at every
+   * `session_start` (#466): the user's, tightened by the project's approved tier once trusted (#753).
+   */
+  incidentPolicy: (project: GuardProject | undefined) => EnsoIncidentPolicy
   /** The log directory `protected-records` refuses a shell command naming (#466). */
   logsDirectory: string
   /**
@@ -201,6 +204,16 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
       session.start({
         recordDirectory: () => extensionContext.sessionManager.getSessionDir(),
         transcript: () => transcriptOf(extensionContext.sessionManager.getBranch()),
+        project: () => ({
+          cwd: extensionContext.cwd,
+          // pi's own trust store and settings (#509): `harness/core` may not import them.
+          trusted:
+            decidedProjectTrust({
+              ...sessionConfigEnvironment(process.env, { ProjectTrustStore, SettingsManager }),
+              cwd: extensionContext.cwd,
+              isProjectTrusted: () => extensionContext.isProjectTrusted(),
+            }) === true,
+        }),
       })
     })
 
@@ -417,7 +430,11 @@ config switched to alert-only since does not lift it. Only a human's resolution 
 resolve route appends `enso-incident-resolved` and announces it on `ENSO_INCIDENT_RESOLVED_CHANNEL`,
 and the guard applies the same step live; the resolution also resets the risk, the only reset. The
 policy is read at every `session_start` and lazily at the first call if none fired — the floor's
-reasoning. ⚠ The records are **tamper-evident at best, and not yet that** (the hash chain is #526): the
+reasoning: the user's `security.incidents`, tightened by the session's project once it is trusted
+(its approved `.enso/config.json`, #753, `sessionIncidentPolicy`: halting turned on, a threshold
+reached sooner, a wider window; a key that would loosen it is ignored, and the session told so).
+The trust is the one already decided — the web host's, or pi's saved one — since `session_start`
+cannot wait on a question. ⚠ The records are **tamper-evident at best, and not yet that** (the hash chain is #526): the
 records deny refuses a shell command naming them, which makes an edit harder and visible as a
 signal, not impossible — the guards are the whole boundary (#24).
 
@@ -450,7 +467,7 @@ over the guard's own branch, halting or not. ⚠ The branch is replayed as it ha
 opens earlier still reads the calls a halt would have stopped.
 
 **The command judge, recorded only** (#469 PR1; `@enso/core` `command-judge.ts`, `config.json` `security.judge.backend`).
-Off by default, and user-only as the rest of `security` is: an unreadable `config.json` leaves it off.
+Off by default, and user-only (`security.judge`: a project's is ignored with a notice, #753): an unreadable `config.json` leaves it off.
 Switched on (`jev` or `local`), the guard asks it about a `bash` call it let through when the call follows a
 refusal in the risk window or is one the guards cannot read — built at run time, decoded, handed to an
 interpreter — the selection `judgeContextOf` makes off the risk fold's own state, so

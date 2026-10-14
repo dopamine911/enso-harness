@@ -65,6 +65,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'session-eval.ts': 'Thread, Record',
     'session-incident.ts': 'Permission, Control, Record',
     'session-risk.ts': 'Permission, Record',
+    'text-patch.ts': 'Thread, Record',
     'thread-inspection.ts': 'Thread, Observation',
     'thread-timeline.ts': 'Thread, Observation, Record',
     'thread-context.ts': 'Thread, Observation',

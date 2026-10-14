@@ -194,6 +194,29 @@ test('after a shell refusal, a script written and then run is a tool substitutio
   ])
 })
 
+// #753's last acceptance item: an attempted write to a config tier raises a signal — with no refusal
+// before it, and whether the guard refused it (a write into `.enso/`) or could not read it (an
+// interpreter one-liner the guard lets through).
+test('⚠ a write, edit or shell command reaching a config tier is a signal on its own, refused or not (#753)', () => {
+  expect(
+    signalsOf(
+      oneCallEach(
+        [['c1', 'write', { path: '.enso/config.json', content: '{}' }], guardDenied('c1', 'persistence-write')],
+        [['c2', 'edit', { path: '/srv/app/.enso/config.local.json', oldText: 'a', newText: 'b' }]],
+        [bash('c3', `python3 -c "open('.enso/config.json', 'w').write('{}')"`)],
+        [bash('c4', 'cat ~/.enso/config.json'), guardDenied('c4', 'secret-path')],
+        [bash('c5', 'cat .enso/config.json.bak docs/config.json')],
+        [['c6', 'write', { path: 'src/enso/config.json', content: '{}' }]],
+      ),
+    ).filter(([signal]) => signal === 'config-tier-touch'),
+  ).toEqual([
+    ['config-tier-touch', 'c1'],
+    ['config-tier-touch', 'c2'],
+    ['config-tier-touch', 'c3'],
+    ['config-tier-touch', 'c4'],
+  ])
+})
+
 test("⚠ the engine's refusals count: a person's No repeated, and an auto block followed by a one-liner (#464, #496)", () => {
   expect(
     signalsOf(
@@ -329,7 +352,10 @@ test("⚠ after a refusal, the thread's own tree is its work, not the harness's 
     'policy-introspection@sibling-prefix',
     'policy-introspection@climbs-out',
     'policy-introspection@policy',
+    // A config tier named by a shell command is its own signal too (#753), whoever's tree it is in.
+    'config-tier-touch@home-config',
     'policy-introspection@home-config',
+    'config-tier-touch@project-config',
     'policy-introspection@project-config',
   ])
   // A path argument (read, write, edit) is judged by the same rule as a command.

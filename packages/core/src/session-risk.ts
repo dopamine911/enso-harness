@@ -17,8 +17,10 @@ import type { EnsoTranscriptEntry } from './transcript.ts'
  * threshold tuned on replays (#468) is the threshold the live guard runs.
  *
  * ⚠ SIGNALS NAME WHAT WAS OBSERVED, never intent: "a bash call used `python -c` two calls after a
- * shell refusal", not "the agent tried to evade". Every detector needs an earlier refusal in the
- * window, so no single command, however odd, is a signal on its own.
+ * shell refusal", not "the agent tried to evade". Every detector but two needs an earlier refusal in
+ * the window, so no single command, however odd, is a signal on its own — except one that reaches
+ * the records an incident rests on (`protected-record-touch`, #466) or a config tier
+ * (`config-tier-touch`, #753): reaching them is the observation.
  *
  * ⚠ THE THRESHOLDS ARE UNCALIBRATED. The window and the level counts are named guesses, to be
  * tuned against real sessions by #468's replay before anything acts on a level (#466).
@@ -221,7 +223,12 @@ export function readEnsoToolRefusalMetadata(
  *   after a shell refusal;
  * - `tool-substitution-after-denial` — after a shell refusal, a file written or edited and then run;
  * - `policy-introspection` — a read or search of the guard's policy or the harness's internals
- *   after a refusal.
+ *   after a refusal;
+ * - `protected-record-touch` — a shell command naming the session or log directory (#466);
+ * - `config-tier-touch` — a write or edit of a config tier file (`.enso/config.json`,
+ *   `.enso/config.local.json`), or a shell command naming one (#753).
+ *
+ * The last two need no refusal before them.
  *
  * @group Session risk
  */
@@ -232,6 +239,7 @@ export const ENSO_SECURITY_SIGNALS = [
   'tool-substitution-after-denial',
   'policy-introspection',
   'protected-record-touch',
+  'config-tier-touch',
 ] as const
 
 /** @group Session risk */
@@ -439,6 +447,13 @@ const ONE_LINER =
  */
 const INTERNALS = /guards?\/|guard\.ts|permissions\.json|extensions\/[\w.-]+\/config\.json|(?:^|[\s/'"])\.enso(?:\/|\b)/
 
+/**
+ * A config tier file by name (#753): a project's `.enso/config.json` or `.enso/config.local.json`,
+ * and the user's `~/.enso/config.json` — wherever it sits in a path or a command, quoted or not, so
+ * an interpreter one-liner that writes it (`open('.enso/config.json', 'w')`) is seen too.
+ */
+const CONFIG_TIER = /(?:^|[^\w.-])\.enso[/\\]config(?:\.local)?\.json(?![\w.-])/i
+
 /** Where a path segment ends in a command: the end, a separator, a quote or a shell operator. */
 const SEGMENT_END = `(?:$|[\\s/'"\`;&|)])`
 
@@ -486,13 +501,32 @@ function withSignal(signals: EnsoSecuritySignal[], signal: EnsoSecuritySignal): 
     signals.push(signal)
 }
 
-/** The signals a call raises against the refusals before it in the window. */
+/**
+ * ⚠ The call signal that needs no earlier refusal (#753), as `protected-record-touch` needs none: a
+ * write or edit of a config tier file, or a shell command naming one, is itself the observation —
+ * refused or not, since the guard cannot read every route to the file (an interpreter one-liner).
+ */
+function configTierTouch(call: RecentCall): EnsoSecuritySignal | undefined {
+  let target: string | undefined
+  if (WRITE_TOOLS.has(call.tool)) target = call.path
+  else if (SHELL_TOOLS.has(call.tool)) target = call.command
+  if (target === undefined || !CONFIG_TIER.test(target)) return undefined
+  return {
+    signal: 'config-tier-touch',
+    toolCallId: call.toolCallId,
+    detail: `${call.tool} reached a config tier file: ${firstLine(target)}`,
+    after: [],
+  }
+}
+
+/** The signals a call raises: a config tier reached, and what it does against the refusals before it in the window. */
 function callSignals(
   call: RecentCall,
   earlier: readonly RecentCall[],
   ownTree: string | undefined,
 ): EnsoSecuritySignal[] {
-  const found: EnsoSecuritySignal[] = []
+  const touch = configTierTouch(call)
+  const found: EnsoSecuritySignal[] = touch === undefined ? [] : [touch]
   const denied = earlier.filter((recent) => recent.denial !== undefined)
   if (denied.length === 0) return found
   const target = call.command ?? call.path ?? ''

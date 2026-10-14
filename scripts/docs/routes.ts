@@ -420,7 +420,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     handler: 'respondWithProjectSettings → createProjectSettingsRoute.read → resolveProjectThreadSettings',
     input: 'path: `projectId` (sixteen hex digits)',
     success:
-      "200 `EnsoProjectSettings` JSON — each `threads` key (tree mode, files to copy, setup commands) with the tier it resolves from, whether the project is trusted (its own tiers are read only then), the file behind each tier, and the project's tier files that could not be read (#754)",
+      "200 `EnsoProjectSettings` JSON — each `threads` key (tree mode, files to copy, setup commands) with the tier it resolves from, as approved (#753), whether the project is trusted (its own tiers are read only then), the file behind each tier, and the project's tiers whose approved text no longer reads (#754)",
     errors:
       '403 untrusted origin; 404 no registered project with that id; 422 a server started without the user config; 500 handler failure',
     routeClass: 'observation',
@@ -434,9 +434,9 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     input:
       "path: `projectId`; body: `EnsoProjectSettingsUpdate` — the tier (`shared`, the project's committed `.enso/config.json`, or `local`, its gitignored `.enso/config.local.json`) and the `threads` keys to set, `null` removing one",
     success:
-      "200 `EnsoProjectSettings` JSON as the settings now resolve; the tier's file keeps every other key, written as 2-space JSON (#754)",
+      "200 `EnsoProjectSettings` JSON as the settings now resolve; the tier's file keeps every other key, written as 2-space JSON (#754), and is approved as written (#753)",
     errors:
-      "400 malformed body, or one that is not an update; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 422 the tier's file is there and unreadable (never overwritten), the project's directory is gone, or a server started without the user config; 500 handler failure",
+      "400 malformed body, or one that is not an update; 403 untrusted origin; 404 no registered project with that id; 409 the tier's file is not the version approved — changed, gone or never approved — so a save over it would approve it unseen (#753); 413 body too large; 422 the tier's file is there and unreadable (never overwritten), the project's directory is gone, or a server started without the user config; 500 handler failure",
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',
@@ -462,6 +462,33 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
       "200 `EnsoProjectTrust` JSON as it now stands — saved in pi's `trust.json` under the project's path, the store a thread's **Trust project** answer writes; a revoke is an explicit `false`, never a deletion, so no trusted ancestor shows through, and retires the project's live threads that are not running, so each is rebuilt under it at its next prompt. A grant reaches each thread when it is next built (#873)",
     errors:
       '400 malformed body, or one that is not exactly `{ trusted }`; 403 untrusted origin; 404 no registered project with that id; 409 a revoke while a thread in the project is running; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  PROJECT_CONFIG_APPROVAL_READ_ROUTE: {
+    method: 'GET',
+    path: '/api/projects/:projectId/config-approval',
+    handler: 'createProjectSettingsRoute.review → reviewProjectConfig',
+    input: 'path: `projectId` (sixteen hex digits)',
+    success:
+      "200 `EnsoProjectConfigReview` JSON — each of the project's own tier files that is there or approved, local first: its state against the version approved (`approved`, `changed`, `removed`, `unapproved`), its SHA-256 now, the unified diff from the approved version to it, and why it can't be approved as it is (#753); read whatever the trust, applying nothing",
+    errors:
+      '403 untrusted origin; 404 no registered project with that id; 422 a server started without the user config; 500 handler failure',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
+  PROJECT_CONFIG_APPROVAL_WRITE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/config-approval',
+    handler: 'respondToProjectConfigApproval → createProjectSettingsRoute.approve → approveProjectTier',
+    input:
+      'path: `projectId`; body: `EnsoProjectConfigApproval` — the tier and the file’s SHA-256 as reviewed, `null` approving its removal',
+    success:
+      '200 `EnsoProjectConfigReview` JSON as it now stands — the file as reviewed is the version that applies, kept in `ENSO_HOME/projects/<id>/config-approvals.json` (#753)',
+    errors:
+      "400 malformed body, or one that is not an approval; 403 untrusted origin; 404 no registered project with that id; 409 the file changed after it was reviewed — nothing approved; 413 body too large; 422 the file can't be approved as it is (a link, a FIFO, over 64 KiB, not a config Enso reads), the project's directory is gone, or a server started without the user config; 500 handler failure",
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',

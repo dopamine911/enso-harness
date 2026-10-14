@@ -12,11 +12,11 @@ import {
 } from '@enso/core'
 import {
   projectIdOf,
+  projectIdOfCwd,
   projectSessionsDir,
   projectSnapshotsDir,
   projectTreesDir,
   realpathOrSelf,
-  treeProjectId,
 } from '@enso/core/paths'
 
 /**
@@ -27,17 +27,9 @@ import {
  *
  * ⚠ A THREAD ON A TREE RUNS IN A DIRECTORY THAT IS NO PROJECT. pi's cwd — and so the session
  * header, the listing's `cwd`, the guards' write root — is the tree. Everything filed or served BY
- * PROJECT asks {@link projectIdOfCwd} first: the session directory, the snapshot store, the server's
- * projects (`server/projects.ts`).
+ * PROJECT asks `projectIdOfCwd` (`@enso/core/paths`) first: the session directory, the snapshot
+ * store, the server's projects (`server/projects.ts`).
  */
-
-/**
- * The project a cwd belongs to, by id: the one a minted tree's path names, else the cwd's own (its
- * canonical path, hashed — `projectIdOf`).
- */
-export function projectIdOfCwd(projectsDir: string, cwd: string): string {
-  return treeProjectId(projectsDir, cwd) ?? projectIdOf(realpathOrSelf(cwd))
-}
 
 /** The session directory a thread in `cwd` files under (#552): its project's, whether `cwd` is the checkout or one of its trees. */
 export function sessionDirectoryFor(projectsDir: string, cwd: string): string {

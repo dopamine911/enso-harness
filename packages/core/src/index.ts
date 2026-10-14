@@ -82,14 +82,20 @@ export {
   EnsoThreadGit,
 } from './git-state.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
+export { unifiedPatch } from './text-patch.ts'
 export {
   ENSO_TREE_SETUP_ENTRY,
   EnsoConfigTier,
+  EnsoProjectConfigApproval,
+  EnsoProjectConfigReview,
   EnsoProjectSettings,
   EnsoProjectSettingsUpdate,
   EnsoProjectThreadSettings,
   EnsoProjectTier,
+  EnsoProjectTierApprovalState,
   EnsoProjectTierFile,
+  EnsoProjectTierPending,
+  EnsoProjectTierReview,
   EnsoProjectTrust,
   EnsoProjectTrustUpdate,
   EnsoTreeSetupOutcome,
@@ -387,6 +393,7 @@ export {
   replayIncidents,
   sessionIncidentsOf,
   sessionIncidentsStep,
+  tightenIncidentPolicy,
   tippingCallOf,
   toolFamilyOf,
 } from './session-incident.ts'

@@ -263,7 +263,8 @@ function omittedText(change: EnsoGitFileChange): string {
   return 'git reported no line changes: a mode change, or an empty file.'
 }
 
-function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.ReactNode {
+/** One file's diff, split side by side: a thread's changed file, and a project config file to approve (#753). */
+export function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.ReactNode {
   const hunks = change.patch === null ? [] : parsePatch(change.patch)
   const oneSided = oneSidedLabel(change.status)
   return (

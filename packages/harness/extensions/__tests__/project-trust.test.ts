@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent'
-import { ensoAgentDir, ensoConfigPath, projectConfigPath } from '@enso/core/paths'
+import {
+  ensoAgentDir,
+  ensoConfigPath,
+  ensoProjectsDir,
+  projectConfigApprovalsPath,
+  projectConfigPath,
+  projectIdOfCwd,
+} from '@enso/core/paths'
+import { approveProjectTier, reviewProjectConfig } from '@enso/core/project-config'
 import { sessionConfigEnvironment, sessionEnsoConfig } from '../../core/index.ts'
 import { type ProjectTrustOption, projectTrustOptions } from '../../core/project-trust.ts'
 
@@ -27,7 +35,14 @@ const pi = (await import(join(dirname(piEntryPoint), 'core', 'trust-manager.js')
 
 const PROJECT = { webFetch: { allowedHosts: ['docs.project.example'] } }
 
-/** A real ENSO_HOME and a project with its own `.enso/config.json`, under `root/parent/project`. */
+/** Approve the project's shared file as the page would (#753): its hash as the review answers it. */
+function approveShared(home: string, cwd: string): void {
+  const approvals = projectConfigApprovalsPath(ensoProjectsDir(home), projectIdOfCwd(ensoProjectsDir(home), cwd))
+  const shared = reviewProjectConfig(cwd, approvals).find((tier) => tier.tier === 'shared')
+  approveProjectTier(cwd, approvals, { tier: 'shared', sha256: shared?.current ?? null })
+}
+
+/** A real ENSO_HOME and a project with its own `.enso/config.json`, approved, under `root/parent/project`. */
 function fixture(): { home: string; parent: string; cwd: string } {
   const root = mkdtempSync(join(tmpdir(), 'enso-pi-trust-'))
   const home = join(root, 'home', '.enso')
@@ -36,6 +51,7 @@ function fixture(): { home: string; parent: string; cwd: string } {
   mkdirSync(ensoAgentDir(home), { recursive: true })
   mkdirSync(join(cwd, '.enso'), { recursive: true })
   writeFileSync(projectConfigPath(cwd), JSON.stringify(PROJECT))
+  approveShared(home, cwd)
   return { home, parent, cwd }
 }
 
@@ -82,14 +98,18 @@ test("pi's defaultProjectTrust in the agent dir's settings decides an undecided 
   expect(await resolve(home, cwd, 'Do not trust')).toEqual({ hosts: ['docs.project.example'], asked: 0 })
 })
 
-test("⚠ a trusted project's config can't set the Claude Code version Enso claims or the incident policy: the user's stand, and the person is told (#925, #466)", async () => {
+test("⚠ a trusted project's config can't set the Claude Code version Enso claims or loosen the incident policy: the user's stand, and the person is told (#925, #466, #753)", async () => {
   const { home, cwd } = fixture()
   writeFileSync(join(ensoAgentDir(home), 'settings.json'), JSON.stringify({ defaultProjectTrust: 'always' }))
-  writeFileSync(ensoConfigPath(home), JSON.stringify({ claudeCode: { version: '2.1.284' } }))
+  writeFileSync(
+    ensoConfigPath(home),
+    JSON.stringify({ claudeCode: { version: '2.1.284' }, security: { incidents: { halt: true } } }),
+  )
   writeFileSync(
     projectConfigPath(cwd),
     JSON.stringify({ ...PROJECT, claudeCode: { version: '9.9.9' }, security: { incidents: { halt: false } } }),
   )
+  approveShared(home, cwd)
   const notices: string[] = []
   const resolved = await sessionEnsoConfig(
     {},
@@ -105,10 +125,10 @@ test("⚠ a trusted project's config can't set the Claude Code version Enso clai
   // The project's own settings still apply: it was trusted.
   expect(resolved.result.config.webFetch?.allowedHosts).toEqual(['docs.project.example'])
   expect(resolved.result.config.claudeCode).toEqual({ version: '2.1.284' })
-  expect(resolved.result.config.security).toBeUndefined()
+  expect(resolved.result.config.security).toEqual({ incidents: { halt: true } })
   expect(notices).toEqual([
-    `Enso: ${projectConfigPath(cwd)} sets security, which only ${ensoConfigPath(home)} may set — ignored.`,
     `Enso: ${projectConfigPath(cwd)} sets claudeCode, which only ${ensoConfigPath(home)} may set — ignored.`,
+    `Enso: ${projectConfigPath(cwd)} sets security.incidents.halt looser than ${ensoConfigPath(home)} does — ignored: a project may only tighten it.`,
   ])
 })
 
