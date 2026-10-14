@@ -19,10 +19,14 @@ Actions review.
 ## 1. Start in your own worktree
 
 ```bash
-git -C <main checkout> fetch origin
-git -C <main checkout> worktree add -b <type>/<issue>-<slug> ../zhf-<issue> origin/main
-cd ../zhf-<issue> && bun install
+git -C <repos>/zen-harness-foundation fetch origin
+git -C <repos>/zen-harness-foundation worktree add -b <type>/<issue>-<slug> <repos>/zhf-<issue> origin/main
+cd <repos>/zhf-<issue> && bun install
 ```
+
+`<repos>` is the directory that holds the owner's checkout, `zen-harness-foundation`. Use absolute
+paths: `git -C` resolves a relative path against the checkout, while `cd` resolves it against where
+you are, so one relative `../zhf-<issue>` names two different places.
 
 - `<type>` is one of `feat`, `fix`, `docs`, `design`, `chore`, `test`, `refactor`, `ui`, as the
   existing branches use.
@@ -36,8 +40,9 @@ cd ../zhf-<issue> && bun install
 `git commit` runs `.githooks/pre-commit`, which runs `bun run check:all` (`scripts/gate.ts`, the
 same gate CI runs). It takes 3–5 minutes.
 
-- **Never `--no-verify`.** A failing gate is a finding: fix its cause. The gates and what each holds
-  are in `docs/verification.md`.
+- **Never `--no-verify` on a commit you push.** The hook allows it for a local work-in-progress commit
+  (its header says so), but every pushed commit has passed the gate. A failing gate is a finding: fix
+  its cause. The gates and what each holds are in `docs/verification.md`.
 - **The ones that surprise newcomers:**
   - the source-citation gate: docs cite code as `path#Name`, never with a line number;
   - the CRAP ratchet: an untested function with complexity has to be tested, or pinned in
@@ -53,7 +58,8 @@ Use `.github/pull_request_template.md` as written:
 - `Closes #<n>`, or `Refs #<n>` when the PR is only part of the issue;
 - **Why**, **What** (every contract that moved), **Acceptance** (each item ticked with where it is
   held), **Screenshots** ("No UI change" when there is none);
-- **Checks**: only what you ran, with its result.
+- **Checks**: only what you ran, with its result;
+- **Not in this PR**: what the PR deliberately leaves for later, with its issue.
 
 Then notify the reviewer (step 4).
 
@@ -66,11 +72,13 @@ bun run review-notify          # the current branch's PR
 bun run review-notify <number> # or name it
 ```
 
-It only queues the PR (`~/.cache/enso-review/queue/<number>`). The running worker reviews it within
-about 10 seconds, and the review takes 2–5 minutes.
+It only queues the PR (`~/.cache/enso-review/queue/<number>`). An idle worker picks it up within
+about 10 seconds; a busy one finishes the review in progress first. Each review takes 2–5 minutes.
 
-- **If you forget, nothing is lost:** the worker's poll finds the push within 3 minutes. Notifying just
-  makes it immediate.
+- **Always notify.** While the worker runs, its poll also finds an un-notified push within 3 minutes.
+  But a push made **while the worker is stopped** is reviewed only if it was notified: the queue
+  survives a restart, and the worker starts from a baseline of the current heads, which counts an
+  un-notified push as already seen. When in doubt, notify again; a head already reviewed is skipped.
 - **To check the worker is running:** `cat ~/.cache/enso-review/worker.lock` names its pid, and
   `kill -0 <pid>` succeeds. If no worker is running, **tell the owner; do not start one.** There is one
   per machine, run from `../zhf-review-worker`. The review happens when it starts.
@@ -94,7 +102,8 @@ gh api repos/dopamine911/zen-harness-foundation/issues/<number>/comments --pagin
 
 - **Check the status's `head=`** against the SHA you pushed. A review of an older head is not a
   review of your fix.
-- **A ❌ status** means no review was posted; the next poll retries. A ✅ with "docker-agent exited 1
+- **A ❌ status** means no review was posted. A running worker tries that head again at its next poll
+  (every 3 minutes). If no worker is running, notify again once one is. A ✅ with "docker-agent exited 1
   after the review was posted" is a known upstream issue, and the review stands.
 - **Verdicts:** Ship it, Approve-with-nits, or Needs work. A finding marked **blocker** or
   **load-bearing** must be answered before you call the PR done.
@@ -106,7 +115,8 @@ gh api repos/dopamine911/zen-harness-foundation/issues/<number>/comments --pagin
    reproduce is answered with what you ran.
 2. **Fix with a test that fails before the fix and passes after.** Where you can, show that it fails on
    the old code.
-3. **Commit, push, notify** (steps 2 and 4). The next review covers only the new commits.
+3. **Commit, push, notify** (steps 2 and 4). The next review covers the commits since the head it last
+   reviewed, in the context of the whole PR. After a force-push it reviews the whole PR again.
 4. **Reply on the PR**, one line per finding: `fixed in <sha>`, or `not changed: <reason>`. Never write
    "fixed" without the commit.
 
@@ -130,9 +140,10 @@ git fetch origin && git merge origin/main
 
 ## 8. CI while GitHub Actions is blocked
 
-Since 2026-10-14 the account's Actions minutes are used up, until the limits reset, about two weeks
-on. Every check then "fails" in about 3 seconds with the annotation "The job was not started because
-recent account payments have failed or your spending limit needs to be increased".
+While the account's Actions minutes are used up (as they were from 2026-10-14 until the next monthly
+reset), every check "fails" in about 3 seconds with the annotation "The job was not started because
+recent account payments have failed or your spending limit needs to be increased". Once checks run
+for minutes again, this section no longer applies: read them as real results.
 
 - **That is not a failure of your change.** Do not try to fix it, and do not report it as one.
 - **The evidence is the local gate**, which ran when you committed. Say so under **Checks**.

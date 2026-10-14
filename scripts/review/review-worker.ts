@@ -89,14 +89,34 @@ function takeLock(): number | undefined {
   return undefined
 }
 
-/** Reviews each pull request in turn; one that fails is logged and does not stop the rest. */
-async function reviewEach(numbers: readonly number[]): Promise<void> {
+/** Reviews each pull request in turn; one that fails is logged and does not stop the rest. Answers the ones that failed. */
+async function reviewEach(numbers: readonly number[]): Promise<Set<number>> {
+  const failed = new Set<number>()
   for (const number of numbers) {
     try {
-      log(await reviewPullRequest({ number, dryRun: false }))
+      const result = await reviewPullRequest({ number, dryRun: false })
+      log(result.summary)
+      if (result.failed) failed.add(number)
     } catch (error: unknown) {
       log(`#${number}: review failed — ${String(error)}`)
+      failed.add(number)
     }
+  }
+  return failed
+}
+
+/**
+ * Records the heads a poll saw, except those of pull requests whose review just failed. ⚠ A failed
+ * review's head stays unseen, so the next poll tries it again; recording it would leave a failed head
+ * unreviewed until the next push (#993's review).
+ */
+export function recordSeenHeads(
+  lastSeenHeads: Map<number, string>,
+  open: readonly OpenPullRequest[] | undefined,
+  failed: ReadonlySet<number>,
+): void {
+  for (const pullRequest of open ?? []) {
+    if (!failed.has(pullRequest.number)) lastSeenHeads.set(pullRequest.number, pullRequest.headRefOid)
   }
 }
 
@@ -110,8 +130,8 @@ async function workerPass(lastSeenHeads: Map<number, string>, poll: boolean): Pr
       log(`poll failed — ${String(error)}`)
     }
   }
-  await reviewEach(pullRequestsToReview(drainReviewQueue(), open, lastSeenHeads))
-  for (const pullRequest of open ?? []) lastSeenHeads.set(pullRequest.number, pullRequest.headRefOid)
+  const failed = await reviewEach(pullRequestsToReview(drainReviewQueue(), open, lastSeenHeads))
+  recordSeenHeads(lastSeenHeads, open, failed)
 }
 
 /** What the command line asks of the worker. */

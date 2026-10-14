@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { notifyArgument } from '../review/review-notify.ts'
 import { drainReviewQueue, enqueueReview } from '../review/review-queue.ts'
-import { type OpenPullRequest, parseWorkerArguments, pullRequestsToReview } from '../review/review-worker.ts'
+import {
+  type OpenPullRequest,
+  parseWorkerArguments,
+  pullRequestsToReview,
+  recordSeenHeads,
+} from '../review/review-worker.ts'
 
 const HEAD = 'a'.repeat(40)
 const NEWER = 'b'.repeat(40)
@@ -75,4 +80,16 @@ test('review-notify takes a pull request number, or none for the current branch'
   expect(notifyArgument(['989'])).toBe(989)
   expect(notifyArgument([])).toBeUndefined()
   expect(() => notifyArgument(['main'])).toThrow()
+})
+
+/** ⚠ A FAILED REVIEW IS RETRIED BY THE NEXT POLL (#993's review): its head is not recorded as seen. */
+test("⚠ a poll records every head it saw except a failed review's, which the next poll names again", () => {
+  const open: OpenPullRequest[] = [
+    { number: 1, headRefOid: NEWER, isDraft: false },
+    { number: 2, headRefOid: NEWER, isDraft: false },
+  ]
+  const seen = new Map<number, string>()
+  recordSeenHeads(seen, open, new Set([2]))
+  expect(seen).toEqual(new Map([[1, NEWER]]))
+  expect(pullRequestsToReview([], open, seen)).toEqual([2])
 })

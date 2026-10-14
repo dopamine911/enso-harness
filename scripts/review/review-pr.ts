@@ -347,6 +347,12 @@ function runReviewer(tree: string, runDirectory: string, prompt: string, poster:
   return reviewer.exitCode
 }
 
+/** What one run did: a line for the terminal, and whether it failed (no review reached the pull request). */
+export interface ReviewResult {
+  readonly summary: string
+  readonly failed: boolean
+}
+
 export interface ReviewOptions {
   readonly number: number
   readonly dryRun: boolean
@@ -401,8 +407,23 @@ interface ReviewRun {
   readonly tree: string
 }
 
+/** The terminal line for one run: what was posted (or that nothing was), docker-agent's exit, a missing comment list, the log. */
+export function runSummary(run: {
+  readonly number: number
+  readonly posted: boolean
+  readonly where: string
+  readonly scope: string
+  readonly agentExitCode: number
+  readonly listProblem: string | undefined
+  readonly log: string
+}): string {
+  const outcome = run.posted ? `reviewed (${run.scope}); comment ${run.where}` : 'FAILED: no review comment was posted'
+  const listNote = run.listProblem === undefined ? '' : `; ${run.listProblem}`
+  return `#${run.number}: ${outcome}; docker-agent exited ${run.agentExitCode}${listNote}; log ${run.log}`
+}
+
 /** Everything after the worktree exists: context, settings, the reviewer, the status. */
-function reviewInWorktree(review: ReviewRun): string {
+function reviewInWorktree(review: ReviewRun): ReviewResult {
   const { poster, options, pullRequest, repository, plan, runDirectory, tree } = review
   const config = readReviewWorkflow(
     run(['git', 'show', `${pullRequest.baseRefOid}:${REVIEW_WORKFLOW_PATH}`], { cwd: tree }),
@@ -430,14 +451,20 @@ function reviewInWorktree(review: ReviewRun): string {
     const body = statusCommentBody({ posted, headSha: pullRequest.headRefOid, scope: plan.scope, agentExitCode })
     upsertStatusComment(repository, options.number, body, poster)
   }
-  const where = options.dryRun ? `captured to ${capture}` : `posted to the pull request as ${poster.login}`
-  const outcome = posted ? `reviewed (${plan.scope}); comment ${where}` : 'FAILED: no review comment was posted'
-  const listNote = listProblem === undefined ? '' : `; ${listProblem}`
-  return `#${options.number}: ${outcome}; docker-agent exited ${agentExitCode}${listNote}; log ${join(runDirectory, 'review.log')}`
+  const summary = runSummary({
+    number: options.number,
+    posted,
+    where: options.dryRun ? `captured to ${capture}` : `posted to the pull request as ${poster.login}`,
+    scope: plan.scope,
+    agentExitCode,
+    listProblem,
+    log: join(runDirectory, 'review.log'),
+  })
+  return { summary, failed: !posted }
 }
 
 /** One review of one pull request, start to finish. Returns what happened, for the terminal. */
-export async function reviewPullRequest(options: ReviewOptions): Promise<string> {
+export async function reviewPullRequest(options: ReviewOptions): Promise<ReviewResult> {
   const repository = repositoryName()
   const poster = await reviewPoster(repository)
   const pullRequest = readPullRequest(options.number, poster)
@@ -450,7 +477,7 @@ export async function reviewPullRequest(options: ReviewOptions): Promise<string>
       Bun.spawnSync(['git', 'merge-base', '--is-ancestor', sha, pullRequest.headRefOid], { cwd: REPOSITORY_ROOT })
         .exitCode === 0,
   )
-  if (plan.kind === 'skip') return `#${options.number}: skipped — ${plan.reason}`
+  if (plan.kind === 'skip') return { summary: `#${options.number}: skipped — ${plan.reason}`, failed: false }
   const runDirectory = join(
     RUNS_DIRECTORY,
     `pr-${options.number}-${pullRequest.headRefOid.slice(0, SHORT_SHA_LENGTH)}-${Date.now()}`,
@@ -473,5 +500,5 @@ export function parseReviewArguments(argv: readonly string[]): ReviewOptions {
 }
 
 if (import.meta.main) {
-  process.stdout.write(`${await reviewPullRequest(parseReviewArguments(process.argv.slice(2)))}\n`)
+  process.stdout.write(`${(await reviewPullRequest(parseReviewArguments(process.argv.slice(2)))).summary}\n`)
 }
