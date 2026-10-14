@@ -2,7 +2,7 @@ import { type EnsoGitFileChange, type EnsoGitFileText, EnsoThreadChangedFile } f
 import { useEffect, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { type HighlightedLines, highlightLines, languageOf, type SyntaxLanguage } from './diff-highlight.ts'
-import { agreesWith, type DiffHunk, linesOf, type Side } from './diff-rows.ts'
+import { agreesWith, type DiffHunk, linesOf, type Side, sameHiddenLines } from './diff-rows.ts'
 import { readSchemaRoute } from './route-read.ts'
 
 /**
@@ -12,8 +12,11 @@ import { readSchemaRoute } from './route-read.ts'
  * ⚠ THE FILE MUST BE THE ONE THE PATCH WAS CUT FROM. The file is read after the patch, and the
  * agent may have changed it in between; lines from a newer file would be shown under the patch's
  * numbers. So a side is used only when every line the hunks show of it is the file's line at its
- * number (`agreesWith`); one that is not waits for the next read of the changes, which brings a new
- * patch and reads the file again.
+ * number (`agreesWith`) — and that holds only the lines the hunks show. The old side is preferred:
+ * a blob at the baseline does not change. When the new side is text the hunks show too, the two
+ * must also hold the same unchanged lines (`sameHiddenLines`), so an edit inside a run since the
+ * patch is caught on whichever side made it. A file that fails waits for the next read of the
+ * changes, which brings a new patch and reads the file again.
  */
 
 /** What `GET …/changes/file` gave: the file, or why not. */
@@ -86,6 +89,26 @@ function agreeingLines(text: EnsoGitFileText, hunks: readonly DiffHunk[], side: 
   return agreesWith(hunks, lines, side) ? lines : undefined
 }
 
+/** Whether the hunks number any line on the new side — whether there is a new file of the patch's at all. */
+const showsNew = (hunks: readonly DiffHunk[]): boolean =>
+  hunks.some((hunk) => hunk.lines.some((line) => line.newNumber !== null))
+
+const CHANGED_SINCE: Expansion = {
+  kind: 'blocked',
+  why: 'changed since this diff',
+  detail: 'the file changed after this diff was read; it expands once the diff reads again',
+}
+
+/**
+ * A type change (a file become a symbolic link, or one become a file) is two patches of two files
+ * — all of one removed, all of the other added — and has no unchanged lines between them.
+ */
+const TYPE_CHANGED: Expansion = {
+  kind: 'blocked',
+  why: 'a type change',
+  detail: 'the old and new sides are different kinds of file, with no unchanged lines between them',
+}
+
 /** Why neither side can be shown from, the plainest reason first. */
 function blockedBy(file: EnsoThreadChangedFile): Expansion {
   const sides = [file.newText, file.oldText]
@@ -98,10 +121,7 @@ function blockedBy(file: EnsoThreadChangedFile): Expansion {
       detail: `the file is ${size}, past the most sent to the page`,
     }
   }
-  if (sides.some((side) => side.kind === 'text')) {
-    const detail = 'the file changed after this diff was read; it expands once the diff reads again'
-    return { kind: 'blocked', why: 'changed since this diff', detail }
-  }
+  if (sides.some((side) => side.kind === 'text')) return CHANGED_SINCE
   if (sides.some((side) => side.kind === 'binary'))
     return { kind: 'blocked', why: 'a binary file', detail: 'a binary file has no lines' }
   const unavailable = sides.find((side) => side.kind === 'unavailable')
@@ -110,22 +130,30 @@ function blockedBy(file: EnsoThreadChangedFile): Expansion {
 }
 
 /**
- * What the unchanged runs of a file whose patch is `hunks` can be shown from: the new side's lines,
- * else the old side's — the runs are the same on both — each only while it agrees with the patch.
+ * What the unchanged runs of a file whose patch is `hunks` can be shown from: the old side's lines
+ * — held to the new side's unchanged lines too when the hunks show the new side as text — else the
+ * new side's, each only while it agrees with the patch. Never for a type change.
  */
 export function expansionOf(
   readFile: ReadChangedFile | undefined,
   outcome: ChangedFileOutcome | undefined,
+  change: Pick<EnsoGitFileChange, 'status'>,
   hunks: readonly DiffHunk[],
 ): Expansion {
   if (readFile === undefined) return { kind: 'off' }
+  if (change.status === 'type-changed') return TYPE_CHANGED
   if (outcome === undefined) return { kind: 'reading' }
   if (outcome.kind === 'failed') return { kind: 'blocked', why: "can't be read", detail: outcome.problem }
   const { file } = outcome
-  const newLines = agreeingLines(file.newText, hunks, 'new')
-  if (newLines !== undefined) return { kind: 'ready', lines: newLines, side: 'new' }
+  const newLines = file.newText.kind === 'text' ? linesOf(file.newText.text) : undefined
   const oldLines = agreeingLines(file.oldText, hunks, 'old')
-  if (oldLines !== undefined) return { kind: 'ready', lines: oldLines, side: 'old' }
+  if (oldLines !== undefined) {
+    // The new side, where the hunks show it as text, must hold the same unchanged lines.
+    const held = newLines === undefined || !showsNew(hunks) || sameHiddenLines(hunks, oldLines, newLines)
+    return held ? { kind: 'ready', lines: oldLines, side: 'old' } : CHANGED_SINCE
+  }
+  if (newLines !== undefined && agreesWith(hunks, newLines, 'new'))
+    return { kind: 'ready', lines: newLines, side: 'new' }
   return blockedBy(file)
 }
 

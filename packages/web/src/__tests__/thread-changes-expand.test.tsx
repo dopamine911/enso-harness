@@ -11,8 +11,8 @@ import { waitUntil } from './wait-until.ts'
 /**
  * #461: the Diff view mounted — a `N unchanged lines` count opens those lines, numbered on both
  * sides, from the file read whole; a file too large to send stays unexpandable and says so; and a
- * file that changed after its patch is never shown under the patch's numbers. Each line takes its
- * syntax's theme-token classes.
+ * file that changed after its patch is never shown under the patch's numbers, nor a deleted file's
+ * lines as unchanged ones. Each line takes its syntax's theme-token classes.
  */
 
 // Dynamic, not static: react-dom/client must load after the DOM exists (`dom-environment.ts`).
@@ -70,7 +70,7 @@ const answering =
   (change): Promise<ChangedFileOutcome> =>
     Promise.resolve({ kind: 'read', file: { threadId: 't1', ...change, oldText, newText } })
 
-async function mount(readFile: ReadChangedFile): Promise<HTMLElement> {
+async function mount(readFile: ReadChangedFile, change: EnsoGitFileChange = CONFIG): Promise<HTMLElement> {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
@@ -83,7 +83,7 @@ async function mount(readFile: ReadChangedFile): Promise<HTMLElement> {
             threadId: 't1',
             cwd: '/work/shop-api',
             git: REPOSITORY,
-            files: [CONFIG],
+            files: [change],
             truncated: false,
             copy: null,
           },
@@ -173,4 +173,91 @@ test("a line takes its syntax's theme-token classes once the file is tokenised",
   expect(container.querySelector('table .text-muted-foreground:not(td)')).not.toBeNull()
   // The text a reader copies is unchanged.
   expect(rowsOf(container).find((row) => row[0] === '2')?.[2]).toBe('− const alpha = 1')
+})
+
+/** A reader that answers `file`'s two sides, and says when it was asked. */
+function readingOnce(
+  oldText: EnsoGitFileText,
+  newText: EnsoGitFileText,
+): { read: ReadChangedFile; asked: () => boolean } {
+  let asked = false
+  return {
+    read: (change) => {
+      asked = true
+      return Promise.resolve({ kind: 'read', file: { threadId: 't1', ...change, oldText, newText } })
+    },
+    asked: () => asked,
+  }
+}
+
+/** Mounted, its file read and the read drawn. */
+async function mountRead(reader: ReturnType<typeof readingOnce>, change: EnsoGitFileChange): Promise<HTMLElement> {
+  const container = await mount(reader.read, change)
+  await waitUntil(reader.asked)
+  await act(async () => {
+    await Promise.resolve()
+  })
+  return container
+}
+
+const DELETED_LINES = ['a', 'b', 'c']
+
+test('⚠ a file become a symbolic link offers no unchanged lines: the deleted file is never drawn as context after the link', async () => {
+  const typeChanged: EnsoGitFileChange = {
+    path: 'f.ts',
+    oldPath: null,
+    status: 'type-changed',
+    added: 1,
+    removed: 3,
+    patch: [
+      'diff --git a/f.ts b/f.ts',
+      'deleted file mode 100644',
+      '@@ -1,3 +0,0 @@',
+      '-a',
+      '-b',
+      '-c',
+      'diff --git a/f.ts b/f.ts',
+      'new file mode 120000',
+      '@@ -0,0 +1 @@',
+      '+elsewhere',
+      '\\ No newline at end of file',
+      '',
+    ].join('\n'),
+    omitted: null,
+  }
+  const container = await mountRead(
+    readingOnce(text(DELETED_LINES), { kind: 'unavailable', reason: 'a symbolic link, which is not followed' }),
+    typeChanged,
+  )
+  expect(container.textContent).not.toContain('unchanged line')
+})
+
+test('⚠ a file deleted from the index but kept on disk (`git rm --cached`) offers no unchanged lines from the disk', async () => {
+  const untracked: EnsoGitFileChange = {
+    path: 'f.ts',
+    oldPath: null,
+    status: 'deleted',
+    added: 0,
+    removed: 3,
+    patch: ['diff --git a/f.ts b/f.ts', 'deleted file mode 100644', '@@ -1,3 +0,0 @@', '-a', '-b', '-c', ''].join('\n'),
+    omitted: null,
+  }
+  const container = await mountRead(readingOnce(text(DELETED_LINES), text(DELETED_LINES)), untracked)
+  expect(container.textContent).not.toContain('unchanged line')
+})
+
+test('⚠ a same-length edit inside a hidden run since the patch is caught: changed since this diff, never drawn as unchanged', async () => {
+  // `e` → `E` at line 6, inside the run between the hunks: every line the patch shows still agrees.
+  const container = await mount(answering(text(NEW.with(5, 'E'))))
+  await waitUntil(() => (container.textContent ?? '').includes('changed since this diff'))
+  expect(countButton(container, 'unchanged lines')).toBeUndefined()
+})
+
+test('one side too large, the other agreeing: the runs expand from the other', async () => {
+  const large: EnsoGitFileText = { kind: 'too-large', bytes: 700 * 1024 }
+  for (const container of [await mount(answering(text(NEW), large)), await mount(answering(large))]) {
+    await waitUntil(() => countButton(container, '6 unchanged lines') !== undefined)
+    await act(async () => countButton(container, '6 unchanged lines')?.click())
+    expect(rowsOf(container).find((row) => row[0] === '6')).toEqual(['6', '6', 'e'])
+  }
 })

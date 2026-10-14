@@ -34,6 +34,8 @@ const LEGEND = Object.entries(STATUS_LETTER)
 const MAX_CHANGED_FILES = numberIn('packages/core/src/git.ts', 'MAX_CHANGED_FILES')
 /** The largest file the Diff view reads whole to expand, either side, in KiB (`git.ts`). */
 const MAX_FILE_TEXT_KIB = numberIn('packages/core/src/git.ts', 'MAX_FILE_TEXT_BYTES') / 1024
+/** The longest line the Diff view colours, in characters (`diff-highlight.ts`). */
+const MAX_TOKENIZED_LINE = numberIn('packages/web/src/diff-highlight.ts', 'MAX_TOKENIZED_LINE')
 
 const PANEL: MarkTarget = { role: 'tabpanel', name: 'Diff' }
 /** pi's one edit, as the diff shows its new line. */
@@ -106,9 +108,9 @@ export const DIFF: FeatureSpec = {
     'It never fetches, pushes or changes anything in git. "The last push" is what this copy last saw of the remote; run `git fetch` yourself to update it. How the baseline is chosen is in [Sessions and projects](./sessions-and-projects.md).',
     "It shows what differs, not who changed it. An edit you made before the session appears beside pi's.",
     `A binary file, one too large to send to the page, or one git did not produce a diff for is listed without a diff, and says why. Past ${MAX_CHANGED_FILES} files the list stops and says so.`,
-    `A file larger than ${MAX_FILE_TEXT_KIB} KiB keeps its unchanged lines as counts, marked \`too large to expand\`. A file that changed again after its diff was read is marked \`changed since this diff\` until the tab reads again. Run \`git diff\` on the file to see it whole.`,
+    `When both the old and the new version of a file are larger than ${MAX_FILE_TEXT_KIB} KiB, its unchanged lines stay as counts, marked \`too large to expand\`. A file that changed again after its diff was read is marked \`changed since this diff\` until the tab reads again. Run \`git diff\` on the file to see it whole.`,
     'Only a file inside the project is read whole. A project inside a larger repository never reads a file outside its own folder.',
-    'Syntax colours cover common languages, such as TypeScript, JavaScript, Python, Go, Rust, shell, JSON, YAML, CSS, HTML and Markdown. A file in any other language is shown uncoloured, and so is a line longer than 1000 characters.',
+    `Syntax colours cover common languages, such as TypeScript, JavaScript, Python, Go, Rust, shell, JSON, YAML, CSS, HTML and Markdown. A file in any other language is shown uncoloured, and so is a line longer than ${MAX_TOKENIZED_LINE} characters.`,
   ],
   see: [
     {

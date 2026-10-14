@@ -39,7 +39,7 @@
 
 import { type ChildProcess, execFile } from 'node:child_process'
 import { constants, existsSync, lstatSync } from 'node:fs'
-import { open, realpath } from 'node:fs/promises'
+import { type FileHandle, lstat, open, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
   EnsoGitBaseline,
@@ -463,9 +463,12 @@ export async function readGitState(runGit: GitRunner, cwd: string): Promise<Enso
 /**
  * The files under `scope` and nothing else: from the top level whatever the cwd (`top`), and
  * character for character, so a directory named `[x]` or `*` is not a pattern (`literal`). An empty
- * scope is the whole working tree.
+ * scope is the whole working tree. The one spelling of a path given to git — the snapshot store's
+ * too.
+ *
+ * @group Git
  */
-function scopePathspec(scope: string): string {
+export function scopePathspec(scope: string): string {
   return `:(top,literal)${scope}`
 }
 
@@ -837,7 +840,8 @@ export async function readGitChanges(
 
 /**
  * The largest file whose text is sent, either side, in bytes — the 512 KiB one file's patch may be
- * ({@link MAX_PATCH_CHARS}). A file past it is `too-large`: the Diff view cannot expand it, and says so.
+ * ({@link MAX_PATCH_CHARS}). A side past it is `too-large`; the Diff view cannot expand a file
+ * when neither side is within it, and says so.
  */
 const MAX_FILE_TEXT_BYTES = 512 * 1024
 
@@ -876,6 +880,14 @@ export interface ChangedFileTexts {
 }
 
 /**
+ * Whether the work tree's file is one the changes may list: listed, not listed (ignored), or the
+ * listing failed, in git's or the store's words.
+ *
+ * @group Git
+ */
+export type WorkTreeListing = 'listed' | 'not-listed' | { readonly failed: string }
+
+/**
  * Where {@link readFileTexts} reads a changed file: from `root`, the old side at `base` — `null`
  * before the first commit, where there is no old side — and the new side in the work tree.
  *
@@ -888,7 +900,7 @@ export interface FileTextPlace {
    * Whether the work tree's `path` is a file the changes may list — tracked, or untracked and not
    * ignored. One that is not is never read: an ignored `.env` is no more shown than listed.
    */
-  readonly listed: (path: string) => Promise<boolean>
+  readonly listed: (path: string) => Promise<WorkTreeListing>
 }
 
 const NO_FILE: EnsoGitFileText = { kind: 'none' }
@@ -930,24 +942,34 @@ async function readCommittedText(
   return shown.code === 0 ? textOf(shown.stdout) : unreadable(reasonOf(shown))
 }
 
+const LINKED = unreadable('a symbolic link, which is not followed')
+
 /**
  * `path`'s text in the work tree; none when nothing is there — a deleted file, or one under a
  * directory that became a file. ⚠ NEVER THROUGH A SYMBOLIC LINK: a link inside the scope can point
  * anywhere, so the file's real path must be the one asked for — no link on the way — and it is
- * opened `O_NOFOLLOW`, then held to a regular file of at most {@link MAX_FILE_TEXT_BYTES}. A file the
- * changes would not list is not read.
+ * opened `O_NOFOLLOW`. That guards only the last name, and the agent writes the tree meanwhile: a
+ * directory on the way may become a link between the check and the open. So the check runs again
+ * after the open, and the path must still name the very file opened (its device and inode). Then
+ * it is held to a regular file of at most {@link MAX_FILE_TEXT_BYTES}, and no more than its size
+ * at the open is read. A file the changes would not list is not read.
  */
 async function readWorkTreeText(place: FileTextPlace, path: string): Promise<EnsoGitFileText> {
   const asked = join(await realpath(place.root), path)
   try {
-    if ((await realpath(asked)) !== asked) return unreadable('a symbolic link, which is not followed')
-    if (!(await place.listed(path))) return unreadable('not a file the changes list: an ignored one')
+    if ((await realpath(asked)) !== asked) return LINKED
+    const listing = await place.listed(path)
+    if (listing === 'not-listed') return unreadable('not a file the changes list: an ignored one')
+    if (listing !== 'listed') return unreadable(`whether the changes list it is unknown: ${listing.failed}`)
     const file = await open(asked, constants.O_RDONLY | constants.O_NOFOLLOW)
     try {
       const facts = await file.stat()
+      if ((await realpath(asked)) !== asked) return LINKED
+      const there = await lstat(asked)
+      if (there.dev !== facts.dev || there.ino !== facts.ino) return unreadable('the file moved while it was read')
       if (!facts.isFile()) return unreadable('not a regular file')
       if (facts.size > MAX_FILE_TEXT_BYTES) return { kind: 'too-large', bytes: facts.size }
-      return textOf(await file.readFile('utf8'))
+      return await textUpTo(file, facts.size)
     } finally {
       await file.close()
     }
@@ -956,6 +978,22 @@ async function readWorkTreeText(place: FileTextPlace, path: string): Promise<Ens
     if (code === 'ENOENT' || code === 'ENOTDIR') return NO_FILE
     return unreadable(error instanceof Error ? error.message : String(error))
   }
+}
+
+/**
+ * The open `file`'s text, `size` bytes as its stat gave — one byte more is asked for, so a file
+ * that grew since is caught rather than read on past the cap.
+ */
+async function textUpTo(file: FileHandle, size: number): Promise<EnsoGitFileText> {
+  const buffer = Buffer.alloc(size + 1)
+  let filled = 0
+  while (filled < buffer.length) {
+    const { bytesRead } = await file.read(buffer, filled, buffer.length - filled, filled)
+    if (bytesRead === 0) break
+    filled += bytesRead
+  }
+  if (filled > size) return unreadable('the file grew while it was read')
+  return textOf(buffer.toString('utf8', 0, filled))
 }
 
 /**
@@ -1001,7 +1039,8 @@ export function readGitFileTexts(
           ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', scopePathspec(path)],
           root,
         )
-        return found.code === 0 && found.stdout.split('\0').includes(path)
+        if (found.code !== 0) return { failed: reasonOf(found) }
+        return found.stdout.split('\0').includes(path) ? 'listed' : 'not-listed'
       },
     },
     paths,

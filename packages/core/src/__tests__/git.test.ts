@@ -1,12 +1,13 @@
 import { expect, test } from 'bun:test'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Check } from 'typebox/value'
 import {
   type ChangedFileTexts,
   type GitRunner,
+  readFileTexts,
   readGitChanges,
   readGitFileTexts,
   readGitState,
@@ -679,4 +680,57 @@ test('⚠ reading a file whole runs no textconv or filter program the repository
     newText: { kind: 'text', text: 'two\n' },
   })
   expect(existsSync(ran)).toBe(false)
+})
+
+test('a nested file is read whole by its path from the top: the committed blob found without `-r`, the work tree beside it', async () => {
+  const directory = repository()
+  mkdirSync(join(directory, 'src', 'deep'), { recursive: true })
+  commit(directory, 'src/deep/x.ts', 'one\n')
+  // A sibling whose name the path starts with is not the file.
+  commit(directory, 'src/deep/x.ts.bak', 'not it\n')
+  writeFileSync(join(directory, 'src', 'deep', 'x.ts'), 'two\n')
+  expect(await textsAt(join(directory, 'src'), 'src/deep/x.ts')).toEqual({
+    oldText: { kind: 'text', text: 'one\n' },
+    newText: { kind: 'text', text: 'two\n' },
+  })
+})
+
+test('a listing that failed is said in its own words, never as an ignored file', async () => {
+  const directory = repository()
+  writeFileSync(join(directory, 'README.md'), 'two\n')
+  const failingList: GitRunner = (args, cwd) =>
+    args[0] === 'ls-files'
+      ? Promise.resolve({ code: 128, stdout: '', stderr: 'fatal: index file corrupt\n' })
+      : runGit(args, cwd)
+  const { newText } = await readGitFileTexts(failingList, await repositoryAt(directory), {
+    path: 'README.md',
+    oldPath: null,
+  })
+  expect(newText).toEqual({
+    kind: 'unavailable',
+    reason: 'whether the changes list it is unknown: fatal: index file corrupt',
+  })
+})
+
+test('⚠ a directory on the way swapped for a symbolic link between the check and the open is caught after the open', async () => {
+  const directory = repository()
+  mkdirSync(join(directory, 'dir'))
+  commit(directory, 'dir/f.txt', 'mine\n')
+  const outside = scratch('swapped-outside')
+  writeFileSync(join(outside, 'f.txt'), 'SECRET=hunter2\n')
+  const { newText } = await readFileTexts(
+    runGit,
+    {
+      root: directory,
+      base: null,
+      // The agent's move, made while the listing is out: `dir` becomes a link to elsewhere.
+      listed: () => {
+        renameSync(join(directory, 'dir'), join(directory, 'dir-was'))
+        symlinkSync(outside, join(directory, 'dir'))
+        return Promise.resolve('listed')
+      },
+    },
+    { path: 'dir/f.txt', oldPath: null },
+  )
+  expect(newText).toEqual({ kind: 'unavailable', reason: 'a symbolic link, which is not followed' })
 })

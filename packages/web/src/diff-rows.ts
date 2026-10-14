@@ -186,16 +186,45 @@ export function linesOf(text: string): string[] {
 }
 
 /**
- * Whether `lines` are the file the hunks were cut from on `side`: every line the hunks show of
- * that side is the file's line at its number. A file read after the patch, and changed between,
- * is not — and its lines would be shown under the wrong numbers.
+ * Whether `lines` are the file the hunks were cut from on `side`: the hunks show at least one line
+ * of that side, and every one they show is the file's line at its number. A side they show none of
+ * cannot be held to them — a deleted file's new side, or the old side of a type change's second
+ * part — and is not that file. A file read after the patch, and changed between, is not either —
+ * and its lines would be shown under the wrong numbers. ⚠ Only the lines the hunks show are held:
+ * an edit inside a hidden run passes (`sameHiddenLines` holds those).
  */
 export function agreesWith(hunks: readonly DiffHunk[], lines: readonly string[], side: Side): boolean {
-  return hunks.every((hunk) =>
+  let shown = false
+  const held = hunks.every((hunk) =>
     hunk.lines.every((line) => {
       const number = side === 'old' ? line.oldNumber : line.newNumber
-      return number === null || lines[number - 1] === line.text.replace(/\r$/, '')
+      if (number === null) return true
+      shown = true
+      return lines[number - 1] === line.text.replace(/\r$/, '')
     }),
+  )
+  return shown && held
+}
+
+/**
+ * Whether the old file's `oldLines` and the new one's `newLines` hold the same unchanged lines git
+ * left out — every run before a hunk, and the run after the last, as long and line for line the
+ * same. In the patch they are; a side edited inside a run since (`e` → `E`, no line added) is not.
+ */
+export function sameHiddenLines(
+  hunks: readonly DiffHunk[],
+  oldLines: readonly string[],
+  newLines: readonly string[],
+): boolean {
+  const last = hunks.at(-1)
+  if (last === undefined) return true
+  const afterOld = hiddenAfter(last, oldLines, 'old')
+  if (afterOld.count !== hiddenAfter(last, newLines, 'new').count) return false
+  const runs = [...hunks.map((hunk, hunkIndex) => hiddenBefore(hunk, hunks[hunkIndex - 1])), afterOld]
+  return runs.every((run) =>
+    Array.from({ length: run.count }, (_, offset) => offset).every(
+      (offset) => oldLines[run.oldStart + offset - 1] === newLines[run.newStart + offset - 1],
+    ),
   )
 }
 

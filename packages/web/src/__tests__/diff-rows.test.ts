@@ -1,5 +1,14 @@
 import { expect, test } from 'bun:test'
-import { agreesWith, hiddenAfter, hiddenBefore, hiddenRows, linesOf, parsePatch, splitRows } from '../diff-rows.ts'
+import {
+  agreesWith,
+  hiddenAfter,
+  hiddenBefore,
+  hiddenRows,
+  linesOf,
+  parsePatch,
+  sameHiddenLines,
+  splitRows,
+} from '../diff-rows.ts'
 
 /**
  * #452: git's unified diff, read the way git writes it, and laid out side by side the way a reader
@@ -180,6 +189,33 @@ test('a file read after its patch is held to it: a line the patch shows that the
   expect(agreesWith(hunks, oldLines.with(3, 'keep four, edited since'), 'old')).toBe(false)
   // A file too short for a line the patch shows does not agree either.
   expect(agreesWith(hunks, oldLines.slice(0, 10), 'old')).toBe(false)
+})
+
+test('⚠ a side the hunks show no line of is not the file they were cut from: a deleted file’s new side, a type change’s second part', () => {
+  // `git rm --cached f` keeps f on disk: the patch removes every line, and the file read is not its new side.
+  const deleted = parsePatch(['@@ -1,3 +0,0 @@', '-a', '-b', '-c'].join('\n'))
+  expect(agreesWith(deleted, ['a', 'b', 'c'], 'new')).toBe(false)
+  expect(agreesWith(deleted, ['a', 'b', 'c'], 'old')).toBe(true)
+  // A file become a symbolic link: all of the file removed, then the link's one line added.
+  const typeChange = parsePatch(['@@ -1,3 +0,0 @@', '-a', '-b', '-c', '@@ -0,0 +1 @@', '+elsewhere'].join('\n'))
+  expect(agreesWith(typeChange.slice(1), ['a', 'b', 'c'], 'old')).toBe(false)
+})
+
+/** TWO_EDITS' old file: fifteen lines, `two` and `eleven` as they were. */
+const TWO_EDITS_OLD = TWO_EDITS_NEW.filter((line) => !line.includes('and a half')).map(
+  (line) => ({ TWO: 'two', ELEVEN: 'eleven' })[line] ?? line,
+)
+
+test('⚠ both sides must hold the same unchanged lines: an edit inside a hidden run, or lines added past the last hunk, is caught', () => {
+  const hunks = parsePatch(TWO_EDITS)
+  expect(sameHiddenLines(hunks, TWO_EDITS_OLD, TWO_EDITS_NEW)).toBe(true)
+  // `six` → `SIX` inside the run between the hunks: the shown lines still agree, the runs do not.
+  const edited = TWO_EDITS_NEW.with(6, 'SIX')
+  expect(agreesWith(hunks, edited, 'new')).toBe(true)
+  expect(sameHiddenLines(hunks, TWO_EDITS_OLD, edited)).toBe(false)
+  // The same in the run after the last hunk, and that run grown by a line.
+  expect(sameHiddenLines(hunks, TWO_EDITS_OLD, TWO_EDITS_NEW.with(-1, 'FIFTEEN'))).toBe(false)
+  expect(sameHiddenLines(hunks, TWO_EDITS_OLD, [...TWO_EDITS_NEW, 'sixteen'])).toBe(false)
 })
 
 test("a file's lines: a final newline opens no extra line, a CRLF line's \\r is not part of it, an empty file has none", () => {
