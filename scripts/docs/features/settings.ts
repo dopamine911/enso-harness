@@ -60,17 +60,18 @@ const SECTIONS: MarkTarget = { role: 'navigation', name: 'Settings sections' }
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts · permissions · security · storage',
+  landingTagline: 'themes · fonts · permissions · security · projects & threads · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
     "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, set the file's other keys under **Behaviour**, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
     "**Security**: `config.json`'s `security` section, which only your own file may set. **Incidents**: whether an incident stops tools, and the four risk thresholds. **Command judge**: off, Jev or a local model server, the local server's address and model, and the TypeSafe key Jev needs. Each key is its own control, named by its file, key and default and checked when you leave it; one **Save** writes the file, keeping every key the page does not show. A save that finds a problem saves nothing and lists what to fix, each a link to its field. One that protects less (halting off, a looser threshold, the judge off) says so plainly and asks before it saves. The key is stored on its own line in `ENSO_HOME/secrets.env`; the page only ever says whether it is set. See [Incidents](./incidents.md).",
+    "**Projects & threads**: your defaults for every project, in `config.json`. **Projects**: the project roots, the folders a project must sit inside (only your own file can set them; none means any folder that passes Enso's standing checks, and a change applies from the server's next start), and the trust a project nobody has decided gets — asked at its first run, trusted, or not trusted (pi's `defaultProjectTrust`, set on its own with **Set**). **A new thread’s tree**: the mode, the setup commands (which run on your machine in every new tree, as the field says), the files to copy, and a project's own mode. These are your tier: a project's Worktrees tab shows which tier each value comes from, a value from your settings links back here, and the project's own files can override it. One **Save** writes the file, keeping every key the page does not show; a root that is neither absolute nor `~/` is refused, since the server would not start with it.",
     '**Storage**: the totals across every project (trees, what they take, and what the snapshot stores take), then each project with what it takes on disk (its trees plus its snapshot store, the number its card on the Projects page says), every thread tree with what it takes, and a Delete for each. See [Thread trees](./thread-trees.md).',
     "A project's own settings are on the project's page, not here: **Project settings…** in its menu on the rail. See [Thread trees](./thread-trees.md).",
   ],
   opens: [
     '{steps}, at the foot of the rail. Settings opens as a page in place of the thread, which keeps running behind it; opening a thread from the rail leaves the page.',
-    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions`, `security` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
+    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions`, `security`, `projects` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
   ],
   shots: [
     {
@@ -86,7 +87,7 @@ export const SETTINGS: FeatureSpec = {
       marks: [
         {
           target: SECTIONS,
-          says: 'The sections: **Appearance**, **Permissions**, **Security** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
+          says: 'The sections: **Appearance**, **Permissions**, **Security**, **Projects & threads** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
         },
         {
           // A card's name is its label then its scheme (`Tokyo Dark, dark`).

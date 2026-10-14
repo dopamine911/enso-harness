@@ -522,7 +522,12 @@ function ProjectTabs({
         <ThreadsTab project={project} pageThreads={pageThreads} stored={stored} onOpenThread={props.onOpenThread} />
       </TabsContent>
       <TabsContent value="worktrees">
-        <ProjectWorktrees projectId={project.projectId} fetch={fetchImpl} revision={trustRevision} />
+        <ProjectWorktrees
+          projectId={project.projectId}
+          fetch={fetchImpl}
+          revision={trustRevision}
+          onOpenSettings={() => onOpen({ kind: 'settings', section: 'projects' })}
+        />
       </TabsContent>
       <TabsContent value="storage">
         <ProjectStorage fetch={fetchImpl} project={project} stored={stored} onDeleted={props.onDeleted} />

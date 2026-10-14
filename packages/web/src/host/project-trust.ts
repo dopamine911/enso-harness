@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { hasTrustRequiringProjectResources, ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent'
-import { type EnsoTranscriptEntry, threadTrustsProject } from '@enso/core'
+import { type EnsoDefaultProjectTrust, type EnsoTranscriptEntry, threadTrustsProject } from '@enso/core'
 import { projectConfigPath, projectPromptsDir } from '@enso/core/paths'
 
 /**
@@ -61,6 +61,57 @@ export function hostedProjectTrust(
  */
 export function projectTrusted(project: string, agentDir: string): boolean {
   return hostedProjectTrust(project, project, agentDir, []).settingsManager.isProjectTrusted()
+}
+
+/** pi's settings as the user's, never a project's: the trust default is read from the agent dir only. */
+function userSettings(agentDir: string): SettingsManager {
+  return SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
+}
+
+/**
+ * What a project nobody decided gets (#934): pi's `defaultProjectTrust` (`ask` when unset), and the
+ * file it lives in — read by Settings › Projects & threads.
+ */
+export function readDefaultProjectTrust(agentDir: string): {
+  readonly trustPath: string
+  readonly defaultProjectTrust: EnsoDefaultProjectTrust
+} {
+  return {
+    trustPath: join(agentDir, 'settings.json'),
+    defaultProjectTrust: userSettings(agentDir).getDefaultProjectTrust(),
+  }
+}
+
+/** @group Project trust */
+export type DefaultProjectTrustWrite =
+  | { readonly kind: 'written'; readonly defaultProjectTrust: EnsoDefaultProjectTrust }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * Set pi's `defaultProjectTrust` (#934) through pi's own settings writer — its lock, every other key
+ * kept; a file pi cannot read is not written over. Each new session and project page builds its
+ * trust from that file afresh (`hostedProjectTrust`), so a change applies to the next one. The
+ * answer is the value read back.
+ */
+export async function writeDefaultProjectTrust(
+  agentDir: string,
+  value: EnsoDefaultProjectTrust,
+): Promise<DefaultProjectTrustWrite> {
+  const settings = userSettings(agentDir)
+  const unreadable = settings.drainErrors()
+  if (unreadable.length > 0) {
+    return {
+      kind: 'refused',
+      reason: `${join(agentDir, 'settings.json')} could not be read, so nothing was saved: ${unreadable.map(({ error }) => error.message).join('; ')}`,
+    }
+  }
+  settings.setDefaultProjectTrust(value)
+  await settings.flush()
+  const failed = settings.drainErrors()
+  if (failed.length > 0) {
+    return { kind: 'refused', reason: `not saved: ${failed.map(({ error }) => error.message).join('; ')}` }
+  }
+  return { kind: 'written', defaultProjectTrust: userSettings(agentDir).getDefaultProjectTrust() }
 }
 
 /**

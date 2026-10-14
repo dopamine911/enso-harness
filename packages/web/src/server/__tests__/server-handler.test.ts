@@ -848,7 +848,11 @@ async function settingsServer(options: {
   // file may not name pi (the vendor gate, #145).
   writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: options.trusted }))
   const userPath = join(mkdtempSync(join(tmpdir(), 'enso-settings-home-')), 'config.json')
-  const threadSettings = { user: { threads: { copy: ['.env'] } }, userPath, canonical: (key: string) => key }
+  const threadSettings = {
+    readUser: () => ({ threads: { copy: ['.env'] } }),
+    userPath,
+    canonical: (key: string) => key,
+  }
   const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, threadSettings })
   const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
   if (launch === undefined) throw new Error('no launch project')

@@ -74,7 +74,7 @@ function headingOf(page: PageUrl, projects: readonly EnsoProject[]): PageHeading
   if (page.kind === 'settings') {
     return {
       title: 'Settings',
-      subtitle: 'Appearance stays in this browser. Permissions, security and storage live on the server.',
+      subtitle: 'Appearance stays in this browser. Permissions, security, projects and storage live on the server.',
       status: 'Settings',
     }
   }

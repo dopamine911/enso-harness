@@ -2259,7 +2259,11 @@ function treeHost(
     permissionRulesPath,
     harnessPackageDir: harnessDir,
     projectsDir,
-    threadSettings: { user, userPath: join(tmpdir(), 'enso-home', 'config.json'), canonical: (key) => key },
+    threadSettings: {
+      readUser: () => user,
+      userPath: join(tmpdir(), 'enso-home', 'config.json'),
+      canonical: (key) => key,
+    },
     extensionFactories,
   })
   return { host, projectsDir }

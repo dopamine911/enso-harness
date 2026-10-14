@@ -1,5 +1,13 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { CheckIcon, ChevronRightIcon, FolderIcon, LayersIcon, LockIcon, ShieldAlertIcon } from 'lucide-react'
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  FolderIcon,
+  FolderTreeIcon,
+  LayersIcon,
+  LockIcon,
+  ShieldAlertIcon,
+} from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
@@ -17,6 +25,7 @@ import {
 import { cn } from './lib/utils.ts'
 import { SUB_TITLE } from './page-styles.ts'
 import { PermissionsSection, type PolicyEditor } from './permissions-settings.tsx'
+import { ProjectsSection } from './projects-settings.tsx'
 import { SecuritySection } from './security-settings.tsx'
 import { applyTheme, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
 import { SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
@@ -219,6 +228,7 @@ const SECTION_LINKS: Readonly<Record<SettingsSection, { readonly label: string; 
   appearance: { label: 'Appearance', icon: <LayersIcon /> },
   permissions: { label: 'Permissions', icon: <LockIcon /> },
   security: { label: 'Security', icon: <ShieldAlertIcon /> },
+  projects: { label: 'Projects & threads', icon: <FolderTreeIcon /> },
   storage: { label: 'Storage', icon: <FolderIcon /> },
 }
 
@@ -308,6 +318,7 @@ function SectionBody({
   if (section === 'appearance') return <AppearanceFields />
   if (section === 'permissions') return <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
   if (section === 'security') return <SecuritySection fetch={fetch} />
+  if (section === 'projects') return <ProjectsSection fetch={fetch} projects={projects} />
   return (
     <TreesSection
       fetch={fetch}
@@ -326,7 +337,7 @@ function SectionBody({
 function savedWhere(section: SettingsSection, permissions: PolicyEditor): string {
   if (section === 'appearance') return 'Saved in this browser'
   if (section === 'storage') return 'Measured on the server when you open this'
-  if (section === 'security') return 'Saved on the server · config.json'
+  if (section === 'security' || section === 'projects') return 'Saved on the server · config.json'
   const { state } = permissions
   return state.kind === 'loaded' ? `Saved on the server · ${state.policy.path}` : 'Saved on the server'
 }

@@ -13,7 +13,7 @@ import { createProjectRoutes } from './project-routes.ts'
 import { createProjectRegistry } from './projects.ts'
 import { createPromptLibrary, type PromptLibrary } from './prompt-library.ts'
 import { createPromptRoutes } from './prompt-routes.ts'
-import { createSecurityRoutes } from './security-routes.ts'
+import { createSettingsRoutes } from './settings-routes.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createThreadControlRoutes } from './thread-control-routes.ts'
 import { createThreadReadRoutes } from './thread-read-routes.ts'
@@ -259,7 +259,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const { dispatchPromptRoute } = promptRoutes
   const { dispatchPermissionRoute } = permissions
-  const { dispatchSecurityRoute } = createSecurityRoutes({ ensoHome: options.ensoHome })
+  const { dispatchSettingsRoute } = createSettingsRoutes({ ensoHome: options.ensoHome, agentDir: options.agentDir })
   const { previews } = reads
 
   /**
@@ -335,7 +335,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (dispatchProjectRoute(request, response)) return
     if (dispatchPromptRoute(request, response)) return
     if (dispatchPermissionRoute(request, response)) return
-    if (dispatchSecurityRoute(request, response)) return
+    if (dispatchSettingsRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

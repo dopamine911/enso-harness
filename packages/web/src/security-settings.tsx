@@ -7,16 +7,16 @@ import {
   type EnsoSecuritySettingsRead,
 } from '@enso/core'
 import { LockIcon, TriangleAlertIcon } from 'lucide-react'
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
-import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { Button } from './components/ui/button.tsx'
 import { FieldError } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { cn } from './lib/utils.ts'
 import { OptionSelect } from './option-select.tsx'
-import { PAGE_BUTTON, PAGE_INPUT, PAGE_OUTLINE_BUTTON, SAVE_BAR, SUB_TITLE } from './page-styles.ts'
+import { PAGE_BUTTON, PAGE_INPUT, PAGE_OUTLINE_BUTTON, SUB_TITLE } from './page-styles.ts'
 import { fetchSecuritySettings, saveJudgeKey, saveSecuritySettings } from './security-connection.ts'
+import { ConflictNotice, SaveBar, SettingRow, SettingsFileSection, SourceLine, useSending } from './settings-rows.tsx'
 
 /**
  * Settings › Security (#933): `config.json`'s user-only `security` section — whether an incident
@@ -223,92 +223,6 @@ type SaveProblem =
   | { readonly kind: 'refused'; readonly detail: string }
   | { readonly kind: 'unavailable'; readonly detail: string }
 
-type Load =
-  | { readonly kind: 'loading' }
-  | { readonly kind: 'unavailable'; readonly detail: string }
-  | { readonly kind: 'loaded'; readonly settings: EnsoSecuritySettingsRead }
-
-/** Where a key lives — `file` is its real path, as the server read it — and whether it is set there. */
-interface KeySource {
-  readonly id: string
-  readonly file: string
-  readonly keyPath: string
-  readonly set: boolean
-  readonly defaultText: string
-  readonly unsaved: boolean
-}
-
-/** Where a key stands in the file: set, or not there and its default is in force. */
-function SourceLine({ id, file, keyPath, set, defaultText, unsaved }: KeySource): React.ReactNode {
-  return (
-    <p id={id} className="text-xs break-words text-muted-foreground">
-      <span className="font-mono text-meta text-foreground">{file}</span> ›{' '}
-      <span className="font-mono text-meta text-foreground">{keyPath}</span> ·{' '}
-      {set ? 'set in the file' : `not in the file — the default is ${defaultText}`}
-      {unsaved ? (
-        <>
-          {' '}
-          · <span className="font-semibold text-chart-3">unsaved</span>
-        </>
-      ) : null}
-    </p>
-  )
-}
-
-/** One key's row: its words and where it lives on the left, its control on the right. */
-function SettingRow({
-  field,
-  help,
-  source,
-  problem,
-  stacked = false,
-  labelled,
-  children,
-}: {
-  field: FieldName
-  help: string
-  source: React.ReactNode
-  problem: string | undefined
-  stacked?: boolean
-  /** A control with no id to point a `<label>` at (the switch) names itself by the label's id. */
-  labelled?: boolean
-  children: React.ReactNode
-}): React.ReactNode {
-  const id = fieldId(field)
-  return (
-    <div
-      className={cn(
-        'grid items-start gap-x-6 gap-y-2 p-4 [&+&]:border-t',
-        stacked ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-setting-row',
-      )}
-    >
-      <div className="grid min-w-0 gap-1">
-        {labelled === true ? (
-          <span id={`${id}-label`} className="text-sm font-semibold">
-            {FIELD_LABELS[field]}
-          </span>
-        ) : (
-          <label id={`${id}-label`} htmlFor={id} className="text-sm font-semibold">
-            {FIELD_LABELS[field]}
-          </label>
-        )}
-        <p id={`${id}-help`} className="max-w-reading text-detail text-muted-foreground">
-          {help}
-        </p>
-        {source}
-      </div>
-      <div className={cn('grid min-w-0 gap-2', stacked ? 'justify-items-stretch' : 'md:justify-items-end')}>
-        {children}
-        {problem === undefined ? null : (
-          <FieldError id={`${id}-error`} className="justify-self-stretch">
-            {problem}
-          </FieldError>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function RemoveButton({ label, onClick }: { label: string; onClick: () => void }): React.ReactNode {
   return (
     <button
@@ -356,21 +270,12 @@ function JudgeKey({
 }): React.ReactNode {
   const id = useId()
   const [value, setValue] = useState('')
-  const [working, setWorking] = useState(false)
-  const [problem, setProblem] = useState<string | undefined>(undefined)
-  const store = (next: string | null): void => {
-    setWorking(true)
-    setProblem(undefined)
-    void saveJudgeKey({ value: next }, fetchImpl).then((saved) => {
-      setWorking(false)
-      if (saved.kind === 'unavailable') {
-        setProblem(`Not saved: ${saved.detail}`)
-        return
-      }
+  const { working, problem, send } = useSending()
+  const store = (next: string | null): void =>
+    send(saveJudgeKey({ value: next }, fetchImpl), (saved) => {
       setValue('')
       onSet(saved.judgeKeySet)
     })
-  }
   return (
     <div className="grid grid-cols-1 items-start gap-x-6 gap-y-2 p-4 [&+&]:border-t">
       <div className="grid min-w-0 gap-1">
@@ -427,22 +332,6 @@ function JudgeKey({
   )
 }
 
-/** The section's read, reloadable. */
-function useSecuritySettings(fetchImpl: FetchLike | undefined): {
-  load: Load
-  reload: () => void
-  replace: (settings: EnsoSecuritySettingsRead) => void
-} {
-  const [load, setLoad] = useState<Load>({ kind: 'loading' })
-  const reload = useCallback(() => {
-    void fetchSecuritySettings(fetchImpl).then((read) =>
-      setLoad(read.kind === 'loaded' ? { kind: 'loaded', settings: read.settings } : read),
-    )
-  }, [fetchImpl])
-  useEffect(reload, [reload])
-  return { load, reload, replace: (settings) => setLoad({ kind: 'loaded', settings }) }
-}
-
 function focusField(field: FieldName): void {
   const element = document.getElementById(fieldId(field))
   element?.scrollIntoView({ block: 'center' })
@@ -484,28 +373,8 @@ function SaveProblemNotice({
       </div>
     )
   }
-  if (problem.kind === 'conflict') {
-    return (
-      <div
-        role="alert"
-        aria-label="changed on disk"
-        className="grid gap-3 rounded-sm border border-chart-3 bg-card p-4 text-sm"
-      >
-        <p>
-          config.json changed on disk since it was read ({problem.detail}). Nothing was written. Reload to see the file
-          as it is now; your changes here are dropped.
-        </p>
-        <Button
-          variant="outline"
-          className={cn(PAGE_OUTLINE_BUTTON, 'justify-self-start')}
-          disabled={working}
-          onClick={onReload}
-        >
-          Reload from disk
-        </Button>
-      </div>
-    )
-  }
+  if (problem.kind === 'conflict')
+    return <ConflictNotice detail={problem.detail} working={working} onReload={onReload} />
   return <FieldError>Not saved: {problem.detail}</FieldError>
 }
 
@@ -643,7 +512,7 @@ function SecurityForm({
         />
       )}
       <SaveBar
-        dirtyKeys={dirty ? dirtyKeys : []}
+        dirtyLabels={dirty ? dirtyKeys.map((field) => FIELD_LABELS[field]) : []}
         path={settings.path}
         disabled={working || confirming !== undefined}
         onDiscard={discard}
@@ -680,7 +549,8 @@ function IncidentRows({ draft, setDraft, path, unsaved, shownProblem, leave }: G
       </p>
       <div className="rounded-lg border bg-card">
         <SettingRow
-          field="halt"
+          id={fieldId('halt')}
+          label={FIELD_LABELS['halt']}
           labelled
           help="Off, an incident is recorded and shown to you while pi carries on. On, pi’s tools are suspended until you look."
           source={
@@ -712,7 +582,8 @@ function IncidentRows({ draft, setDraft, path, unsaved, shownProblem, leave }: G
           return (
             <SettingRow
               key={key}
-              field={key}
+              id={fieldId(key)}
+              label={FIELD_LABELS[key]}
               help={help}
               source={
                 <SourceLine
@@ -767,7 +638,8 @@ function JudgeRows({
       <p className={PAGE_NOTE}>Applies from the next session. The key is read at the judge’s next call.</p>
       <div className="rounded-lg border bg-card">
         <SettingRow
-          field="backend"
+          id={fieldId('backend')}
+          label={FIELD_LABELS['backend']}
           help="A second opinion on commands pi wants to run. Jev is TypeSafe’s hosted judge; local is your own llama.cpp router on this machine. A local judge’s address and model are kept only while the judge is local."
           source={
             <SourceLine
@@ -801,7 +673,8 @@ function JudgeRows({
               return (
                 <SettingRow
                   key={field}
-                  field={field}
+                  id={fieldId(field)}
+                  label={FIELD_LABELS[field]}
                   stacked
                   help={
                     field === 'baseUrl' ? 'Where your llama.cpp router listens.' : 'The model name the router serves.'
@@ -840,82 +713,18 @@ function JudgeRows({
   )
 }
 
-interface SaveBarProps {
-  readonly dirtyKeys: readonly FieldName[]
-  readonly path: string
-  readonly disabled: boolean
-  readonly onDiscard: () => void
-  readonly onSave: () => void
-}
-
-/** Discard and the one Save for the file, and what is unsaved: pinned while there is something to save. */
-function SaveBar({ dirtyKeys, path, disabled, onDiscard, onSave }: SaveBarProps): React.ReactNode {
-  const dirty = dirtyKeys.length > 0
-  return (
-    <div
-      role="region"
-      aria-label="unsaved settings"
-      className={dirty ? SAVE_BAR : 'flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3'}
-    >
-      <span className="min-w-50 flex-1 text-sm">
-        <strong className="block">
-          {dirty ? `${dirtyKeys.length} unsaved ${dirtyKeys.length === 1 ? 'change' : 'changes'}` : 'saved'}
-        </strong>
-        <span className="font-mono text-meta break-words text-muted-foreground">
-          {dirty ? `${dirtyKeys.map((field) => FIELD_LABELS[field]).join(' · ')} → ` : 'Saves to '}
-          {path}
-        </span>
-      </span>
-      <Button variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={!dirty || disabled} onClick={onDiscard}>
-        Discard
-      </Button>
-      <Button className={PAGE_BUTTON} disabled={!dirty || disabled} onClick={onSave}>
-        Save
-      </Button>
-    </div>
-  )
-}
-
 /** Settings' Security section. */
 export function SecuritySection({ fetch: fetchImpl }: { fetch: FetchLike | undefined }): React.ReactNode {
-  const { load, reload, replace } = useSecuritySettings(fetchImpl)
-  if (load.kind === 'loading') return <p className={PAGE_NOTE}>reading config.json…</p>
-  if (load.kind === 'unavailable') {
-    return (
-      <Alert variant="destructive" aria-label="security settings unavailable">
-        <TriangleAlertIcon />
-        <AlertTitle>Security settings could not be read</AlertTitle>
-        <AlertDescription>{load.detail}</AlertDescription>
-        <Button variant="outline" className={cn(PAGE_OUTLINE_BUTTON, 'mt-2 justify-self-start')} onClick={reload}>
-          Try again
-        </Button>
-      </Alert>
-    )
-  }
-  const { settings } = load
   return (
-    <div className="flex flex-col gap-8">
-      <p className="max-w-reading text-muted-foreground">
-        When Enso counts a run as risky, and who judges a command. These live in your own file only — a project can’t
-        change them.
-      </p>
-      {settings.kind === 'unreadable' ? (
-        <Alert variant="destructive" aria-label="unreadable config">
-          <TriangleAlertIcon />
-          <AlertTitle>config.json cannot be read</AlertTitle>
-          <AlertDescription>
-            Everything that reads it fails closed: incidents halt with the default thresholds, the judge is off, and the
-            server will not start again until it is fixed. {settings.reason}. Fix {settings.path} by hand, then reload.
-          </AlertDescription>
-          <Button variant="outline" className={cn(PAGE_OUTLINE_BUTTON, 'mt-2 justify-self-start')} onClick={reload}>
-            Reload
-          </Button>
-        </Alert>
-      ) : (
-        // A new version of the file (a save, a reload after a conflict) is the new baseline: the form
-        // starts again from it. Storing the key keeps the version, so an unsaved draft survives it.
+    <SettingsFileSection
+      fetchImpl={fetchImpl}
+      read={fetchSecuritySettings}
+      name="Security"
+      intro="When Enso counts a run as risky, and who judges a command. These live in your own file only — a project can’t change them."
+      consequence="Everything that reads it fails closed: incidents halt with the default thresholds, the judge is off, and the server will not start again until it is fixed."
+      form={(settings, replace, reload) => (
+        // Storing the key keeps the file's version, so an unsaved draft survives it.
         <SecurityForm
-          key={settings.etag ?? 'no file'}
           settings={settings}
           fetchImpl={fetchImpl}
           onSaved={replace}
@@ -923,6 +732,6 @@ export function SecuritySection({ fetch: fetchImpl }: { fetch: FetchLike | undef
           onKeySet={(judgeKeySet) => replace({ ...settings, judgeKeySet })}
         />
       )}
-    </div>
+    />
   )
 }

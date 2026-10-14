@@ -22,11 +22,12 @@ const log = ensoLogger('host')
 
 /**
  * What a project's tree settings resolve against (#754): the user's config — its `threads` is the
- * user tier — the file it came from, named on the project page, and how its project keys are
- * canonicalized (`~/code/app`, a trailing slash, a symlink: `canonicalConfigPath`).
+ * user tier — read afresh at each call, so a save in Settings › Projects & threads (#934) applies to
+ * the next tree and the next project page; the file it came from, named on the project page; and how
+ * its project keys are canonicalized (`~/code/app`, a trailing slash, a symlink: `canonicalConfigPath`).
  */
 export interface ProjectThreadSettingsSource {
-  readonly user: EnsoConfig
+  readonly readUser: () => EnsoConfig
   readonly userPath: string
   readonly canonical: (key: string) => string
 }
@@ -47,7 +48,7 @@ export function resolveProjectThreadSettings(
   readonly unreadable: EnsoProjectSettings['unreadable']
 } {
   const trusted = projectTrusted(project, agentDir)
-  const read = readProjectThreadSettings({ project, user: source.user, canonical: source.canonical, trusted })
+  const read = readProjectThreadSettings({ project, user: source.readUser(), canonical: source.canonical, trusted })
   for (const unreadable of read.unreadable) {
     log.warn('{path}, the {tier} tier of {project}, is unreadable and was not read (#754): {reason}', {
       project,
