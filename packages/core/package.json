@@ -6,6 +6,11 @@
   "description": "Every TypeBox schema in Enso's product. One place, so a shape cannot be duplicated by accident.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "files": [
+    "src",
+    "!src/__tests__",
+    "README.md"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./git": "./src/git.ts",
@@ -20,19 +25,19 @@
     "./secrets": "./src/secrets.ts",
     "./snapshot-store": "./src/snapshot-store.ts",
     "./thread-tree": "./src/thread-tree.ts",
-    "./tree-setup": "./src/tree-setup.ts",
-    "./flow-trace": "./src/__tests__/flow-trace.ts",
-    "./log-recorder": "./src/__tests__/log-recorder.ts",
-    "./observation-kinds": "./src/__tests__/observation-kinds.ts"
+    "./tree-setup": "./src/tree-setup.ts"
   },
   "dependencies": {
     "@logtape/file": "2.3.7",
     "@logtape/logtape": "2.3.7",
     "@logtape/pretty": "2.3.7",
-    "@logtape/redaction": "2.3.7",
-    "typebox": "^1.3.34"
+    "@logtape/redaction": "2.3.7"
   },
   "devDependencies": {
-    "@logtape/testing": "2.3.7"
+    "@enso/test-support": "*",
+    "typebox": "^1.3.34"
+  },
+  "peerDependencies": {
+    "typebox": "*"
   }
 }

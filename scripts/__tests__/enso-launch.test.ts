@@ -3,26 +3,20 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { flowTrace } from '@enso/core/flow-trace'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { permissionEngineConfigPath } from '@enso/core/permission-rules'
-import {
-  isPrintRun,
-  isRegisteredProject,
-  piArguments,
-  piVersionSupported,
-  piVersionText,
-  projectLine,
-  SUPPORTED_PI_VERSIONS,
-} from '../enso-launch.ts'
+import { flowTrace } from '@enso/test-support/flow-trace'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
+import { piVersionText, SUPPORTED_PI_VERSIONS } from '../../packages/core/src/supported-pi-versions.ts'
+import { isPrintRun, isRegisteredProject, piArguments, projectLine } from '../enso-launch.ts'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 /**
  * The terminal launcher's decisions (docs/flows/boot-and-launchers.md). What `enso.ts` decides
- * before spawning is pinned as pure functions — the isolation triple, the print-run reading,
- * and the version range, against a `pi --version` line of the test's making — and one test
- * below drives `enso.ts` itself, against a `pi` shim first on `PATH`. The vendor-path
+ * before spawning is pinned as pure functions — the isolation triple and the print-run reading —
+ * and one test below drives `enso.ts` itself, against a `pi` shim first on `PATH`. The version
+ * range moved to `@enso/core` with #953, because the harness checks it too, and its boundaries are
+ * pinned there (`packages/core/src/__tests__/supported-pi-versions.test.ts`). The vendor-path
  * precondition moved out with #221 — it is pi's manifest layout, not the launcher's decision,
  * and is pinned at its owner (`packages/core/src/__tests__/pi-manifest.test.ts`). Whether the
  * RANGE still covers the pi the guard corpus pins against is a different question again, and
@@ -45,48 +39,6 @@ test('a print run is -p, --print, or stdin that is not a TTY; an interactive run
   expect(isPrintRun([], false)).toBe(true)
   expect(isPrintRun([], true)).toBe(false)
   expect(isPrintRun(['--model', 'x'], true)).toBe(false)
-})
-
-// ── #217: the pi on PATH must be one the guard's replica was pinned against ───────────────
-
-// ⚠ The BOUNDARIES, which are the whole content of the predicate: the minimum is supported and
-// the patch below it is not; the excluded version is refused and the patch below it is not.
-// These four also pin the `~1.1.0` semantics the harness manifest's peer range states.
-// @pins boot-and-launchers/pi-version-gate
-test('the tested pi range includes its minimum and excludes the version it stops below', () => {
-  expect(piVersionSupported(piVersionText(SUPPORTED_PI_VERSIONS.minimum))).toBe(true)
-  expect(piVersionSupported('1.0.4')).toBe(false)
-  expect(piVersionSupported(piVersionText(SUPPORTED_PI_VERSIONS.below))).toBe(false)
-  expect(piVersionSupported('1.1.9')).toBe(true)
-})
-
-// ⚠ FAIL CLOSED: a version the launcher cannot read is a pi the corpus says nothing about, so
-// it is refused rather than launched. A prerelease of the excluded version is one of those —
-// the numeric core reads as the excluded version itself.
-// @pins boot-and-launchers/pi-version-gate
-test('a pi whose version cannot be read, or is a prerelease of the excluded version, is refused', () => {
-  expect(piVersionSupported('')).toBe(false)
-  expect(piVersionSupported('unknown')).toBe(false)
-  expect(piVersionSupported('1.1')).toBe(false)
-  expect(piVersionSupported('1.2.0-rc.1')).toBe(false)
-  // …and a version printed with company around it is still read: `pi --version` may grow a banner.
-  expect(piVersionSupported('pi 1.1.7 (bun 1.4.0)')).toBe(true)
-})
-
-// ⚠ WHOSE number is it (PR #294 review). "The first triple in the output" read bun's version
-// when a banner named bun first — a wrong refusal when that number falls outside the range and
-// a wrong ACCEPTANCE when it falls inside, on the one gate standing between the guard and a
-// deny computed against the wrong target. pi's own name decides; a bare triple is the fallback.
-// @pins boot-and-launchers/pi-version-gate
-test("the version read is pi's, whatever else the banner names first (#217)", () => {
-  // The dangerous shape: another component's number is in range, pi's is not.
-  expect(piVersionSupported('bun 1.1.5 / pi 1.2.3')).toBe(false)
-  // …and its mirror: the leading number is out of range, pi's is in it.
-  expect(piVersionSupported('bun 1.4.0 / pi 1.1.7')).toBe(true)
-  expect(piVersionSupported('pi@1.1.7')).toBe(true)
-  expect(piVersionSupported('pi v1.1.7')).toBe(true)
-  // A banner that names no pi version at all is no version claim: refused.
-  expect(piVersionSupported('bun 1.4.0 (linux x64)')).toBe(false)
 })
 
 // #552: the terminal's project is the directory it is launched in. The web lists that project's

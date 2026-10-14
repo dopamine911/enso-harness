@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "~1.1.0",
+    "@enso/test-support": "*",
     "@gotgenes/pi-permission-system": "40.0.2",
     "@happy-dom/global-registrator": "20.14.5",
     "@logtape/testing": "2.3.7",

@@ -101,7 +101,7 @@ const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 /**
  * A test file as Bun's runner names one (`*.test.ts`, `*_test.tsx`, `*.spec.js`, …): the files
  * `coverageSkipTestFiles` leaves out by default, so the records the floor never counted (#838).
- * Helpers beside the tests (`__tests__/log-recorder.ts`, `test/gate-support.ts`) are not test
+ * Helpers beside the tests (`packages/test-support/src/log-recorder.ts`, `test/gate-support.ts`) are not test
  * files by this rule and stay counted, as they always were.
  */
 export function isTestFilePath(path: string): boolean {

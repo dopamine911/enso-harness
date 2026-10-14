@@ -31,7 +31,10 @@ interface FakeRuntime extends GuardRuntime {
   announce(channel: string, data: unknown): void
 }
 
-function fakeRuntime(toolNames: () => readonly string[] = () => EVERY_POLICY_TOOL): FakeRuntime {
+function fakeRuntime(
+  toolNames: () => readonly string[] = () => EVERY_POLICY_TOOL,
+  versionRefusal: () => string | undefined = () => undefined,
+): FakeRuntime {
   const listeners = new Map<string, ((data: unknown) => void)[]>()
   const appended: { customType: string; data: unknown }[] = []
   const announce = (channel: string, data: unknown): void => {
@@ -45,6 +48,7 @@ function fakeRuntime(toolNames: () => readonly string[] = () => EVERY_POLICY_TOO
     emit: announce,
     on: (channel, handler) => listeners.set(channel, [...(listeners.get(channel) ?? []), handler]),
     toolNames,
+    versionRefusal,
   }
 }
 
@@ -89,6 +93,31 @@ test('⚠ the floor reads the runtime tool list: a policy tool it lacks refuses 
   expect(call(unreadable, 'read', { path: 'a' })).toMatchObject({
     kind: 'refused',
     reason: expect.stringContaining("could not enumerate durable's tools: Error: no registry"),
+  })
+})
+
+test('⚠ the floor reads the runtime version first: its refusal refuses every call, and so does a version it cannot read (#953)', () => {
+  const unpinned = startedSession(fakeRuntime(undefined, () => 'durable 9.9.9 is not one the guard was pinned against'))
+  expect(call(unpinned, 'read', { path: 'a' })).toMatchObject({
+    kind: 'refused',
+    reason: 'All tool calls are blocked: durable 9.9.9 is not one the guard was pinned against',
+  })
+  // Before the tool-list leg: a runtime that is both unpinned and lacking a tool names the version.
+  const both = startedSession(
+    fakeRuntime(
+      () => ['read'],
+      () => 'unpinned',
+    ),
+  )
+  expect(call(both, 'read', { path: 'a' })).toMatchObject({ reason: 'All tool calls are blocked: unpinned' })
+  const unreadable = startedSession(
+    fakeRuntime(undefined, () => {
+      throw new Error('no version')
+    }),
+  )
+  expect(call(unreadable, 'read', { path: 'a' })).toMatchObject({
+    kind: 'refused',
+    reason: expect.stringContaining("could not read durable's version: Error: no version"),
   })
 })
 

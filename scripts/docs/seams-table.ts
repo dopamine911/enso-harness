@@ -56,7 +56,7 @@ const SEAM_METADATA: Record<string, SeamMetadata> = {
   },
   'observation.md': {
     domain: 'Observation',
-    gate: 'kinds sweeps over `@enso/core/observation-kinds`; `observations.md` generated',
+    gate: 'kinds sweeps over `@enso/test-support/observation-kinds`; `observations.md` generated',
   },
   'dialog.md': { domain: 'Control', gate: 'extension-UI-context tests' },
   'permission-mode.md': { domain: 'Permission', gate: 'vendor gate; `code-offenders` stale-row check' },

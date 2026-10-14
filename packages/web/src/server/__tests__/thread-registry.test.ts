@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { HostedThread } from '../../host/live-thread.ts'
 import {

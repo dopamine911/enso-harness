@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
 import { ENSO_TOOL_RESULT_KEY, type EnsoObservation, isEnsoToolResultDescriptor } from '@enso/core'
-import { observationKindsDeclaredByTheUnion } from '@enso/core/observation-kinds'
+import { observationKindsDeclaredByTheUnion } from '@enso/test-support/observation-kinds'
 import type { StreamChunk } from '@tanstack/ai'
 import { type AguiIdentifiers, observationToAguiEvents } from '../to-agui.ts'
 
