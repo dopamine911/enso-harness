@@ -17,7 +17,8 @@ import type {
   EnsoTreesListing,
   RuntimeCommand,
 } from '@enso/core'
-import { NO_SESSION_INCIDENTS } from '@enso/core'
+import { EnsoProjectTitleUpdate, NO_SESSION_INCIDENTS } from '@enso/core'
+import { Check } from 'typebox/value'
 
 /**
  * A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames
@@ -98,6 +99,8 @@ export interface ScriptedFetchOptions {
   readonly storedThreads?: EnsoStoredThread[]
   /** What `GET /api/projects` lists (#395); the launch project alone, `p-launch`, when absent. */
   readonly projects?: EnsoProject[]
+  /** What `PUT /api/projects/:id/title` (#939) answers instead of renaming: the server's refusal, said as its text. */
+  readonly projectTitleRefusal?: { status: number; reason: string }
   /** What `GET /api/threads/:id/history` answers for a resume click; keyed by thread id. */
   readonly histories?: Record<string, EnsoThreadHistory>
   /** What `GET /api/threads/:id/history?before=<id>` answers (#739) — "Load earlier"; keyed by that message id. */
@@ -359,15 +362,19 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     return new Response(null, { status: 204 })
   }
   /**
-   * `PUT /api/projects/:id/title` (#939): recorded, and the listed project renamed; an id it does not
-   * list is the 404. Undefined for any other request.
+   * `PUT /api/projects/:id/title` (#939): recorded, and the listed project renamed; a body the real
+   * route would refuse is the 400, an id it does not list the 404, and `projectTitleRefusal` the
+   * answer a test scripts. Undefined for any other request.
    */
   const retitleProject = (path: string, init: RequestInit | undefined): Response | undefined => {
     const matched = init?.method === 'PUT' ? /^\/api\/projects\/([^/]+)\/title$/.exec(path)?.[1] : undefined
     if (matched === undefined) return undefined
     const projectId = decodeURIComponent(matched)
-    const body = postedJson(init) as { title: string }
+    const body = postedJson(init)
     projectTitles.push({ projectId, body })
+    if (!Check(EnsoProjectTitleUpdate, body)) return new Response('not a project title update', { status: 400 })
+    const refusal = options.projectTitleRefusal
+    if (refusal !== undefined) return new Response(refusal.reason, { status: refusal.status })
     const found = projects.find((project) => project.projectId === projectId)
     if (found === undefined) return new Response(`no registered project has the id ${projectId}`, { status: 404 })
     const renamed = { ...found, title: body.title.trim() }

@@ -202,14 +202,13 @@ export async function removeProject(
 
 /**
  * One of a project's own resources — its `settings` (#754), its `trust` (#873) or its `title`
- * (#939) — read, or with `update` written by a PUT, and the answer checked against `schema`.
+ * (#939) — read, or with `update` written by a PUT, and the answer checked against `schema`. The
+ * title is write-only (no GET route), so it always carries its `update`.
  */
 async function projectResource<Schema extends TSchema>(
-  request: {
-    readonly projectId: string
-    readonly resource: 'settings' | 'trust' | 'title'
-    readonly update?: unknown
-  },
+  request:
+    | { readonly projectId: string; readonly resource: 'settings' | 'trust'; readonly update?: unknown }
+    | { readonly projectId: string; readonly resource: 'title'; readonly update: unknown },
   schema: Schema,
   fetchImpl: FetchLike,
 ): Promise<ProjectRequestOutcome<Static<Schema>>> {

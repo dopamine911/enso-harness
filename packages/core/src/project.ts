@@ -105,8 +105,9 @@ export const EnsoProjectTitleUpdate = Type.Object(
 export type EnsoProjectTitleUpdate = Static<typeof EnsoProjectTitleUpdate>
 
 /**
- * `.enso/projects.json`: the projects registered from a page, as the server keeps them. The id
- * is not stored — it is the canonical path's (`EnsoProject.projectId`), so it cannot drift.
+ * `.enso/projects.json`: the projects registered from a page, as the server keeps them, and the
+ * launch folder's rename (#939), an entry for its path. The id is not stored — it is the canonical
+ * path's (`EnsoProject.projectId`), so it cannot drift.
  *
  * @group Projects
  */

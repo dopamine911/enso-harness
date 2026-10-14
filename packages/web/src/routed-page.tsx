@@ -153,8 +153,10 @@ function PageAction({
 
 /**
  * Rename the project (#939), then read the projects again before the field closes, so the page,
- * the rail, the switcher and Projects all show the new name at once. Any failure is said under the
- * field, in the server's words, or the network's.
+ * the rail, the switcher and Projects all show the new name at once. A refused or failed rename is
+ * said under the field, in the server's words, or the network's. The read after it never throws:
+ * if it fails, the rename stands, the field closes on the old name, and the rail says the listing
+ * could not be read.
  */
 async function saveProjectTitle(projectId: string, title: string): Promise<RenameOutcome> {
   try {
@@ -170,9 +172,11 @@ async function saveProjectTitle(projectId: string, title: string): Promise<Renam
 /**
  * The page's title in its `h1`, and what it is under it: a project's title is a button that renames
  * it in place (#939), as a thread's title does (#879) — the pencil on hover and focus; Enter saves,
- * Escape cancels, and the folder keeps its name. While the field is up the `h1` stays, read only by
- * a screen reader, so the page's region keeps its name, and the field's hint takes the path's line.
- * Done, focus returns to the title.
+ * Escape cancels, and the folder keeps its name. The button is named by the visible title, then
+ * ", rename project" for a screen reader, so the `h1` — and the page's region it labels — are named
+ * by the title alone. While the field is up the `h1` holds the title as plain text, read only by a
+ * screen reader (nothing in it to tab to), and the field's hint takes the path's line. Done, focus
+ * returns to the title.
  */
 function PageTitle({
   heading,
@@ -204,18 +208,18 @@ function PageTitle({
           on && 'sr-only',
         )}
       >
-        {project === undefined ? (
+        {project === undefined || on ? (
           heading.title
         ) : (
           <button
             ref={button}
             type="button"
-            aria-label={`Rename project: ${heading.title}`}
             onClick={() => setRenaming(project.projectId)}
             className="group flex max-w-full min-w-0 items-center gap-2 rounded-xs text-left focus-visible:outline-2 focus-visible:outline-ring"
           >
             <span className="truncate">{heading.title}</span>
             <PencilIcon aria-hidden="true" className={TITLE_PENCIL} />
+            <span className="sr-only">, rename project</span>
           </button>
         )}
       </h1>
@@ -231,19 +235,33 @@ function PageTitle({
           }}
         />
       ) : null}
-      {on || heading.subtitle === undefined ? null : (
-        <p
-          className={cn(
-            'max-w-full truncate text-xs text-muted-foreground',
-            heading.subtitleIsPath === true && 'font-mono',
-          )}
-          title={heading.subtitleIsPath === true ? heading.subtitle : undefined}
-        >
-          {heading.subtitle}
-        </p>
-      )}
+      {on ? null : <PageSubtitle heading={heading} />}
     </>
   )
+}
+
+/** The line under a page's title: a project's path, in mono, or what the page is. */
+function PageSubtitle({ heading }: { heading: PageHeading }): React.ReactNode {
+  if (heading.subtitle === undefined) return null
+  const isPath = heading.subtitleIsPath === true
+  return (
+    <p
+      className={cn('max-w-full truncate text-xs text-muted-foreground', isPath && 'font-mono')}
+      title={isPath ? heading.subtitle : undefined}
+    >
+      {heading.subtitle}
+    </p>
+  )
+}
+
+/**
+ * Which page the header is on, for its arrival focus: the page, never its title — a rename (#939), or
+ * a refresh that renames the project, is no arrival (PR #982 review). A section is no arrival either.
+ */
+function arrivalOf(page: PageUrl): string {
+  if (page.kind === 'project') return `project:${page.projectId}`
+  if (page.kind === 'not-found') return `not-found:${page.asked}`
+  return page.kind
 }
 
 /**
@@ -272,9 +290,10 @@ export function PageHeader({
 }): React.ReactNode {
   const heading = headingOf(page, projects)
   const title = useRef<HTMLHeadingElement>(null)
+  const arrival = arrivalOf(page)
   useEffect(() => {
     title.current?.focus()
-  }, [heading.title])
+  }, [arrival])
   return (
     <header className={HEADER}>
       <RailToggle open={rail.open} onToggle={rail.toggle} />

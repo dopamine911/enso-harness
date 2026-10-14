@@ -62,7 +62,7 @@ export interface ProjectRoutes {
 }
 
 /**
- * A project request's body — a registration, a settings update, a trust update: at most
+ * A project request's body — a registration, a settings, trust or title update: at most
  * `MAX_DIALOG_BODY_BYTES` and exactly `schema`, else its 413 or 400 is answered and this is
  * undefined. `what` names it in the 413.
  */

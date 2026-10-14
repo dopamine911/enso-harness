@@ -337,6 +337,8 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   // restores them — which is why `stored` is written back whole and only `served()` is filtered.
   let stored: Registration[] = options.statePath === undefined ? [] : readRegistrations(options.statePath)
   for (const registration of stored) {
+    // The launch path's entry is its rename (#939): served here as the launch project whatever the rule says.
+    if (registration.path === launch.path) continue
     const refusal = refusalOf(registration.path, true)
     if (refusal !== undefined) {
       log.warn('registered project not served: {path}: {reason}', { path: registration.path, reason: refusal })
@@ -364,7 +366,9 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   /**
    * The launch project, named by its folder unless renamed (#939). A rename is stored as an entry
    * for the launch path, which `served()` leaves out while the server runs here; launched elsewhere,
-   * that entry is a project registered under the name it was given, checked as every one is.
+   * that entry is a project registered under the name it was given, checked as every stored one is
+   * — with hidden folders allowed, as for any entry, so a renamed launch folder inside a hidden one
+   * is served from elsewhere without the "show hidden folders" tick a page's registration needs.
    */
   function launchView(): EnsoProject {
     const renamed = stored.find((registration) => registration.path === launch.path)?.title

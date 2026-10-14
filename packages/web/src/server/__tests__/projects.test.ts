@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { projectIdOf, projectTreesDir } from '@enso/core/paths'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import { readProjectsSettings, writeProjectsSettings } from '../../host/projects-config-file.ts'
 import { canonicalConfigPath, createProjectRegistry, ProjectUnavailable } from '../projects.ts'
 
@@ -263,6 +264,38 @@ test('a rename outlives the process and touches only the title — the folder, p
   // Removed, the id is unknown: a stale page cannot rename a project that is gone.
   expect(restarted.remove(projectId)).toBe('removed')
   expect(restarted.retitle(projectId, 'Ledger again')).toEqual({ kind: 'unknown' })
+})
+
+// PR #982 review: the launch folder's rename is an entry for its path. Started there again it is the
+// launch project, never "not served", even outside the roots; started elsewhere it is an ordinary
+// registration under its new name, checked as every stored one is.
+test('⚠ a renamed launch folder warns nothing on a restart there, outside the roots; started elsewhere it is a registered project under its new name, or refused by the roots (#939)', async () => {
+  const { launch, root, statePath } = layout()
+  const logs = await recordEnsoLogs()
+  try {
+    const first = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+    expect(first.retitle(projectIdOf(launch), 'Home base')).toMatchObject({ kind: 'retitled' })
+    logs.clear()
+
+    const again = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+    expect(logs.filter({ rawMessage: /^registered project not served/ })).toEqual([])
+    expect(again.list().map(({ title, launch: isLaunch }) => [title, isLaunch])).toEqual([['Home base', true]])
+
+    const elsewhere = join(root, 'elsewhere')
+    mkdirSync(elsewhere)
+    const unfenced = createProjectRegistry({ launchDirectory: elsewhere, roots: [], statePath })
+    expect(unfenced.list().map(({ title, path, launch: isLaunch }) => [title, path, isLaunch])).toEqual([
+      ['elsewhere', elsewhere, true],
+      ['Home base', launch, false],
+    ])
+
+    logs.clear()
+    const fenced = createProjectRegistry({ launchDirectory: elsewhere, roots: [root], statePath })
+    expect(fenced.list().map(({ path }) => path)).toEqual([elsewhere])
+    expect(logs.filter({ rawMessage: /^registered project not served/ })).toHaveLength(1)
+  } finally {
+    await releaseEnsoLogs()
+  }
 })
 
 test('a new thread is built in the one project a page named for it, else the launch directory; never in a vanished one', () => {
