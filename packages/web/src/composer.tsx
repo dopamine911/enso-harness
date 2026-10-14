@@ -58,6 +58,7 @@ import {
 } from './model-state.tsx'
 import type { NotificationsStore } from './notifications.tsx'
 import { useRecentModels } from './page-listings.ts'
+import { useComposerOpening, useDraftKeptForReload } from './page-reload.ts'
 import { useChatContext, PaneViewContext } from './pane-context.ts'
 import { ModeChip, usePermissionMode } from './permission-mode.tsx'
 import { COMPOSER_ICON_BUTTON, LockedChip } from './setting-chip.tsx'
@@ -572,6 +573,8 @@ function ComposerBody({
 }): React.ReactNode {
   const stores = useThreadStores()
   const attachments = usePromptInputAttachments()
+  // The banner's Reload keeps what is written here, and a reload puts it back (#919).
+  useDraftKeptForReload(stores.threadId, draft, attachments.files)
   // A resolution ended the thread (#466): read-only for good — the server refuses a prompt, so
   // the composer says why instead of offering a send that cannot land. Forking still works.
   const ended = useStore(stores.incidents).ended
@@ -761,8 +764,10 @@ export function ChatPromptInput(): React.ReactNode {
   useFreshThreadMode()
   // Controlled, so the send button can disable on empty and a take-back can write it —
   // the ai-elements chatbot example's PromptInput does the same. A fork opens holding the
-  // forked prompt's words (#433), as pi's `/fork` fills its editor.
-  const [draft, setDraft] = useState(stores.initialDraft)
+  // forked prompt's words (#433), as pi's `/fork` fills its editor; a reload, the words and the
+  // images the banner's Reload kept (#919).
+  const opening = useComposerOpening(stores.threadId, stores.initialDraft)
+  const [draft, setDraft] = useState(opening.text)
   // The textarea, so a palette choice can put focus back where typing continues (#338).
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   // The user messages this composer put in the transcript for prompts pi is still
@@ -960,6 +965,7 @@ export function ChatPromptInput(): React.ReactNode {
       className={launch.form === undefined ? 'w-full px-6 pb-4 max-md:px-3 max-md:pb-3' : 'w-full'}
       accept={ENSO_IMAGE_MIME_TYPES.join(',')}
       multiple
+      {...opening.form}
       maxFiles={ENSO_PROMPT_MAX_IMAGES}
       maxFileSize={ENSO_IMAGE_MAX_BYTES}
       // A file the form would not take is said, not dropped (#68): the reason names the cap.

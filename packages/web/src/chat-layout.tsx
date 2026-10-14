@@ -6,6 +6,7 @@ import { PendingQueue } from './composer.tsx'
 import { PendingDialog } from './dialog-card.tsx'
 import { LaunchHead, LaunchNotices, LaunchRecent } from './launch-panel.tsx'
 import { useLaunching } from './launch-settings.tsx'
+import { PaneBoundary } from './page-fault.tsx'
 import { useThreadProject } from './page-listings.ts'
 import {
   useChatContext,
@@ -111,6 +112,7 @@ function ThreadViewOverlay({
  */
 function ThreadViews(): React.ReactNode {
   const chat = useChatContext()
+  const stores = useThreadStores()
   const { shown, open } = useContext(PaneViewContext)
   const scroller = useRef<TranscriptScroller | null>(null)
   const revealInTranscript = useCallback<RevealStatsTarget>(
@@ -149,13 +151,17 @@ function ThreadViews(): React.ReactNode {
         <Conversation>
           <TranscriptRevealBridge into={scroller} />
           <ConversationContent className="mx-auto w-full max-w-transcript gap-6 px-6 pt-6 pb-8 max-md:p-4 ledger:gap-0">
-            <TranscriptContent
-              messages={chat.messages}
-              setMessages={chat.setMessages}
-              selection={selection}
-              placed={placed}
-              incidentReveal={incidentReveal}
-            />
+            {/* Each pane its own boundary (#919): a throw drawing the transcript leaves the
+                question, the run's error and the composer under it working. */}
+            <PaneBoundary pane="transcript" threadId={stores.threadId}>
+              <TranscriptContent
+                messages={chat.messages}
+                setMessages={chat.setMessages}
+                selection={selection}
+                placed={placed}
+                incidentReveal={incidentReveal}
+              />
+            </PaneBoundary>
             {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
                 `ask` verdict reaches the browser, and an unmounted slot is precisely
                 why an approval would silently never appear. */}
@@ -165,11 +171,19 @@ function ThreadViews(): React.ReactNode {
           <ConversationScrollButton />
         </Conversation>
       </div>
-      <ThreadViewOverlay
-        shown={shown}
-        revealInTranscript={revealInTranscript}
-        changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
-      />
+      {/* Keyed by the view: another view, or the chat, is drawn afresh after one failed. */}
+      <PaneBoundary
+        key={shown ?? 'chat'}
+        pane="views"
+        threadId={stores.threadId}
+        placement="absolute top-0 left-0 z-10"
+      >
+        <ThreadViewOverlay
+          shown={shown}
+          revealInTranscript={revealInTranscript}
+          changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
+        />
+      </PaneBoundary>
     </div>
   )
 }

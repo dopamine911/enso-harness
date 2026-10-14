@@ -26,6 +26,7 @@ import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
+import { PAGE_HEALTH_TIMING, reportPageFault } from './page-health.ts'
 import { pageLeaving } from './page-leaving.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
 
@@ -347,6 +348,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * the bubble before a rotation the same batch made.
    */
   readonly streamMessageId: () => string | undefined
+  /**
+   * When this page last applied the follow (#919), `Date.now()`: the client took back the last
+   * chunk handed to it, or a frame that queued none was observed with nothing waiting. Undefined
+   * while no follow is open — nothing is being applied, and a dropped follow is said otherwise.
+   * What the page's server check compares the server's listing against (`page-behind-check.ts`).
+   */
+  readonly appliedAt: () => number | undefined
 }
 
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
@@ -400,6 +408,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /** Chunks waiting for the subscription loop to take them — pushed by frames and by `send`. */
   const queue: StreamChunk[] = []
+  /** `appliedAt`'s answer: set while a follow is open, undefined otherwise. */
+  let appliedAt: number | undefined
   let wake: (() => void) | undefined
   const runs = new Map<string, OpenRun>()
   /**
@@ -730,6 +740,41 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       "this page stopped applying the thread's updates: handling a {chunk} chunk failed. What it shows is as of then, and the thread may have moved on — reload the page to catch up",
       { chunk: name },
     )
+    reportPageFault({
+      trigger: 'stalled',
+      threadId,
+      error: `the chat client stopped taking chunks while handling a ${name} chunk`,
+    })
+  }
+
+  /**
+   * The watchdog on applying (#919): a chunk handed to the client and not taken back for
+   * `stallMs` is a stall, said once per subscription. ⚠ TanStack handles a chunk synchronously
+   * and asks for the next (`consumeSubscription`); a hand-over that lasts seconds is a client that
+   * will not come back — #915's shape when the throw does not even reach its loop. One timer per
+   * subscription, not one per chunk: deltas are handed thousands at a time.
+   */
+  function watchHandOver(state: Following): () => void {
+    const { stallMs } = PAGE_HEALTH_TIMING
+    const timer = setInterval(
+      () => {
+        if (state.stalled || state.handing === undefined || Date.now() - state.handedAt < stallMs) return
+        state.stalled = true
+        const name = state.handing.type === EventType.CUSTOM ? state.handing.name : state.handing.type
+        const seconds = Math.round((Date.now() - state.handedAt) / 1000)
+        problem(
+          "this page has not applied the thread's updates for {seconds}s: a {chunk} chunk is still being handled. What it shows may be out of date — reload the page to catch up",
+          { seconds, chunk: name },
+        )
+        reportPageFault({
+          trigger: 'stalled',
+          threadId,
+          error: `a ${name} chunk handed to the chat client ${seconds}s ago was never taken back`,
+        })
+      },
+      Math.max(stallMs / 4, 10),
+    )
+    return () => clearInterval(timer)
   }
 
   /** One subscription's state the pump and the yielding loop share. */
@@ -740,6 +785,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     consumerGone: boolean
     /** The chunk handed over and not yet taken back: the one being handled if the client stops. */
     handing: StreamChunk | undefined
+    /** When `handing` was handed over (`Date.now()`). */
+    handedAt: number
+    /** The watchdog has said this subscription stalled (`watchHandOver`). */
+    stalled: boolean
   }
 
   /**
@@ -751,6 +800,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       for await (const raw of frames) {
         if (follow.aborted) break
         if (admitted(raw)) observe(raw)
+        // A frame that queued nothing for the client is applied once it is observed.
+        if (queue.length === 0 && state.handing === undefined) appliedAt = Date.now()
       }
       // The server closed it: `followClosed` says so on the page; this is the record of why.
       if (!follow.aborted && !leaving()) log.warn('the follow ended: the server closed it')
@@ -760,6 +811,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       if (!follow.aborted && !leaving()) problem('the follow failed: {error}', { error: String(error) })
     } finally {
       state.ended = true
+      appliedAt = undefined
       followClosed(follow, state.consumerGone)
     }
   }
@@ -794,8 +846,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       throw opening.failure
     }
     // The pump fills the queue; this loop hands it over, waiting when nothing is queued.
-    const state: Following = { ended: false, consumerGone: false, handing: undefined }
+    const state: Following = { ended: false, consumerGone: false, handing: undefined, handedAt: 0, stalled: false }
+    appliedAt = Date.now()
     const pump = pumpFrames(readSseFrames(opening.body, follow), follow, state)
+    const unwatch = watchHandOver(state)
     try {
       while (!abort.aborted) {
         const next = takeQueued()
@@ -807,10 +861,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
           continue
         }
         state.handing = next
+        state.handedAt = Date.now()
         yield next
         state.handing = undefined
+        appliedAt = Date.now()
       }
     } finally {
+      unwatch()
       consumerStopped(state, abort)
       stop.abort()
       await pump
@@ -1081,5 +1138,6 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     resolveIncident,
     close,
     streamMessageId: () => streamMessageId,
+    appliedAt: () => appliedAt,
   }
 }

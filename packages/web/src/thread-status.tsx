@@ -15,6 +15,7 @@ import { useEffect } from 'react'
 import { toolResultState } from './EnsoToolResult.tsx'
 import { STATUS_BUTTON } from './menu-chrome.ts'
 import { useThreadReadable } from './model-state.tsx'
+import { pageFault } from './page-health.ts'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
 import { type EnsoPendingDialog } from './thread-stores.ts'
@@ -68,6 +69,11 @@ export type Activity =
    * aborted, or died with the server, and the page cannot tell which.
    */
   | { readonly kind: 'disconnected' }
+  /**
+   * This page may be out of date (#919): it fell behind the server or part of it failed, and the
+   * banner offers Reload. Nothing it shows is claimed as working or live until then.
+   */
+  | { readonly kind: 'behind' }
 
 /**
  * Read the activity off the transcript's tail.
@@ -108,8 +114,10 @@ export function describeActivity(
   messages: ReadonlyArray<UIMessage>,
   generating: boolean,
   disconnected = false,
+  behind = false,
 ): Activity {
   if (disconnected) return { kind: 'disconnected' }
+  if (behind) return { kind: 'behind' }
   if (!generating) return { kind: 'idle' }
   const message = messages.findLast((candidate) => candidate.role !== 'assistant' || candidate.parts.length > 0)
   const last = message === undefined ? undefined : selectMessageUI(message, {})
@@ -169,6 +177,7 @@ export function countThread(
 function activityLabel(activity: Activity): string {
   if (activity.kind === 'idle') return THREAD_STATUS_WORDS.idle
   if (activity.kind === 'disconnected') return THREAD_STATUS_WORDS.disconnected
+  if (activity.kind === 'behind') return THREAD_STATUS_WORDS.behind
   return activity.kind === 'running' ? `running ${activity.tool}` : activity.kind
 }
 
@@ -245,9 +254,9 @@ const DOT_IDLE = 'size-2 shrink-0 rounded-full border-dot border-muted-foregroun
 // colour and the word beside the dot already say the thread is in flight.
 const DOT_IN_FLIGHT = 'size-2 shrink-0 rounded-full bg-evidence signal:shadow-glow-evidence'
 
-/** The dot beside the word: solid in the running colour while in flight, hollow when idle, a refusal-coloured diamond once the follow ended (#119). */
+/** The dot beside the word: solid in the running colour while in flight, hollow when idle, a refusal-coloured diamond once the follow ended (#119) or the page fell behind (#919). */
 function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof DOT_IDLE | typeof DOT_IN_FLIGHT {
-  if (activity.kind === 'disconnected') return DOT_DISCONNECTED
+  if (activity.kind === 'disconnected' || activity.kind === 'behind') return DOT_DISCONNECTED
   if (activity.kind === 'idle') return DOT_IDLE
   return DOT_IN_FLIGHT
 }
@@ -425,15 +434,15 @@ function QuestionWaiting({ waiting }: { waiting: boolean | undefined }): React.R
 
 /** What the run is doing now: the activity's dot and word, first in the bar — bold, in the running colour while in flight. */
 function ActivityWord({ activity }: { readonly activity: ThreadStatusViewProps['activity'] }): React.ReactNode {
-  const inFlight = activity.kind !== 'idle' && activity.kind !== 'disconnected'
+  const inFlight = activity.kind !== 'idle' && activity.kind !== 'disconnected' && activity.kind !== 'behind'
+  let title = "what the run is doing right now, read off the transcript's tail"
+  if (activity.kind === 'disconnected') title = 'the connection to the server ended — reload and resume from the rail'
+  if (activity.kind === 'behind')
+    title = 'this page has fallen behind the server or part of it failed — Reload to catch up'
   return (
     <span
       className={`flex shrink-0 items-center gap-2 font-semibold ${inFlight ? 'text-evidence' : 'text-foreground'}`}
-      title={
-        activity.kind === 'disconnected'
-          ? 'the connection to the server ended — reload and resume from the rail'
-          : "what the run is doing right now, read off the transcript's tail"
-      }
+      title={title}
     >
       <span aria-hidden="true" className={activityDotClass(activity)} />
       {activityLabel(activity)}
@@ -541,11 +550,12 @@ export interface ThreadStatusBarProps {
 
 /**
  * What the bar says to a listener (#737, core's `EnsoThreadStatusKind`), from what it shows: the
- * follow ended, else a question waiting, else at rest or not. The bar's finer activity words
+ * follow ended or the page fell behind (#919: a listener must not wait on a page that is not
+ * applying the thread), else a question waiting, else at rest or not. The bar's finer activity words
  * (working, thinking, running a tool, responding) are all `running` to something that waits on it.
  */
 function threadStatusKind(activity: Activity, questionWaiting: boolean): EnsoThreadStatusKind {
-  if (activity.kind === 'disconnected') return 'disconnected'
+  if (activity.kind === 'disconnected' || activity.kind === 'behind') return 'disconnected'
   if (questionWaiting) return 'question'
   return activity.kind === 'idle' ? 'idle' : 'running'
 }
@@ -607,7 +617,9 @@ export function ThreadStatusBar({
   // When the tree may have moved: a settled tool result, the run starting or ending.
   const moment = `${settledToolResults(messages)}:${generating}`
   const git = useThreadGit(moment, readable)
-  const activity = describeActivity(messages, generating, disconnected)
+  // While the page says it may be out of date (#919), the bar claims nothing is working.
+  const behind = useStore(pageFault) !== undefined
+  const activity = describeActivity(messages, generating, disconnected, behind)
   useThreadStatusAnnouncement(stores.threadId, shown, threadStatusKind(activity, questionWaiting), dialog)
   return (
     <ThreadStatusView

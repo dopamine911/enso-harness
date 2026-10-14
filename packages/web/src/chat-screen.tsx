@@ -1,5 +1,7 @@
 import { ENSO_NOTICE_SOURCE, type EnsoForkReceipt } from '@enso/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { usePageBehindCheck } from './page-behind-check.ts'
+import { PageFaultBanner, PaneBoundary } from './page-fault.tsx'
 import { AppHeader } from './page-header.tsx'
 import { type PageListings, projectList, storedThreads, usePageListings } from './page-listings.ts'
 import { mintPageThread, adoptPageThread, isDebugMode } from './page-mode.ts'
@@ -520,16 +522,23 @@ export function ChatScreen(): React.ReactNode {
   const rail = useNarrowRail()
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   const newThread = (projectId: string | undefined): void => navigate(mintPageThread(projectId).threadId, 'push')
+  // The page against the server's listing (#919): a thread the server moved on and this page did not.
+  usePageBehindCheck()
   return (
     // The rail runs the window's full height, its brand at its top; the header sits over the main
     // column only (#417) — a thread's, or a page's (#869) in its place.
     <div className="flex h-dvh bg-background text-foreground">
-      <PageRail listings={listings} navigation={navigation} rail={rail} editing={editing} onNew={newThread} />
+      {/* Its own boundary (#919): a rail that fails to draw leaves the thread and its composer. */}
+      <PaneBoundary pane="rail">
+        <PageRail listings={listings} navigation={navigation} rail={rail} editing={editing} onNew={newThread} />
+      </PaneBoundary>
       {/* The drawer's scrim (#417): the thread under the rail, dimmed; a click on it closes the rail. */}
       {rail.open ? (
         <div aria-hidden="true" className="fixed inset-0 z-30 bg-scrim md:hidden" onClick={rail.close} />
       ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* The page may be out of date (#919): one banner over whatever the column shows. */}
+        <PageFaultBanner />
         {page === undefined ? (
           <AppHeader
             active={active}
