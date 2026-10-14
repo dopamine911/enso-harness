@@ -382,7 +382,14 @@ nothing recorded — no risk signal, no denial entry, no judge, no patch.
    configured), a protected fragment, a persistence target, a credential pattern, then the session's
    knowledge of the file — *stale* refuses both tools, *unknown and existing* refuses `write` only, and
    so does *partial* — read, but only part of it (#10, #11, #57 S2; the comment in `decide` says why
-   the messages differ).
+   the messages differ). A read counts from its *result*, and pi prepares every call of a parallel
+   batch — where the guard decides — before it runs any, so a read sent in the same batch as the
+   write or edit it should unblock is checked after it and does not count. Each of these refusals
+   ends by saying to send the read on its own (`guard-session.ts#READ_ON_ITS_OWN`, #922), pinned
+   against pi's real loop by
+   `agent-host.test.ts#⚠⚠ a read in the same batch as an edit of a changed file does not clear stale-write, and the refusal says so; on its own it does (#922)`.
+   Running a batch that holds a mutation in order instead (`executionMode: "sequential"`) would take
+   overriding pi's built-in `edit` and `write`; it is not done.
 6. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
    (`guard-session.ts#readerDenial`); so does a credential location beneath its path (`grep` over `~`),
    except for `ls` and `find`, which return names only (#160 §4), and `read`, which opens the one file it
