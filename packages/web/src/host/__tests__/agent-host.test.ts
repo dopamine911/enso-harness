@@ -1058,6 +1058,12 @@ test('⚠ a policy the engine would not run is refused with each problem’s pla
   const unknownKey = { ...current.file, yolomode: true }
   const refused = writePermissionPolicy(policyPath, agentDir, unknownKey, { kind: 'matches', etag: current.etag })
   expect(refused.kind).toBe('refused')
+  // A Behaviour value out of the engine's bounds (#935): a zero row budget is refused, not written.
+  const zeroRows = { ...current.file, promptMaxRows: 0 }
+  const refusedKnob = writePermissionPolicy(policyPath, agentDir, zeroRows, { kind: 'matches', etag: current.etag })
+  expect(refusedKnob.kind === 'refused' ? refusedKnob.refusal.problems.map((problem) => problem.at) : []).toContain(
+    '/promptMaxRows',
+  )
 
   expect(readFileSync(policyPath, 'utf8')).toBe(before)
   expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).toBe('deny')
