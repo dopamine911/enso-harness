@@ -265,11 +265,12 @@ export type EnsoHostCommandRun = Static<typeof EnsoHostCommandRun>
 /**
  * `POST /api/threads/:id/configure` (#391): a new session's settings, applied together — the
  * launch panel's Start (#877). `model` is a `/model` option id, `thinking` a level THAT model
- * supports, `mode` a permission mode the thread offers, `systemPrompt` a library prompt (#443). The
- * server applies them under one lease, the system prompt first (it is the one a session can take
- * only before its first request) and then the rest in this order (the effort a model allows depends
- * on the model); a value equal to the current one is left alone. The first prompt is not part of
- * it: it goes through the chat's own send.
+ * supports, `mode` a permission mode the thread offers, `systemPrompt` a library prompt (#443),
+ * `role` a role's name (#904) standing in for `model` and `thinking`. The server applies them under
+ * one lease, the system prompt first (it is the one a session can take only before its first
+ * request) and then the rest in this order (the effort a model allows depends on the model); a value
+ * equal to the current one is left alone. The first prompt is not part of it: it goes through the
+ * chat's own send.
  *
  * @group Thread runtime
  */
@@ -458,10 +459,12 @@ export const ThreadRuntime = Type.Object({
    * `thinking` with a level. Resolves when applied; the change itself arrives on the feed as a
    * `model` observation, for every follower. REJECTS with a reason a reader can act on — an
    * unknown model, a level this model does not offer, a provider with no credentials (pi's
-   * `setModel` refuses that) — and the route says it as 422.
+   * `setModel` refuses that) — and the route says it as 422. A change made by hand ends the role
+   * the session runs under (#904); `byRole` marks a role's own step, which leaves the record to
+   * the caller's `setModelRole` — so a switch from one role to another never says the first ended.
    */
-  runHostCommand: Type.Unsafe<(run: EnsoHostCommandRun) => Promise<void>>(
-    Type.Function([Type.Unknown()], Type.Unknown()),
+  runHostCommand: Type.Unsafe<(run: EnsoHostCommandRun, options?: { readonly byRole?: boolean }) => Promise<void>>(
+    Type.Function([Type.Unknown(), Type.Unknown()], Type.Unknown()),
   ),
   /**
    * Start a `flow` host command (#338 slice 3): `login` with a `provider/authType` option,
@@ -529,8 +532,9 @@ export const ThreadRuntime = Type.Object({
   /**
    * Record the role the session now runs under (#904 decision 5): its name and the model and effort
    * it resolved to, as an `enso-model-role` entry appended through pi — the file and every follower
-   * get it — or `null`, ending it. A change of model or effort by hand ends a role by itself.
-   * Synchronous; the caller has already applied the role's model and effort.
+   * get it — or `null`, ending it. A record equal to the current one appends nothing, so a role
+   * chosen again says nothing on the feed. A change of model or effort by hand ends a role by itself
+   * (`runHostCommand`). Synchronous; the caller has already applied the role's model and effort.
    */
   setModelRole: Type.Unsafe<(record: EnsoThreadModelRole | null) => void>(Type.Function([Type.Unknown()], Type.Void())),
   /**

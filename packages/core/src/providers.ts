@@ -56,8 +56,8 @@ export const EnsoProvider = closedObject({
 export type EnsoProvider = Static<typeof EnsoProvider>
 
 /**
- * A provider nobody has set up, reachable through "Add a provider": pi's built-ins with no
- * credential (#904: 42 of them, not listed until added).
+ * A provider nobody has set up, reachable through "Add a provider": one of pi's built-ins with no
+ * credential (#904), not listed until added.
  *
  * @group Providers
  */

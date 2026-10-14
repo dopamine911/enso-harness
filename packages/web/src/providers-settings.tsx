@@ -14,7 +14,7 @@ import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { cn } from './lib/utils.ts'
-import { type ModelsSettingsStore, modelsSettings } from './models-settings.ts'
+import { type ModelsSettingsStore, type ModelsUpdate, modelsSettings, withToggled } from './models-settings.ts'
 import { OptionSelect } from './option-select.tsx'
 import { PAGE_INPUT, PAGE_OUTLINE_BUTTON, PAGE_PRIMARY_BUTTON, SUB_TITLE } from './page-styles.ts'
 import { type ListingRead, type ListingRoute, type ListingState, useListing } from './settings-listing.ts'
@@ -72,16 +72,6 @@ const PROVIDERS_ROUTE: ListingRoute<typeof EnsoProvidersListing> = {
 /** `GET /api/providers` (`useListing`); `replace` takes a listing the server answered otherwise (a logout's). */
 export function useProvidersListing(fetchImpl: FetchLike | undefined): ListingState<EnsoProvidersListing> {
   return useListing(fetchImpl, PROVIDERS_ROUTE)
-}
-
-/** `list` set on the section, or the key removed when it is empty: an absent key is none. */
-export function withList(
-  models: EnsoModelsConfig,
-  key: 'favorites' | 'hiddenProviders',
-  list: readonly string[],
-): EnsoModelsConfig {
-  const { [key]: _dropped, ...rest } = models
-  return list.length === 0 ? rest : { ...rest, [key]: [...list] }
 }
 
 /** How a logged-in provider is, in words: never what the credential is. */
@@ -654,7 +644,7 @@ function ProvidersList({
   config: EnsoModelsConfig | undefined
   refusals: Readonly<Record<string, string>>
   actions: RowActions
-  save: (provider: string, next: EnsoModelsConfig) => Promise<void>
+  save: (provider: string, update: ModelsUpdate) => Promise<void>
   onLogout: (provider: EnsoProvider) => void
 }): React.ReactNode {
   if (providers.length === 0)
@@ -678,10 +668,7 @@ function ProvidersList({
             on={{
               toggleHidden: () => {
                 if (config === undefined) return
-                const next = hidden
-                  ? hiddenProviders.filter((hiddenId) => hiddenId !== provider.id)
-                  : [...hiddenProviders, provider.id]
-                void save(provider.id, withList(config, 'hiddenProviders', next))
+                void save(provider.id, (current) => withToggled(current, 'hiddenProviders', provider.id))
               },
               logout: () => onLogout(provider),
             }}
@@ -691,12 +678,7 @@ function ProvidersList({
               favorites={favorites}
               editable={config !== undefined}
               onToggleFavorite={(model) => {
-                if (config === undefined) return
-                // react-doctor-disable-next-line js-set-map-lookups -- one lookup per click
-                const next = favorites.includes(model)
-                  ? favorites.filter((favorite) => favorite !== model)
-                  : [...favorites, model]
-                void save(provider.id, withList(config, 'favorites', next))
+                if (config !== undefined) void save(provider.id, (current) => withToggled(current, 'favorites', model))
               }}
             />
           </ProviderRow>
@@ -763,9 +745,9 @@ export function ProvidersSection({
     )
 
   const config = models.kind === 'loaded' ? models.settings.models : undefined
-  const save = async (provider: string, next: EnsoModelsConfig): Promise<void> => {
+  const save = async (provider: string, update: ModelsUpdate): Promise<void> => {
     refuse(provider, undefined)
-    const outcome = await store.save(next)
+    const outcome = await store.save(update)
     if (outcome.kind === 'refused') refuse(provider, outcome.reason)
   }
 

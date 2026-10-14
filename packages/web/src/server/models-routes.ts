@@ -1,4 +1,4 @@
-import { existsSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   type EnsoAddableProvider,
@@ -24,6 +24,7 @@ import { Check } from 'typebox/value'
 import type { HostAuthQuestion } from '../host/host-flow-runs.ts'
 import { authEventText, isFlowCancelled, loginCodeQuestion } from '../host/host-flows.ts'
 import type { HostProviderFacts, HostProviders } from '../host/provider-settings.ts'
+import { CREDENTIALS_TIMEOUT_MS } from '../host/session-models.ts'
 import { answerJson, answerOrFail, MAX_DIALOG_BODY_BYTES, readJsonBody, refuseWith } from './request-plumbing.ts'
 
 /**
@@ -90,7 +91,12 @@ function writeSection(configPath: string, models: EnsoModelsConfig): SectionRead
   const checked = parseEnsoConfig(JSON.stringify(next))
   if (checked.kind === 'unreadable') return { kind: 'refused', reason: checked.reason }
   const temporary = `${configPath}.${process.pid}.tmp`
-  writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: existsSync(configPath) ? undefined : 0o600 })
+  // The rename installs the temporary file's inode, so it carries the mode: the file's own, else
+  // 0600 — never the umask's default, which would open the user's config from the second save on.
+  // Set after the write: a mode given to the write is cut by the umask, and ignored for a file left over.
+  const mode = existsSync(configPath) ? statSync(configPath).mode & 0o777 : 0o600
+  writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode })
+  chmodSync(temporary, mode)
   renameSync(temporary, configPath)
   return { kind: 'read', models }
 }
@@ -322,6 +328,10 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
     return { ...listed, ...(login === undefined ? {} : { login: login.state }) }
   }
 
+  /** The provider pi knows by `id` now, or `undefined`. */
+  const providerOf = async (id: string): Promise<HostProviderFacts | undefined> =>
+    (await providers.list()).find((candidate) => candidate.id === id)
+
   async function respondToSectionWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const models = await readClosedBody(request, response, SECTION_BODY)
     if (models === undefined) return
@@ -339,6 +349,10 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   async function respondToLogin(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readClosedBody(request, response, LOGIN_BODY)
     if (body === undefined) return
+    // The providers are read BEFORE the running-login check, and nothing awaits between that check
+    // and `login = started`: two logins sent together cannot both pass it, the second overwriting
+    // the first and leaving its question unanswerable.
+    const provider = await providerOf(body.provider)
     if (login?.state.status === 'running') {
       refuseWith(response, {
         status: 409,
@@ -346,7 +360,6 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
       })
       return
     }
-    const provider = (await providers.list()).find((candidate) => candidate.id === body.provider)
     const refusal = loginRefusal(body, provider)
     if (refusal !== undefined || provider === undefined) {
       log.warn('provider login refused: {reason}', {
@@ -443,7 +456,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   async function respondToLogout(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readClosedBody(request, response, LOGOUT_BODY)
     if (body === undefined) return
-    const provider = (await providers.list()).find((candidate) => candidate.id === body.provider)
+    const provider = await providerOf(body.provider)
     if (provider?.stored !== true) {
       refuseWith(response, {
         status: 422,
@@ -451,7 +464,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
       })
       return
     }
-    await providers.logOut(provider.id, AbortSignal.timeout(15_000))
+    await providers.logOut(provider.id, AbortSignal.timeout(CREDENTIALS_TIMEOUT_MS))
     log.info('provider logged out: {provider}', { provider: provider.id })
     answerJson(response, await listing())
   }

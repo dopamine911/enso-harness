@@ -56,7 +56,10 @@ const [FIRST_ROLE = ''] = ROLE_LABELS
 const PAGE: MarkTarget = { role: 'region', name: 'Settings' }
 const SECTIONS: MarkTarget = { role: 'navigation', name: 'Settings sections' }
 
-/** Settings (#407, #869): the look of the page, (#474) the permission rules pi runs under, and (#578) what trees take on disk. */
+/**
+ * Settings (#407, #869): the look of the page, (#904) the providers pi knows and the model roles,
+ * (#474) the permission rules pi runs under, and (#578) what trees take on disk.
+ */
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
@@ -87,7 +90,7 @@ export const SETTINGS: FeatureSpec = {
       marks: [
         {
           target: SECTIONS,
-          says: 'The sections: **Appearance**, **Permissions** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
+          says: 'The sections: **Appearance**, **Providers**, **Roles**, **Permissions** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
         },
         {
           // A card's name is its label then its scheme (`Tokyo Dark, dark`).

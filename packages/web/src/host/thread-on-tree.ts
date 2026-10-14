@@ -38,8 +38,8 @@ export interface TreeMove {
  * A new thread that moves onto its own tree when it first runs (#551). Until
  * then it runs nowhere — it is pi built in the checkout, answering previews and permission
  * checks there. At the first `prompt` (or `continueRun`) the tree is minted from the checkout as
- * it is THEN, the session — everything chosen before (model, thinking, mode, system prompt), the
- * tree's record, a header naming the tree — is written as the thread's file, and pi is built
+ * it is THEN, the session — everything chosen before (model, thinking, mode, system prompt, role),
+ * the tree's record, a header naming the tree — is written as the thread's file, and pi is built
  * again on it; the old build is disposed. Every runtime call goes to the build of the moment,
  * and every observer stays subscribed across the move. Runs that arrive while it moves wait for
  * it. A mint that is refused refuses the run, never runs it in the checkout instead, and the next
@@ -54,10 +54,10 @@ export interface TreeMove {
  * shutdown disposes busy threads too) is disposed in turn, and the run that waited is refused —
  * no pi is left running that nothing would dispose.
  *
- * ⚠ NO CHANGE WHILE IT MOVES: a mode, system prompt, host command or incident resolution would
- * land on the checkout session after its entries were written for the tree, and be lost. The
- * server's control routes cannot reach this (a moving run holds the thread's lease); the wrapper
- * refuses them itself, so no caller can.
+ * ⚠ NO CHANGE WHILE IT MOVES: a mode, system prompt, host command, role record or incident
+ * resolution would land on the checkout session after its entries were written for the tree, and be
+ * lost. The server's control routes cannot reach this (a moving run holds the thread's lease); the
+ * wrapper refuses them itself, so no caller can.
  */
 export function treeOnFirstRun(first: HostedThread, move: TreeMove): HostedThread {
   const { threadId, project, checkout, liveLogs, environment, mintTree, logOnTree, storeOf, buildHosted } = move
@@ -160,8 +160,8 @@ export function treeOnFirstRun(first: HostedThread, move: TreeMove): HostedThrea
     listCommands: () => current.runtime.listCommands(),
     modelState: () => current.runtime.modelState(),
     sessionUsage: () => current.runtime.sessionUsage(),
-    runHostCommand: (run) =>
-      isMoving() ? Promise.reject(new HostCommandRefused(whileMoving)) : current.runtime.runHostCommand(run),
+    runHostCommand: (...run) =>
+      isMoving() ? Promise.reject(new HostCommandRefused(whileMoving)) : current.runtime.runHostCommand(...run),
     startHostFlow: (run, outcome) =>
       isMoving() ? outcome.onRejected(whileMoving) : current.runtime.startHostFlow(run, outcome),
     loginInProgress: () => current.runtime.loginInProgress(),
@@ -170,7 +170,10 @@ export function treeOnFirstRun(first: HostedThread, move: TreeMove): HostedThrea
     setPermissionMode: (mode, outcome) =>
       isMoving() ? outcome.onRejected(whileMoving) : current.runtime.setPermissionMode(mode, outcome),
     setSystemPrompt: (choice) => (isMoving() ? whileMoving : current.runtime.setSystemPrompt(choice)),
-    setModelRole: (record) => current.runtime.setModelRole(record),
+    setModelRole: (record) => {
+      if (isMoving()) throw new HostCommandRefused(whileMoving)
+      current.runtime.setModelRole(record)
+    },
     resolveIncident: (incidentId, resolution) =>
       isMoving() ? whileMoving : current.runtime.resolveIncident(incidentId, resolution),
     subscribe: (observer) => {

@@ -227,6 +227,49 @@ test("the models section is written whole into the user's config, every other se
   expect(readFileSync(configPath, 'utf8')).toBe('{ not json')
 })
 
+// A rename installs the temporary file's inode: written with the umask's default, the second save
+// would leave the user's config readable to every account on the machine.
+test("the user's config keeps its mode across saves: 0600 when the server made it, whatever the umask", async () => {
+  const umask = process.umask(0o022)
+  try {
+    const { url, configPath } = await start()
+    for (const favorites of [['fake/fake-1'], ['fake/fake-2']]) {
+      const saved = await fetch(`${url}/api/models/settings`, { method: 'PUT', body: JSON.stringify({ favorites }) })
+      expect(saved.status).toBe(200)
+      expect(statSync(configPath).mode & 0o777).toBe(0o600)
+    }
+  } finally {
+    process.umask(umask)
+  }
+})
+
+test('two logins started together: one runs and keeps its question answerable, the other is refused (409)', async () => {
+  const { url, providers } = await start()
+  // Both requests read the providers before either goes on: the window a running-login check
+  // made before that read would leave open.
+  const list = providers.list.bind(providers)
+  const bothListing = Promise.withResolvers<void>()
+  let listings = 0
+  providers.list = async () => {
+    listings += 1
+    if (listings === 2) bothListing.resolve()
+    await bothListing.promise
+    return list()
+  }
+  const subscription = { provider: 'faux-sub', authType: 'oauth' }
+  const responses = await Promise.all([
+    post(`${url}/api/providers/login`, subscription),
+    post(`${url}/api/providers/login`, subscription),
+  ])
+  expect(responses.map((response) => response.status).toSorted((first, second) => first - second)).toEqual([200, 409])
+  const started = (await responses.find((response) => response.status === 200)?.json()) as EnsoProviderLogin
+  const done = (await (
+    await post(`${url}/api/providers/login/answer`, { questionId: started.question?.id, value: 'code-1' })
+  ).json()) as EnsoProviderLogin
+  expect(done.status).toBe('done')
+  expect(providers.stored.get('faux-sub')).toBe('code-1')
+})
+
 test('⚠ a configure that names a role runs its model at its effort, clamped, and records the role with what it resolved to (#904)', async () => {
   const { url, configPath, built } = await start({
     models: {
@@ -258,4 +301,27 @@ test('⚠ a configure that names a role runs its model at its effort, clamped, a
   // Editing the role later rewrites nothing a thread recorded: the record is the thread's.
   writeFileSync(configPath, JSON.stringify({ models: { roles: { review: { model: 'fake/fake-1' } } } }))
   expect(built[0]?.modelRoles).toEqual([{ role: 'review', provider: 'fake', modelId: 'fake-2', thinkingLevel: 'off' }])
+})
+
+// PR #973 review: a role chosen again says nothing new, and a switch from one role to another
+// records the new role alone — never the first one ended and the second begun. A hand change ends it.
+test('re-choosing the current role appends nothing; switching roles appends only the new one; a hand change ends it (#904)', async () => {
+  const { url, built } = await start({
+    models: {
+      roles: {
+        review: { model: 'fake/fake-2', effort: 'high' },
+        quick: { model: 'fake/fake-1', effort: 'low' },
+      },
+    },
+  })
+  const configure = (body: object): Promise<Response> => post(`${url}/api/threads/t1/configure`, body)
+  const review = { role: 'review', provider: 'fake', modelId: 'fake-2', thinkingLevel: 'off' }
+  const quick = { role: 'quick', provider: 'fake', modelId: 'fake-1', thinkingLevel: 'low' }
+  expect((await configure({ role: 'review' })).status).toBe(204)
+  expect((await configure({ role: 'review' })).status).toBe(204)
+  expect(built[0]?.modelRoles).toEqual([review])
+  expect((await configure({ role: 'quick' })).status).toBe(204)
+  expect(built[0]?.modelRoles).toEqual([review, quick])
+  expect((await post(`${url}/api/threads/t1/command`, { name: 'thinking', value: 'high' })).status).toBe(204)
+  expect(built[0]?.modelRoles).toEqual([review, quick, null])
 })

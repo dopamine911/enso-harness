@@ -236,6 +236,7 @@ export {
   EnsoModelTarget,
   type EnsoRoleResolution,
   EnsoThreadModelRole,
+  MODEL_PRESET_NAME_MAX,
   MODEL_ROLE_NAME_SOURCE,
   readEnsoModelsConfig,
   resolveModelRole,
@@ -243,6 +244,7 @@ export {
   THINKING_LEVEL_ORDER,
   threadModelRole,
   threadModelRoleOf,
+  unavailableReason,
 } from './model-roles.ts'
 export {
   EnsoAddableProvider,

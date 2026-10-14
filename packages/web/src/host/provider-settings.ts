@@ -2,7 +2,12 @@ import type { EnsoProviderAuth } from '@enso/core'
 import { modelOptionId } from './host-commands.ts'
 import type { HostAuthQuestion } from './host-flow-runs.ts'
 import type { HostAuthEvent, HostAuthType } from './host-flows.ts'
-import { agentDirModelRuntime, type HostModelRuntime, type SessionModels } from './session-models.ts'
+import {
+  agentDirModelRuntime,
+  CREDENTIALS_TIMEOUT_MS,
+  type HostModelRuntime,
+  type SessionModels,
+} from './session-models.ts'
 
 /**
  * The host's providers, for Settings (#904): what pi knows about each one, and logging in and out of
@@ -51,7 +56,7 @@ export function hostProviders(agentDir: string, models: SessionModels): HostProv
     async list() {
       const runtime = await runtimeOf()
       await runtime.refresh({ allowNetwork: false })
-      const credentials = await runtime.listCredentials({ signal: AbortSignal.timeout(15_000) })
+      const credentials = await runtime.listCredentials({ signal: AbortSignal.timeout(CREDENTIALS_TIMEOUT_MS) })
       const registered = new Set(runtime.getRegisteredProviderIds())
       return runtime.getProviders().map((provider) => {
         const stored = credentials.find((credential) => credential.providerId === provider.id)

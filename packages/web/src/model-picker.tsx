@@ -18,7 +18,7 @@ import {
 } from './components/ui/command.tsx'
 import { Popover, PopoverAnchor, PopoverContent } from './components/ui/popover.tsx'
 import { cn } from './lib/utils.ts'
-import { modelsConfigOf, modelsSettings, useModelsSettings } from './models-settings.ts'
+import { modelsConfigOf, modelsSettings, useModelsSettings, withToggled } from './models-settings.ts'
 
 /**
  * The model picker (#880, #904), one for the launch panel's Model chip (#877) and the started
@@ -566,8 +566,8 @@ interface ModelPickerProps {
 }
 
 /**
- * Starring and unstarring (#904): the whole section saved with the favorites changed — read from
- * the store at the click, so two quick stars do not overwrite each other — and why a save was
+ * Starring and unstarring (#904): the star toggled on the section as the last save left it — the
+ * store's saves run in turn, so two quick stars do not overwrite each other — and why a save was
  * refused, said in the picker. `undefined` while the section is not read.
  */
 function useStars(): { readonly stars: Stars | undefined; readonly refusal: string | undefined } {
@@ -575,15 +575,12 @@ function useStars(): { readonly stars: Stars | undefined; readonly refusal: stri
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   if (settings.kind !== 'loaded') return { stars: undefined, refusal }
   const toggle = (modelId: string): void => {
-    const models = modelsConfigOf(modelsSettings.get())
-    const favorites = models.favorites ?? []
-    const next = favorites.includes(modelId)
-      ? favorites.filter((favoriteId) => favoriteId !== modelId)
-      : [...favorites, modelId]
     setRefusal(undefined)
-    void modelsSettings.save({ ...models, favorites: next }).then((outcome) => {
-      if (outcome.kind === 'refused') setRefusal(`the star was not saved: ${outcome.reason}`)
-    })
+    void modelsSettings
+      .save((current) => withToggled(current, 'favorites', modelId))
+      .then((outcome) => {
+        if (outcome.kind === 'refused') setRefusal(`the star was not saved: ${outcome.reason}`)
+      })
   }
   return { stars: { favorites: settings.settings.models.favorites ?? [], toggle }, refusal }
 }

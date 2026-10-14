@@ -56,7 +56,7 @@ import type { ThreadReadDeps } from './thread-read.ts'
 
 const log = ensoLogger('server', 'http')
 
-/** What the thread controls take from the server (#810): the follow's reach, the live-or-cold read, the library's pick. */
+/** What the thread controls take from the server (#810): the follow's reach, the live-or-cold read, the library's pick, the role resolver (#904). */
 export interface ThreadControlRoutesState {
   readonly followDeps: FollowRouteDeps
   readonly threadRead: ThreadReadDeps
@@ -311,9 +311,10 @@ export function createThreadControlRoutes(state: ThreadControlRoutesState): Thre
   }
 
   /**
-   * `POST …/configure` (#391): a new session's model, effort and mode, applied together — the
-   * launch panel's Start (#877). A refused step answers 422 with its JSON refusal (the step and
-   * the reason), so the panel can say which; a run in flight is the usual 409 text.
+   * `POST …/configure` (#391): a new session's system prompt, model, effort and mode — or a role
+   * (#904) in place of the model and effort — applied together: the launch panel's Start (#877). A
+   * refused step answers 422 with its JSON refusal (the step and the reason), so the panel can say
+   * which; a run in flight is the usual 409 text.
    */
   async function respondToConfigure(
     threadId: string,

@@ -77,6 +77,13 @@ export const EnsoModelRoles = Type.Record(Type.String({ pattern: MODEL_ROLE_NAME
 })
 
 /**
+ * The longest a preset's name may be, in characters: the schema's bound, and Settings' field's.
+ *
+ * @group Model roles
+ */
+export const MODEL_PRESET_NAME_MAX = 64
+
+/**
  * A preset (#904 decision 4): every role and the default effort, saved under a name and switched in
  * one step. Switching REPLACES the roles: one the preset leaves out is cleared, as in OMP.
  *
@@ -102,7 +109,7 @@ export const EnsoModelsConfig = closedObject({
   hiddenProviders: Type.Optional(Type.Array(NonEmptyString)),
   roles: Type.Optional(EnsoModelRoles),
   defaultEffort: Type.Optional(NonEmptyString),
-  presets: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: 64 }), EnsoModelPreset)),
+  presets: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MODEL_PRESET_NAME_MAX }), EnsoModelPreset)),
 })
 /** @group Model roles */
 export type EnsoModelsConfig = Static<typeof EnsoModelsConfig>
@@ -180,8 +187,13 @@ export type EnsoRoleResolution =
     }
   | { readonly kind: 'refused'; readonly role: string; readonly reason: string }
 
-/** Why a model is not available, or `undefined` when it is. */
-function unavailableReason(model: string, options: readonly HostCommandOption[]): string | undefined {
+/**
+ * Why a model is not available, or `undefined` when it is: the reason a role's resolution gives,
+ * and the one Settings shows beside each of a role's models.
+ *
+ * @group Model roles
+ */
+export function unavailableReason(model: string, options: readonly HostCommandOption[]): string | undefined {
   const option = options.find((candidate) => candidate.id === model)
   if (option === undefined) return 'not in the catalogue'
   if (option.loggedIn === false) return `${option.providerName ?? option.detail ?? 'its provider'} is not logged in`

@@ -406,7 +406,10 @@ export function LaunchChips({
   )
 }
 
-/** Under the chips: why there are no models, what the libraries refused, and why the last Start did not go through. */
+/**
+ * Under the chips: why there are no models, what the libraries refused, why the chosen role was
+ * refused or which fallback it runs on (#904), and why the last Start did not go through.
+ */
 export function LaunchNotes({ form }: { readonly form: LaunchForm }): React.ReactNode {
   return (
     <>

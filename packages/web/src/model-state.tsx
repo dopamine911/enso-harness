@@ -194,7 +194,8 @@ function chipFace(
  * provider is not decoration (#44): the same name runs on several providers, and under
  * multi-account the provider id is WHICH ACCOUNT answers — a failover swap changes it and nothing
  * else on the page would say so. A cold thread's recorded model is named `Model (recorded)`, so it
- * never reads as live (#434).
+ * never reads as live (#434). A thread under a role (#904) has the role's name first,
+ * `review · …`, live or recorded alike.
  */
 export function ModelChip({
   state,
@@ -345,15 +346,16 @@ function useCommandRow(
 
 /**
  * A host command's second step, for the composer's chip and the palette alike: `/model` opens the
- * model picker (`model-picker.tsx`, #880 — Recent, then providers, each row's effort range); a
- * flow (`/login`, `/logout`) opens `ModelSelector` (ai-elements: cmdk inside a dialog), its options
- * flat, filtered by `label` and `detail`.
+ * model picker (`model-picker.tsx`, #880, #904 — Roles and Favorites, then Recent, then providers,
+ * each row's effort range); a flow (`/login`, `/logout`) opens `ModelSelector` (ai-elements: cmdk
+ * inside a dialog), its options flat, filtered by `label` and `detail`.
  *
  * The options are fetched when the dialog OPENS, from `GET …/commands` — never from the model
  * store, which is `null` before the first run (header), and never cached, for the palette's
- * reason: the list is the session's. The row's `value` marks the current choice. Picking closes
- * the dialog and hands `(command, optionId)` to the owner, who POSTs it; the chip then moves on
- * the `model` observation, not on the pick.
+ * reason: the list is the session's. The row's `value` marks the current choice. Picking a model
+ * or a flow's option closes the dialog and hands `(command, optionId)` to the owner, who POSTs it;
+ * picking a role hands its name to `onChooseRole` instead (no Roles group without one). The chip
+ * then moves on the `model` observation, not on the pick.
  */
 export function ModelChoiceDialog({
   threadId,

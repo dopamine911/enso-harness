@@ -316,3 +316,121 @@ test('⚠ switching to a preset replaces every role and the default effort in on
   })
   await eventually(() => expect(() => buttonNamed(container, 'delete role review')).toThrow())
 })
+
+/**
+ * `scripted`, its `PUT`s held until `release` and answered in order — the first one refused with
+ * `refuseFirst`, as a server refuses to overwrite an unreadable file.
+ */
+function heldSaves(
+  models: EnsoModelsConfig,
+  refuseFirst: boolean,
+): { readonly sent: Sent[]; readonly fetchImpl: FetchLike; readonly release: () => void } {
+  const base = scripted(models, () => {
+    throw new Error('a held-saves test logs in to nothing')
+  })
+  const { promise: released, resolve: release } = Promise.withResolvers<void>()
+  let answered = 0
+  const fetchImpl: FetchLike = async (input, init) => {
+    if (init?.method !== 'PUT') return base.fetchImpl(input, init)
+    await released
+    answered += 1
+    if (refuseFirst && answered === 1) {
+      const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
+      base.sent.push({ request: 'PUT /api/models/settings', body })
+      return new Response('the config file could not be read', { status: 409 })
+    }
+    return base.fetchImpl(input, init)
+  }
+  return { sent: base.sent, fetchImpl, release }
+}
+
+const putBodies = (sent: readonly Sent[]): unknown[] =>
+  sent.filter((entry) => entry.request === 'PUT /api/models/settings').map((entry) => entry.body)
+
+test('⚠ two stars clicked before the first save answers are both saved: each change applies to the section the last save left', async () => {
+  const { sent, fetchImpl, release } = heldSaves({ defaultEffort: 'high' }, false)
+  const store = createModelsSettingsStore(fetchImpl)
+  await store.refresh()
+  const container = await mount(<ProvidersSection fetch={fetchImpl} store={store} />)
+
+  await click(container, 'favorite Claude Opus 4.5')
+  await click(container, 'favorite Claude Haiku 4.5')
+  release()
+
+  await eventually(() => expect(putBodies(sent)).toHaveLength(2))
+  expect(putBodies(sent).at(-1)).toEqual({
+    defaultEffort: 'high',
+    favorites: ['anthropic/claude-opus-4-5', 'anthropic/claude-haiku-4-5'],
+  })
+  await eventually(() =>
+    expect(store.get()).toEqual({
+      kind: 'loaded',
+      settings: {
+        path: '/home/person/.enso/config.json',
+        models: { defaultEffort: 'high', favorites: ['anthropic/claude-opus-4-5', 'anthropic/claude-haiku-4-5'] },
+      },
+    }),
+  )
+})
+
+test('a refused save says why on its row, and the change after it still runs — on the section as last saved', async () => {
+  const { sent, fetchImpl, release } = heldSaves({}, true)
+  const store = createModelsSettingsStore(fetchImpl)
+  await store.refresh()
+  const container = await mount(<ProvidersSection fetch={fetchImpl} store={store} />)
+
+  await click(container, 'favorite Claude Opus 4.5')
+  await click(container, 'hide Anthropic from the model picker')
+  release()
+
+  await eventually(() => expect(putBodies(sent)).toHaveLength(2))
+  // The refused star is not in the file, so the hide that followed is saved without it.
+  expect(putBodies(sent)).toEqual([{ favorites: ['anthropic/claude-opus-4-5'] }, { hiddenProviders: ['anthropic'] }])
+  await eventually(() => expect(container.textContent).toContain('the config file could not be read'))
+})
+
+test('a role deleted and the default effort changed before the first save answers: both are saved', async () => {
+  const { sent, fetchImpl, release } = heldSaves(
+    {
+      roles: {
+        default: { model: 'anthropic/claude-opus-4-5' },
+        review: { model: 'anthropic/claude-opus-4-5', effort: 'xhigh' },
+      },
+      defaultEffort: 'medium',
+    },
+    false,
+  )
+  const store = createModelsSettingsStore(fetchImpl)
+  await store.refresh()
+  const container = await mount(<RolesSection fetch={fetchImpl} store={store} />)
+
+  await click(container, 'delete role review')
+  const effort = await eventually(() => {
+    const found = container.querySelector<HTMLSelectElement>('select#settings-default-effort')
+    if (found === null) throw new Error('expected the default effort')
+    return found
+  })
+  await act(async () => {
+    Reflect.set(HTMLSelectElement.prototype, 'value', 'low', effort)
+    effort.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  release()
+
+  await eventually(() => expect(putBodies(sent)).toHaveLength(2))
+  expect(putBodies(sent).at(-1)).toEqual({
+    roles: { default: { model: 'anthropic/claude-opus-4-5' } },
+    defaultEffort: 'low',
+  })
+})
+
+test('a save whose turn comes while the section is not read is refused, never written over an unread file', async () => {
+  const { sent, fetchImpl } = scripted({ favorites: ['anthropic/claude-opus-4-5'] }, () => {
+    throw new Error('this test logs in to nothing')
+  })
+  const store = createModelsSettingsStore(fetchImpl)
+
+  const outcome = await store.save((current) => ({ ...current, defaultEffort: 'low' }))
+
+  expect(outcome).toEqual({ kind: 'refused', reason: 'your models settings are not read yet' })
+  expect(putBodies(sent)).toEqual([])
+})

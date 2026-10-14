@@ -144,14 +144,17 @@ async function resolveSessionConfig(context: SessionConfigContext): Promise<Sess
   // `projects.roots` is user-only: which directories may be projects is not a project's to widen.
   // ⚠ So is `security` (#466): a checkout the agent can write must not switch halting off or raise
   // the thresholds its own incident is measured against. ⚠ And `claudeCode` (#925): nor may it
-  // change the Claude Code version Enso tells Anthropic it is. `threads` is a project setting since
+  // change the Claude Code version Enso tells Anthropic it is. ⚠ And `models` (#904 decision 1): the
+  // server reads favorites, hidden providers and roles from the user's file alone, so a project's
+  // would configure nothing. `threads` is a project setting since
   // #754 (its tree mode, setup and files to copy); the host resolves it by tier when it makes a
   // tree (`@enso/core/project-config`), and nothing in a session reads it from this merge.
-  const { projects, security, claudeCode, ...projectConfig } = project.config
+  const { projects, security, claudeCode, models, ...projectConfig } = project.config
   const userOnlySections: readonly (readonly [string, unknown])[] = [
     ['projects.roots', projects],
     ['security', security],
     ['claudeCode', claudeCode],
+    ['models', models],
   ]
   for (const [section, projectSetting] of userOnlySections) {
     if (projectSetting === undefined) continue

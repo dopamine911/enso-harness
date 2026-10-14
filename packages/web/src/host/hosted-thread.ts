@@ -196,6 +196,18 @@ function describeCommand(
   return description === undefined ? { name, source } : { name, source, description }
 }
 
+/** Whether two role records say the same: both none, or the same role on the same model and effort. */
+function sameModelRole(current: EnsoThreadModelRole | null, next: EnsoThreadModelRole | null): boolean {
+  if (current === null || next === null) return current === next
+  return (
+    current.role === next.role &&
+    current.provider === next.provider &&
+    current.modelId === next.modelId &&
+    current.thinkingLevel === next.thinkingLevel &&
+    current.fallback === next.fallback
+  )
+}
+
 /** What building a live thread reads from the host (#801). */
 export interface HostedThreadHost {
   readonly agentDir: string
@@ -592,7 +604,7 @@ export async function buildHostedThread(
     startHostFlow: flows.startHostFlow,
     modelState: currentModelState,
     sessionUsage: () => liveSessionUsage(session.getSessionStats()),
-    async runHostCommand(run: EnsoHostCommandRun): Promise<void> {
+    async runHostCommand(run: EnsoHostCommandRun, options?: { readonly byRole?: boolean }): Promise<void> {
       const decision = decideHostCommand(run, currentModelState(), session.modelRuntime.getAvailableSnapshot())
       switch (decision.kind) {
         case 'refused':
@@ -617,13 +629,17 @@ export async function buildHostedThread(
           break
         }
       }
-      // A model or effort chosen by hand is no longer the role's (#904): the record ends.
-      if (modelRole !== null) runtime.setModelRole(null)
+      // A model or effort chosen by hand is no longer the role's (#904): the record ends. A role's
+      // own step leaves it to `configureThread`, which records the role it applied.
+      if (options?.byRole !== true) runtime.setModelRole(null)
       // pi's own events have said it by now (see the module header); this is the guarantee
       // that the caller's change is on the feed whatever pi's plumbing did — deduped.
       announceModelState()
     },
     setModelRole(record: EnsoThreadModelRole | null): void {
+      // The role the session already runs under, chosen again, is not news (PR #973 review); nor is
+      // ending none.
+      if (sameModelRole(modelRole, record)) return
       if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
       modelRole = record
       // Through the host's extension API, as the system prompt is: pi emits `entry_appended`, so

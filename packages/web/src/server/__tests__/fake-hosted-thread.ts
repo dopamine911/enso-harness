@@ -277,6 +277,10 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     for (const listener of listeners) listener(observation)
   }
   const parts: FakeThreadParts = { record, emit, open }
+  // The real host's rule (#904): a record equal to the current one appends nothing.
+  const setModelRole = (role: EnsoThreadModelRole | null): void => {
+    if (JSON.stringify(record.modelRoles.at(-1) ?? null) !== JSON.stringify(role)) record.modelRoles.push(role)
+  }
   const runtime: ThreadRuntime = {
     prompt: (request: PromptRequest) => {
       record.prompts.push(request)
@@ -302,7 +306,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     listCommands: () => fakeHostRows(record),
     modelState: () => record.modelState,
     sessionUsage: () => record.sessionUsage,
-    runHostCommand: (run: EnsoHostCommandRun) => {
+    runHostCommand: (run: EnsoHostCommandRun, options?: { readonly byRole?: boolean }) => {
       // What the real host does: the shared decision, the set, then the state said as `model`.
       record.hostCommands.push(run)
       const decision = decideHostCommand(run, record.modelState, FAKE_MODELS)
@@ -311,6 +315,9 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
         decision.kind === 'model'
           ? { ...record.modelState, model: { ...decision.model } }
           : { ...record.modelState, thinkingLevel: decision.level }
+      // A model or effort chosen by hand ends the role (#904), as the real host's does; a role's own
+      // step leaves the record to its caller.
+      if (options?.byRole !== true) setModelRole(null)
       emit({ kind: 'model', ...record.modelState })
       return Promise.resolve()
     },
@@ -368,9 +375,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.systemPrompt = choice ?? undefined
       return undefined
     },
-    setModelRole: (role: EnsoThreadModelRole | null) => {
-      record.modelRoles.push(role)
-    },
+    setModelRole,
     resolveIncident: (incidentId: string, resolution: EnsoIncidentResolution) => {
       // The real host's rule (#466), over the inspection's branch and what was resolved since.
       const branch = [

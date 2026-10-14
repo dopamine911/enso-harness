@@ -6,10 +6,12 @@ import {
   type EnsoModelTarget,
   type EnsoProvidersListing,
   type HostCommandOption,
+  MODEL_PRESET_NAME_MAX,
   MODEL_ROLE_NAME_SOURCE,
   resolveModelRole,
   SUGGESTED_MODEL_ROLES,
   THINKING_LEVEL_ORDER,
+  unavailableReason,
 } from '@enso/core'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
@@ -17,7 +19,7 @@ import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { cn } from './lib/utils.ts'
 import { roleNamesInOrder } from './model-picker.tsx'
-import { type ModelsSettingsStore, modelsSettings } from './models-settings.ts'
+import { type ModelsSettingsStore, type ModelsUpdate, modelsSettings } from './models-settings.ts'
 import { OptionSelect } from './option-select.tsx'
 import { PAGE_CARD, PAGE_INPUT, PAGE_OUTLINE_BUTTON, PAGE_PRIMARY_BUTTON, SUB_TITLE } from './page-styles.ts'
 import { useProvidersListing } from './providers-settings.tsx'
@@ -28,7 +30,8 @@ import { useStore } from './store.ts'
  * first available runs when the model is not; none available, the role is refused, never quietly
  * replaced. `default` is the role new threads start on. Presets save every role and the default
  * effort under a name; switching to one REPLACES the roles in one save, so a role the preset leaves
- * out is cleared, as in OMP. Every change is one `PUT` of the whole section.
+ * out is cleared, as in OMP. Every change is one `PUT` of the whole section, applied in turn to the
+ * section as the last save left it (`ModelsSettingsStore.save`), so quick edits don't drop each other.
  *
  * Models are offered from `GET /api/providers` (no thread is needed to read them): a provider's
  * listed models, those of a logged-in provider being the ones a role can run. The listing says no
@@ -50,14 +53,6 @@ export function modelOptionsOf(listing: EnsoProvidersListing): HostCommandOption
   )
 }
 
-/** Why a model can't run now, or `undefined` when it can (`resolveModelRole`'s own reasons). */
-function unavailable(model: string, options: readonly HostCommandOption[]): string | undefined {
-  const option = options.find((candidate) => candidate.id === model)
-  if (option === undefined) return 'not in the catalogue'
-  if (option.loggedIn === false) return `${option.providerName ?? 'its provider'} is not logged in`
-  return undefined
-}
-
 /** `target` with `effort` set, or without one when it is `''` (the default). */
 function withEffort<T extends { readonly effort?: string }>(target: T, effort: string): T {
   const { effort: _old, ...rest } = target
@@ -68,6 +63,18 @@ function withEffort<T extends { readonly effort?: string }>(target: T, effort: s
 function withRoles(models: EnsoModelsConfig, roles: Readonly<Record<string, EnsoModelRole>>): EnsoModelsConfig {
   const { roles: _old, ...rest } = models
   return Object.keys(roles).length === 0 ? rest : { ...rest, roles: { ...roles } }
+}
+
+/** The section with `presets` set, the key dropped when none is left. */
+function withPresets(models: EnsoModelsConfig, presets: Readonly<Record<string, EnsoModelPreset>>): EnsoModelsConfig {
+  const { presets: _old, ...rest } = models
+  return Object.keys(presets).length === 0 ? rest : { ...rest, presets: { ...presets } }
+}
+
+/** `entries` without `key` — a role or a preset deleted. */
+function withoutKey<T>(entries: Readonly<Record<string, T>> | undefined, key: string): Record<string, T> {
+  const { [key]: _deleted, ...kept } = entries ?? {}
+  return kept
 }
 
 /** A role with `fallbacks` set, the key dropped when none is left. */
@@ -142,18 +149,24 @@ interface RoleCardProps {
   /** Whether the providers listing was read: until it is, nothing is said unavailable. */
   readonly known: boolean
   readonly refusal: string | undefined
-  readonly onSave: (next: EnsoModelsConfig) => void
+  readonly onSave: (update: ModelsUpdate) => void
 }
 
 /** One role: what it resolves to now, its model and effort, its fallbacks in order, and Delete. */
 function RoleCard(props: RoleCardProps): React.ReactNode {
   const { name, models, options, known, refusal, onSave } = props
-  const roles = models.roles ?? {}
-  const role = roles[name]
+  const role = models.roles?.[name]
   if (role === undefined) return null
   const fallbacks = role.fallbacks ?? []
-  const setRole = (next: EnsoModelRole): void => onSave(withRoles(models, { ...roles, [name]: next }))
-  const setFallbacks = (next: readonly EnsoModelTarget[]): void => setRole(withFallbacks(role, next))
+  // Each change applies to the role as the section has it when its save's turn comes, so a change
+  // made while an earlier one is still saving keeps it; a role deleted by then stays deleted.
+  const changeRole = (change: (current: EnsoModelRole) => EnsoModelRole): void =>
+    onSave((current) => {
+      const now = current.roles?.[name]
+      return now === undefined ? current : withRoles(current, { ...current.roles, [name]: change(now) })
+    })
+  const changeFallbacks = (change: (current: readonly EnsoModelTarget[]) => readonly EnsoModelTarget[]): void =>
+    changeRole((current) => withFallbacks(current, change(current.fallbacks ?? [])))
   const resolution = known ? resolveModelRole(name, models, options) : undefined
   const firstFree = options.find(
     (option) =>
@@ -172,10 +185,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
           size="sm"
           variant="destructive"
           aria-label={`delete role ${name}`}
-          onClick={() => {
-            const { [name]: _deleted, ...rest } = roles
-            onSave(withRoles(models, rest))
-          }}
+          onClick={() => onSave((current) => withRoles(current, withoutKey(current.roles, name)))}
         >
           <Trash2Icon aria-hidden="true" />
           Delete
@@ -190,16 +200,16 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
           label={`${name}'s model`}
           value={role.model}
           options={options}
-          onChange={(model) => setRole({ ...role, model })}
+          onChange={(model) => changeRole((current) => ({ ...current, model }))}
         />
         <EffortSelect
           label={`${name}'s effort`}
           value={role.effort}
           unset="default effort"
-          onChange={(effort) => setRole(withEffort(role, effort))}
+          onChange={(effort) => changeRole((current) => withEffort(current, effort))}
         />
       </div>
-      {known ? <Unavailable reason={unavailable(role.model, options)} /> : null}
+      {known ? <Unavailable reason={unavailableReason(role.model, options)} /> : null}
       <div className="grid gap-2">
         <h5 className="text-sm font-semibold">Fallbacks, in order</h5>
         {fallbacks.length === 0 ? (
@@ -216,14 +226,18 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                     label={`${name}'s fallback ${index + 1} model`}
                     value={target.model}
                     options={options}
-                    onChange={(model) => setFallbacks(fallbacks.with(index, { ...target, model }))}
+                    onChange={(model) =>
+                      changeFallbacks((current) => changedAt(current, index, (now) => ({ ...now, model })))
+                    }
                   />
                 </div>
                 <EffortSelect
                   label={`${name}'s fallback ${index + 1} effort`}
                   value={target.effort}
                   unset="default effort"
-                  onChange={(effort) => setFallbacks(fallbacks.with(index, withEffort(target, effort)))}
+                  onChange={(effort) =>
+                    changeFallbacks((current) => changedAt(current, index, (now) => withEffort(now, effort)))
+                  }
                 />
                 <Button
                   type="button"
@@ -231,7 +245,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                   variant="ghost"
                   disabled={index === 0}
                   aria-label={`move ${name}'s fallback ${index + 1} up`}
-                  onClick={() => setFallbacks(swapped(fallbacks, index, index - 1))}
+                  onClick={() => changeFallbacks((current) => swapped(current, index, index - 1))}
                 >
                   <ArrowUpIcon aria-hidden="true" />
                 </Button>
@@ -241,7 +255,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                   variant="ghost"
                   disabled={index === fallbacks.length - 1}
                   aria-label={`move ${name}'s fallback ${index + 1} down`}
-                  onClick={() => setFallbacks(swapped(fallbacks, index, index + 1))}
+                  onClick={() => changeFallbacks((current) => swapped(current, index, index + 1))}
                 >
                   <ArrowDownIcon aria-hidden="true" />
                 </Button>
@@ -250,12 +264,12 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`remove ${name}'s fallback ${index + 1}`}
-                  onClick={() => setFallbacks(fallbacks.toSpliced(index, 1))}
+                  onClick={() => changeFallbacks((current) => current.toSpliced(index, 1))}
                 >
                   <Trash2Icon aria-hidden="true" />
                 </Button>
               </div>
-              {known ? <Unavailable reason={unavailable(target.model, options)} /> : null}
+              {known ? <Unavailable reason={unavailableReason(target.model, options)} /> : null}
             </li>
           ))}
         </ol>
@@ -267,7 +281,9 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
             disabled={firstFree === undefined}
             aria-label={`add a fallback to ${name}`}
             onClick={() => {
-              if (firstFree !== undefined) setFallbacks([...fallbacks, { model: firstFree.id }])
+              if (firstFree === undefined) return
+              const added = { model: firstFree.id }
+              changeFallbacks((current) => [...current, added])
             }}
           >
             <PlusIcon aria-hidden="true" />
@@ -295,6 +311,12 @@ function swapped<T>(list: readonly T[], from: number, to: number): T[] {
   return next
 }
 
+/** `list` with the item at `index` changed, or as it is when there is none there. */
+function changedAt<T>(list: readonly T[], index: number, change: (item: T) => T): readonly T[] {
+  const item = list[index]
+  return item === undefined ? list : list.with(index, change(item))
+}
+
 /** Add a role: a valid name not yet taken, starting on the first model that can run. */
 function AddRole({
   models,
@@ -305,7 +327,7 @@ function AddRole({
   models: EnsoModelsConfig
   options: readonly HostCommandOption[]
   refusal: string | undefined
-  onSave: (next: EnsoModelsConfig) => void
+  onSave: (update: ModelsUpdate) => void
 }): React.ReactNode {
   const [name, setName] = useState('')
   const [problem, setProblem] = useState<string | undefined>(undefined)
@@ -328,7 +350,12 @@ function AddRole({
     }
     setProblem(undefined)
     setName('')
-    onSave(withRoles(models, { ...roles, [trimmed]: { model: first.id } }))
+    // A role of that name saved since this render is kept, never replaced by a new one.
+    onSave((current) =>
+      current.roles?.[trimmed] === undefined
+        ? withRoles(current, { ...current.roles, [trimmed]: { model: first.id } })
+        : current,
+    )
   }
   return (
     <form
@@ -380,7 +407,7 @@ function Presets({
 }: {
   models: EnsoModelsConfig
   refusal: string | undefined
-  onSave: (next: EnsoModelsConfig) => void
+  onSave: (update: ModelsUpdate) => void
 }): React.ReactNode {
   const [name, setName] = useState('')
   const presets = models.presets ?? {}
@@ -414,7 +441,12 @@ function Presets({
                   size="sm"
                   variant="outline"
                   aria-label={`switch to preset ${preset}`}
-                  onClick={() => onSave(switchedToPreset(models, saved))}
+                  onClick={() =>
+                    onSave((current) => {
+                      const chosen = current.presets?.[preset]
+                      return chosen === undefined ? current : switchedToPreset(current, chosen)
+                    })
+                  }
                 >
                   Switch
                 </Button>
@@ -423,11 +455,7 @@ function Presets({
                   size="sm"
                   variant="ghost"
                   aria-label={`delete preset ${preset}`}
-                  onClick={() => {
-                    const { presets: _old, ...rest } = models
-                    const { [preset]: _deleted, ...kept } = presets
-                    onSave(Object.keys(kept).length === 0 ? rest : { ...rest, presets: kept })
-                  }}
+                  onClick={() => onSave((current) => withPresets(current, withoutKey(current.presets, preset)))}
                 >
                   <Trash2Icon aria-hidden="true" />
                 </Button>
@@ -442,19 +470,22 @@ function Presets({
         onSubmit={(event) => {
           event.preventDefault()
           const trimmed = name.trim()
-          if (trimmed === '' || trimmed.length > 64) return
-          const snapshot: EnsoModelPreset = {
-            roles: { ...models.roles },
-            ...(models.defaultEffort === undefined ? {} : { defaultEffort: models.defaultEffort }),
-          }
+          if (trimmed === '' || trimmed.length > MODEL_PRESET_NAME_MAX) return
           setName('')
-          onSave({ ...models, presets: { ...presets, [trimmed]: snapshot } })
+          // The roles and default effort as saved when this save's turn comes, edits still saving included.
+          onSave((current) => {
+            const snapshot: EnsoModelPreset = {
+              roles: { ...current.roles },
+              ...(current.defaultEffort === undefined ? {} : { defaultEffort: current.defaultEffort }),
+            }
+            return withPresets(current, { ...current.presets, [trimmed]: snapshot })
+          })
         }}
       >
         <input
           aria-label="preset name"
           placeholder="Save the current roles as…"
-          maxLength={64}
+          maxLength={MODEL_PRESET_NAME_MAX}
           value={name}
           onChange={(event) => setName(event.target.value)}
           className={cn(PAGE_INPUT, 'w-auto min-w-48 flex-1')}
@@ -496,9 +527,9 @@ export function RolesSection({
   const known = read.kind === 'read'
   const save =
     (where: string) =>
-    (next: EnsoModelsConfig): void => {
+    (update: ModelsUpdate): void => {
       setRefusal(undefined)
-      void store.save(next).then((outcome) => {
+      void store.save(update).then((outcome) => {
         if (outcome.kind === 'refused') setRefusal({ where, reason: outcome.reason })
       })
     }
@@ -525,7 +556,7 @@ export function RolesSection({
           id="settings-default-effort"
           value={models.defaultEffort ?? ''}
           options={[['', "the model's own"], ...EFFORT_OPTIONS]}
-          onChange={(effort) => save('effort')(withEffortKey(models, effort))}
+          onChange={(effort) => save('effort')((current) => withEffortKey(current, effort))}
           className={cn(PAGE_INPUT, 'w-auto min-w-48')}
         />
         {refusedAt('effort') === undefined ? null : (
