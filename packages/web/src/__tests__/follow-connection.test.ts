@@ -1006,3 +1006,33 @@ test('close() during the opening fetch ends the subscription instead of throwing
   await drained
   expect(chunks).toEqual([])
 })
+
+// PR #974 review: a run the stopped client's reset forgot must not be closed into the next
+// subscription — its RUN_ERROR would be yielded ahead of that subscription's snapshot.
+test('a prompt answered after the client stopped taking chunks closes no run into the next subscription', async () => {
+  const server = createScriptedFetch({ promptStatus: { status: 409, body: 'a run is already in progress' } })
+  const connection = createFollowConnection({ threadId: 't1', fetch: server.fetch })
+  const stopped = connection.subscribe()[Symbol.asyncIterator]()
+  const first = stopped.next()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  server.frame(SNAPSHOT_IDLE)
+  await first
+  const release = server.holdPrompt()
+  const sending = connection.send(
+    [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'late' }] }],
+    undefined,
+    undefined,
+    { threadId: 't1', runId: 'r-late', clientTools: [], forwardedProps: {} },
+  )
+  // The client throws handling the chunk it holds: the subscription stops, its runs are forgotten.
+  await stopped.throw?.(new TypeError('the stream processor broke')).catch(() => undefined)
+  release()
+  await sending
+  const next = connection.subscribe()[Symbol.asyncIterator]()
+  const opened = next.next()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  server.frame(SNAPSHOT_IDLE)
+  expect((await opened).value).not.toMatchObject({ runId: 'r-late' })
+  connection.close()
+  await next.return?.(undefined)
+})

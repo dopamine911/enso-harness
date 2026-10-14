@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { EnsoObservation } from '@enso/core'
@@ -31,11 +31,20 @@ afterAll(releaseEnsoLogs)
 
 const servers: Array<{ close: () => Promise<void> }> = []
 const clients: ChatClient[] = []
+/** Each test's temporary directories: the harness, the agent's and the logs'. */
+const scratch: string[] = []
 afterEach(async () => {
   for (const client of clients.splice(0)) client.dispose()
   clearThreadsForTest()
   for (const server of servers.splice(0)) await server.close()
+  for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true })
 })
+
+function scratchDirectory(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix))
+  scratch.push(directory)
+  return directory
+}
 
 /** The scripted runtime's `emit`, and the server the page follows. */
 interface Served {
@@ -53,15 +62,14 @@ async function serve(): Promise<Served> {
     emit = fake.emit
     return Promise.resolve(fake.hosted)
   })
-  const harness = mkdtempSync(join(tmpdir(), 'enso-follow-page-harness-'))
-  mkdirSync(harness, { recursive: true })
+  const harness = scratchDirectory('enso-follow-page-harness-')
   writeFileSync(join(harness, 'package.json'), JSON.stringify({ name: 'fake-harness', pi: {} }))
   const started = startEnsoServer({
     cwd: tmpdir(),
     harnessPackageDir: harness,
-    agentDir: mkdtempSync(join(tmpdir(), 'enso-follow-page-agent-')),
+    agentDir: scratchDirectory('enso-follow-page-agent-'),
     permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
-    logsDir: mkdtempSync(join(tmpdir(), 'enso-follow-page-logs-')),
+    logsDir: scratchDirectory('enso-follow-page-logs-'),
     port: 0,
     host: () => host,
   })
@@ -176,16 +184,23 @@ const ARCADE = Array.from(
   (_unused, line) => `  ctx.fillText("score ✓ ${line}", ${line % 320}, 8) // «game ${line % 5}»\n`,
 ).join('')
 
+/** pi's `input_json_delta` size in the incident: how many characters of the arguments one delta carries. */
+const ARGUMENT_DELTA_CHARACTERS = 14
+
 /** pi's streamed arguments, as the follow carries them: one `toolcall_delta` per few characters. */
 function composedArguments(args: Record<string, unknown>): EnsoObservation[] {
   const json = JSON.stringify(args)
   const deltas: EnsoObservation[] = []
-  for (let at = 0; at < json.length; at += 14) {
+  for (let at = 0; at < json.length; at += ARGUMENT_DELTA_CHARACTERS) {
     deltas.push({
       kind: 'unmapped',
       event: {
         type: 'message_update',
-        assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 1, delta: json.slice(at, at + 14) },
+        assistantMessageEvent: {
+          type: 'toolcall_delta',
+          contentIndex: 1,
+          delta: json.slice(at, at + ARGUMENT_DELTA_CHARACTERS),
+        },
       },
     })
   }

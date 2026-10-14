@@ -1,4 +1,6 @@
+import { EnsoKeptDrafts } from '@enso/core'
 import { useEffect, useRef, useState } from 'react'
+import { Check } from 'typebox/value'
 import type { PromptAttachment } from './components/ai-elements/prompt-input.tsx'
 
 /**
@@ -33,10 +35,12 @@ function tabStorage(): Storage | undefined {
   }
 }
 
-function readKept(storage: Storage | undefined): Record<string, KeptDraft> {
+function readKept(storage: Storage | undefined): EnsoKeptDrafts {
   try {
     const raw = storage?.getItem(KEPT_DRAFTS_KEY)
-    return raw == null ? {} : (JSON.parse(raw) as Record<string, KeptDraft>)
+    if (raw == null) return {}
+    const parsed: unknown = JSON.parse(raw)
+    return Check(EnsoKeptDrafts, parsed) ? parsed : {}
   } catch {
     return {}
   }
@@ -64,7 +68,7 @@ async function dataUrlOf(url: string): Promise<string | undefined> {
  */
 export async function reloadKeepingDrafts(reload: () => void = () => window.location.reload()): Promise<void> {
   const storage = tabStorage()
-  const kept: Record<string, KeptDraft> = readKept(storage)
+  const kept: EnsoKeptDrafts = readKept(storage)
   for (const [threadId, read] of offered) {
     const { text, files } = read()
     if (text.trim().length === 0 && files.length === 0) continue
