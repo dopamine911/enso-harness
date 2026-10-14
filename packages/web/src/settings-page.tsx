@@ -23,15 +23,17 @@ import { TreesSection } from './trees-settings.tsx'
 import { WebToolsSection } from './web-tools-settings.tsx'
 
 /**
- * Settings, a page (#869; the header's dialog before it), in three sections, each its own route.
+ * Settings, a page (#869; the header's dialog before it), in four sections, each its own route.
  * Appearance: the page's colour theme, and a font per role (#407) — a choice applies at once and is
  * kept in this browser (`theme.ts`, `fonts.ts`). Each option draws itself — a theme's card preview
  * wears `data-theme`, so its colours are that theme's variables, and a font's name is set in that font —
  * so nothing here restates a value the page already holds. Permissions (#474): the rules pi runs
  * under, saved on the server (`permissions-settings.tsx`); its draft is held beneath the page
- * (`routed-page.tsx`), so leaving Settings keeps it. Storage (#578): what each thread tree
- * and snapshot store costs on disk, measured when the section opens, with each tree's Delete
- * (`trees-settings.tsx`).
+ * (`routed-page.tsx`), so leaving Settings keeps it. Web tools (#924, #932): the hosts `web_fetch`
+ * may read, and `web_search`'s backend, Tavily domains and key, saved on the server in
+ * `ENSO_HOME/config.json` and `secrets.env` (`web-tools-settings.tsx`). Storage (#578):
+ * what each thread tree and snapshot store costs on disk, measured when the section opens, with each
+ * tree's Delete (`trees-settings.tsx`).
  */
 
 /**

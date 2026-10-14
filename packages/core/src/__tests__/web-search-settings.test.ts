@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseEnsoConfig } from '../config.ts'
@@ -81,4 +81,29 @@ test('⚠ a key the file could not hold is refused without repeating it', () => 
     expect(JSON.stringify(written)).not.toContain('tvly')
   }
   expect(readdirSync(join(path, '..'))).toEqual([])
+})
+
+test('the key’s line replaced wherever it is: an `export` line, every duplicate, a CRLF file kept CRLF (#978 review)', () => {
+  const exported = fileIn('secrets.env', 'export TAVILY_API_KEY=old\nA=1\n')
+  expect(writeSecret(exported, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
+  expect(readFileSync(exported, 'utf8')).toBe('TAVILY_API_KEY=tvly-new\nA=1\n')
+  const twice = fileIn('secrets.env', 'TAVILY_API_KEY=one\nA=1\nTAVILY_API_KEY=two\n')
+  expect(writeSecret(twice, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
+  expect(readFileSync(twice, 'utf8')).toBe('TAVILY_API_KEY=tvly-new\nA=1\n')
+  const crlf = fileIn('secrets.env', 'A=1\r\nB=2\r\n')
+  expect(writeSecret(crlf, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
+  expect(readFileSync(crlf, 'utf8')).toBe('A=1\r\nB=2\r\nTAVILY_API_KEY=tvly-new\r\n')
+})
+
+test('⚠ a symlinked secrets.env stays a link: the file behind it gets the key, owner-only (#978 review)', () => {
+  const store = mkdtempSync(join(tmpdir(), 'enso-password-store-'))
+  const real = join(store, 'enso.env')
+  writeFileSync(real, 'A=1\n', { mode: 0o644 })
+  const path = join(mkdtempSync(join(tmpdir(), 'enso-web-search-')), 'secrets.env')
+  symlinkSync(real, path)
+  expect(writeSecret(path, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
+  expect(lstatSync(path).isSymbolicLink()).toBe(true)
+  expect(readFileSync(real, 'utf8')).toBe('A=1\nTAVILY_API_KEY=tvly-new\n')
+  expect(statSync(real).mode & 0o777).toBe(0o600)
+  expect(readdirSync(store)).toEqual(['enso.env'])
 })

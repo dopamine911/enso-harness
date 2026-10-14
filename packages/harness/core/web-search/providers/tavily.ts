@@ -16,12 +16,6 @@ import { asRecord, asString } from '../wire-json.ts'
  * @group Web search
  */
 export const TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
-/**
- * The env var that ARMS the fallback — read at the composition root only.
- *
- * @group Web search
- */
-export const TAVILY_API_KEY_VARIABLE = 'TAVILY_API_KEY'
 /** Result-count bound sent to the API; Tavily's own default is 5. */
 const TAVILY_MAX_RESULTS = 8
 

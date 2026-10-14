@@ -46,7 +46,7 @@ export const WEB_ACCESS: FeatureSpec = {
     `\`curl\`, \`wget\` and other network clients in the shell are refused by a guard, and the refusal tells pi to use \`${WEB_FETCH_TOOL_NAME}\` instead.`,
   ],
   opens: [
-    'Open **Settings**, then **Web tools**. Under **Fetching pages**, type a host and choose **Add**; **Remove** takes one off. A pasted URL is reduced to its host, after you confirm; a wildcard, a path, a port or a login is refused, saying why. **Check** asks `https://<host>/` once, from the server, and when the host only redirects, offers the host it redirects to: allowing `enso.engineer`, which redirects to `www.enso.engineer`, would fetch nothing.',
+    'Open **Settings**, then **Web tools**. Under **Fetching pages**, type a host and choose **Add**; **Remove** takes one off. A pasted URL is reduced to its host, after you confirm; a wildcard, a path, a port or a login is refused, saying why. **Check** asks `https://<host>/` once, from the server, as `web_fetch` would; a host that resolves to a private or reserved address is not asked, and Check says `web_fetch` would refuse it. When the host only redirects, Check offers the host it redirects to: allowing `enso.engineer`, which redirects to `www.enso.engineer`, would fetch nothing.',
     [
       'The allowlist lives in your config, `ENSO_HOME/config.json` (`~/.enso/config.json` by default), and Settings changes only that key in it. By hand, name each host exactly:',
       '',

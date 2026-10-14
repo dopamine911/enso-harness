@@ -12,10 +12,12 @@ import {
   type EnsoConfigParseResult,
   EXTERNAL_WEB_CONTENT_NOTICE,
   ensoLogger,
+  isPublicIpAddress,
   parseEnsoConfig,
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_TIMEOUT_MS,
   WEB_FETCH_TOOL_NAME,
+  WEB_FETCH_USER_AGENT,
   WebFetchToolParameters,
 } from '@enso/core'
 import { ensoConfigPath, ensoHome, readTextIfPresent } from '@enso/core/paths'
@@ -23,7 +25,6 @@ import {
   isFetchableContentType,
   isHostAllowed,
   isHtmlContentType,
-  isPublicIpAddress,
   parseWebFetchUrl,
   readableTextOfHtml,
   runUnderDeadline,
@@ -98,8 +99,6 @@ export interface WebFetchDependencies {
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
 }
-
-const USER_AGENT = 'enso-web-fetch'
 
 /** What the tool enforces: the allowlist, or why there is none, and the file a human changes. */
 interface WebFetchPolicy {
@@ -297,7 +296,7 @@ function fetchUnderDeadline(
         response = await dependencies.fetchUrl(url.href, {
           redirect: 'manual',
           signal: deadlineSignal,
-          headers: { 'user-agent': USER_AGENT },
+          headers: { 'user-agent': WEB_FETCH_USER_AGENT },
         })
       } catch (error) {
         return refusal(rawUrl, `the request failed: ${String(error)}`)

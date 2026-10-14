@@ -361,7 +361,9 @@ function CheckResult({
     return (
       <p role="status" className="text-sm">
         https://{host}/ answered <strong className="font-semibold">{found.status}</strong>.
-        {found.status < 400 ? ' web_fetch can read it once it is allowed.' : ' The host answers, but not with a page.'}
+        {found.status < 400
+          ? ' web_fetch can reach it once it is allowed; it still reads only pages sent as text.'
+          : ' The host answers, but not with a page.'}
       </p>
     )
   const suggested = found.suggestedHost

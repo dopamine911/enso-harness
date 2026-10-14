@@ -1,4 +1,14 @@
-import { closeSync, constants, fstatSync, mkdirSync, openSync, readSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname } from 'node:path'
 import { type EnsoConfig, parseEnsoConfig } from './config.ts'
 import { projectConfigPath, projectLocalConfigPath } from './paths.ts'
@@ -154,6 +164,11 @@ export function changeProjectWebTools(
 ): { readonly kind: 'written' | 'unchanged' } | { readonly kind: 'refused'; readonly reason: string } {
   const path = projectConfigPath(project)
   mkdirSync(dirname(path), { recursive: true })
+  // ⚠ Never through a link: the write follows one to the file it names (`replaceFileText`), and a
+  // project's own `.enso/config.json` linked to another config — the user's — would change that one.
+  const linked = lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() === true
+  if (linked || realpathSync(dirname(path)) !== dirname(projectConfigPath(realpathSync(project))))
+    return { kind: 'refused', reason: `${path} is reached through a link, so it is not written here; edit it by hand` }
   return 'list' in change || 'backend' in change
     ? changeUserWebSearch(path, change)
     : changeUserAllowedHosts(path, change)

@@ -22,6 +22,7 @@
 
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   closeSync,
   constants,
   copyFileSync,
@@ -37,8 +38,10 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -72,6 +75,37 @@ export function realpathOrSelf(path: string): string {
     return realpathSync(path)
   } catch {
     return path
+  }
+}
+
+/**
+ * Replace the file at `path` with `text` in one step: written beside the file it names, then renamed
+ * over it — a reader never sees half a file. Settings' writes (#924, #932) go through here.
+ *
+ * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config or secrets file kept as a symlink (into a
+ * dotfiles repo, say) stays a link, and the file behind it changes. The file keeps its own mode;
+ * `mode` is the mode of a new one — or, given `forceMode`, of the file whatever it was before.
+ * Nothing staged is left behind when the write or the rename throws: the error is rethrown.
+ *
+ * @group Workspace paths
+ */
+export function replaceFileText(
+  path: string,
+  text: string,
+  options: { mode?: number; forceMode?: boolean } = {},
+): void {
+  const target = realpathOrSelf(path)
+  const before = existsSync(target) ? statSync(target).mode & 0o7777 : undefined
+  const mode = options.forceMode === true || before === undefined ? options.mode : before
+  const staged = `${target}.${process.pid}.tmp`
+  try {
+    writeFileSync(staged, text, mode === undefined ? undefined : { mode })
+    // writeFileSync's mode is masked by the umask; the file's own mode is restored exactly.
+    if (mode !== undefined) chmodSync(staged, mode)
+    renameSync(staged, target)
+  } catch (error: unknown) {
+    rmSync(staged, { force: true })
+    throw error
   }
 }
 

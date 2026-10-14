@@ -224,7 +224,8 @@ never names.
 start, so the allowlist is captured per session and an in-session edit is inert (header of `web-fetch/index.ts`); `resolveHostAddresses` feeds the advisory
 public-address gate (`web-fetch/index.ts#addressGateReason`); `fetchUrl` is called once per call under
 `fetchUnderDeadline` (`web-fetch/index.ts#fetchUnderDeadline`) with `redirect: 'manual'` and `WEB_FETCH_TIMEOUT_MS`. The pure policy —
-URL gate, host match, content-type gate, the address classifier — is `harness/core/web-fetch-policy.ts`.
+URL gate, host match, content-type gate — is `harness/core/web-fetch-policy.ts`; the address classifier, `isPublicIpAddress`,
+is in `@enso/core` (`core/src/web-fetch.ts`), where Settings' host check (#924) asks it too.
 A `text/html` body is handed on as its readable text, not its markup (#927, `web-fetch/index.ts#pageText`):
 `harness/core/html-text.ts` keeps headings, paragraphs, lists, links, code and tables, drops the page's
 chrome and everything it hides, and the header line names the conversion and the raw size. Every other
