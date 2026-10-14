@@ -1,7 +1,7 @@
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { type EnsoConfig, type EnsoConfigParseResult, parseEnsoConfig } from './config.ts'
-import { projectConfigPath, projectLocalConfigPath, readTextIfPresent } from './paths.ts'
+import { type EnsoConfig, parseEnsoConfig } from './config.ts'
+import { projectConfigPath, projectLocalConfigPath } from './paths.ts'
 import type {
   EnsoConfigTier,
   EnsoProjectSettingsUpdate,
@@ -9,6 +9,7 @@ import type {
   EnsoProjectTier,
   EnsoProjectTierFile,
 } from './project-settings.ts'
+import { readEnsoConfigFile } from './user-config-write.ts'
 
 /**
  * A project's `threads` settings read from its tiers (#754), and written to its own files by the
@@ -68,7 +69,7 @@ export function readProjectThreadSettings(request: {
   if (request.trusted) {
     for (const tier of ['local', 'shared'] as const) {
       const path = projectTierPath(request.project, tier)
-      const read = readTierFile(path)
+      const read = readEnsoConfigFile(path)
       if (read.kind === 'unreadable') unreadable.push({ tier, path, reason: read.reason })
       else layers.push({ tier, threads: read.config.threads })
     }
@@ -106,15 +107,6 @@ function projectTierPath(project: string, tier: EnsoProjectTier): string {
   return tier === 'local' ? projectLocalConfigPath(project) : projectConfigPath(project)
 }
 
-/** A tier file's parse; one that is there and cannot be read is `unreadable`, never "no settings". */
-function readTierFile(path: string): EnsoConfigParseResult {
-  try {
-    return parseEnsoConfig(readTextIfPresent(path))
-  } catch (error: unknown) {
-    return { kind: 'unreadable', reason: `could not be read: ${String(error)}` }
-  }
-}
-
 /**
  * Set or clear `threads` keys in one of the project's own files (#754), the project page's write:
  * a key given is set, `null` removes it, a key absent is left; every other key in the file is kept,
@@ -130,7 +122,7 @@ export function writeProjectThreadSettings(
   update: EnsoProjectSettingsUpdate,
 ): { kind: 'written' } | { kind: 'unreadable'; path: string; reason: string } {
   const path = projectTierPath(project, update.tier)
-  const read = readTierFile(path)
+  const read = readEnsoConfigFile(path)
   if (read.kind === 'unreadable') return { kind: 'unreadable', path, reason: read.reason }
   const threads = Object.fromEntries(
     Object.entries({ ...read.config.threads, ...update.threads }).filter(

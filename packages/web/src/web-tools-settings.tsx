@@ -1,46 +1,29 @@
-import {
-  type EnsoStoredThread,
-  readWebFetchHostInput,
-  WebFetchAllowlist,
-  type WebFetchAllowlistChange,
-  WebFetchHostCheck,
-} from '@enso/core'
-import { ExternalLinkIcon, LockIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { readWebFetchHostInput, WebFetchAllowlist, type WebFetchAllowlistChange, WebFetchHostCheck } from '@enso/core'
+import { TriangleAlertIcon } from 'lucide-react'
+import { useState } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { cn } from './lib/utils.ts'
 import { PAGE_INPUT, PAGE_OUTLINE_BUTTON, PAGE_PRIMARY_BUTTON, SUB_TITLE } from './page-styles.ts'
 import { describeFailedResponse } from './stored-threads.ts'
+import { WebSearchSettingsEditor } from './web-search-settings.tsx'
+import {
+  postJson,
+  RemovableList,
+  SettingsUnread,
+  TrustedProjects,
+  useSettingsAnswer,
+  type WebToolsSectionProps,
+  WhenItApplies,
+} from './web-tools-shared.tsx'
 
 /**
  * Settings › Web tools (#924, #930): what `web_fetch` and `web_search` may reach, for every project.
- * This holds **Fetching pages**, the `web_fetch` allowlist; the section's other group, Searching,
- * sits beside it (#932). Written through the server (`/api/settings/web-fetch`), which changes only
+ * This holds **Fetching pages**, the `web_fetch` allowlist, and beside it **Searching**
+ * (`web-search-settings.tsx`, #932). Written through the server (`/api/settings/web-fetch`), which changes only
  * `webFetch.allowedHosts` in `ENSO_HOME/config.json`; a trusted project's own hosts are shown, read only.
  */
-
-type AllowlistRead =
-  | { readonly kind: 'loading' }
-  | { readonly kind: 'read'; readonly allowlist: WebFetchAllowlist }
-  | { readonly kind: 'failed'; readonly reason: string }
-
-/** The page's `fetch`, called as a function (a browser's refuses any `this` but the window). */
-const pageFetch: FetchLike = (input, init) => fetch(input, init)
-
-/** An allowlist answer read and checked against its schema, or why not. */
-async function allowlistOf(response: Response): Promise<AllowlistRead> {
-  if (!response.ok) return { kind: 'failed', reason: await describeFailedResponse(response) }
-  const payload: unknown = await response.json()
-  if (!Check(WebFetchAllowlist, payload))
-    return { kind: 'failed', reason: "the server's allowlist did not match its schema" }
-  return { kind: 'read', allowlist: payload }
-}
-
-async function postJson(fetchNow: FetchLike, url: string, body: unknown): Promise<Response> {
-  return fetchNow(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-}
 
 /** What the Add field holds after a try: nothing yet, a refusal, or a pasted URL waiting for its reduction to be confirmed. */
 type AddState =
@@ -53,14 +36,6 @@ type CheckState =
   | { readonly kind: 'checking'; readonly host: string }
   | { readonly kind: 'checked'; readonly host: string; readonly check: WebFetchHostCheck }
   | { readonly kind: 'failed'; readonly host: string; readonly reason: string }
-
-export interface WebToolsSectionProps {
-  readonly fetch?: FetchLike | undefined
-  /** The stored listing: a thread still on the old list is named by its title. */
-  readonly stored: readonly EnsoStoredThread[]
-  /** Open a project's page, from the group of hosts it adds. */
-  readonly onOpenProject: (projectId: string) => void
-}
 
 export function WebToolsSection(props: WebToolsSectionProps): React.ReactNode {
   return (
@@ -75,6 +50,12 @@ export function WebToolsSection(props: WebToolsSectionProps): React.ReactNode {
           Fetching pages
         </h3>
         <WebFetchAllowlistEditor {...props} />
+      </section>
+      <section aria-labelledby="settings-web-search-label" className="grid gap-3">
+        <h3 id="settings-web-search-label" className={SUB_TITLE}>
+          Searching
+        </h3>
+        <WebSearchSettingsEditor {...props} />
       </section>
     </div>
   )
@@ -94,53 +75,10 @@ async function askHostCheck(fetchNow: FetchLike, host: string): Promise<CheckSta
   }
 }
 
-/** The allowlist, read when the section mounts, and each change written through the server. */
-function useAllowlist(fetchNow: FetchLike): {
-  readonly read: AllowlistRead
-  readonly writing: boolean
-  readonly writeError: string | undefined
-  readonly change: (body: WebFetchAllowlistChange) => Promise<boolean>
-} {
-  const [read, setRead] = useState<AllowlistRead>({ kind: 'loading' })
-  const [writeError, setWriteError] = useState<string | undefined>(undefined)
-  const [writing, setWriting] = useState(false)
-  useEffect(() => {
-    let current = true
-    void fetchNow('/api/settings/web-fetch')
-      .then(allowlistOf)
-      .catch((error: unknown) => ({ kind: 'failed', reason: String(error) }) as const)
-      .then((next) => {
-        if (current) setRead(next)
-      })
-    return (): void => {
-      current = false
-    }
-  }, [fetchNow])
-
-  async function change(body: WebFetchAllowlistChange): Promise<boolean> {
-    setWriting(true)
-    setWriteError(undefined)
-    try {
-      const next = await allowlistOf(await postJson(fetchNow, '/api/settings/web-fetch', body))
-      if (next.kind === 'failed') {
-        setWriteError(next.reason)
-        return false
-      }
-      setRead(next)
-      return true
-    } catch (error: unknown) {
-      setWriteError(String(error))
-      return false
-    } finally {
-      setWriting(false)
-    }
-  }
-  return { read, writing, writeError, change }
-}
-
-function WebFetchAllowlistEditor({ fetch: fetchImpl, stored, onOpenProject }: WebToolsSectionProps): React.ReactNode {
-  const fetchNow = fetchImpl ?? pageFetch
-  const { read, writing, writeError, change } = useAllowlist(fetchNow)
+function WebFetchAllowlistEditor({ fetch, stored, onOpenProject }: WebToolsSectionProps): React.ReactNode {
+  const answer = useSettingsAnswer(fetch, '/api/settings/web-fetch', WebFetchAllowlist, 'allowlist')
+  const { read, writing, writeError, fetchNow } = answer
+  const change = (body: WebFetchAllowlistChange): Promise<boolean> => answer.post(body)
   const [typed, setTyped] = useState('')
   const [add, setAdd] = useState<AddState>({ kind: 'idle' })
   const [check, setCheck] = useState<CheckState>({ kind: 'idle' })
@@ -167,14 +105,8 @@ function WebFetchAllowlistEditor({ fetch: fetchImpl, stored, onOpenProject }: We
     setCheck(await askHostCheck(fetchNow, host))
   }
 
-  if (read.kind === 'loading') return <p className="text-sm text-muted-foreground">Reading the allowlist…</p>
-  if (read.kind === 'failed')
-    return (
-      <p role="alert" className="text-sm text-refuse">
-        The allowlist could not be read: {read.reason}
-      </p>
-    )
-  const { allowlist } = read
+  if (read.kind !== 'read') return <SettingsUnread read={read} what="the allowlist" />
+  const { value: allowlist } = read
   const busy = writing || check.kind === 'checking'
 
   return (
@@ -253,7 +185,12 @@ function WebFetchAllowlistEditor({ fetch: fetchImpl, stored, onOpenProject }: We
         )}
       </form>
 
-      <WhenItApplies staleThreads={allowlist.staleThreads} stored={stored} />
+      <WhenItApplies
+        staleThreads={allowlist.staleThreads}
+        stored={stored}
+        lead="Applies to sessions started after the change: a thread reads the list when its session starts."
+        old="the old list"
+      />
 
       <ProjectHosts projects={allowlist.projects} onOpenProject={onOpenProject} />
     </div>
@@ -288,30 +225,6 @@ function AllowlistNotes({ path, unreadable }: { path: string; unreadable: string
   )
 }
 
-/** When a change applies — the list is read at session start — and the live threads still on the old one, by title. */
-interface WhenItAppliesProps {
-  readonly staleThreads: readonly string[]
-  readonly stored: readonly EnsoStoredThread[]
-}
-
-function WhenItApplies({ staleThreads, stored }: WhenItAppliesProps): React.ReactNode {
-  const names = staleThreads.map((threadId) => {
-    const title = stored.find((row) => row.threadId === threadId)?.title?.trim() ?? ''
-    return title === '' ? `new thread ${threadId.slice(0, 8)}` : title
-  })
-  return (
-    <p className="text-sm text-muted-foreground">
-      Applies to sessions started after the change: a thread reads the list when its session starts.
-      {names.length === 0 ? null : (
-        <>
-          {' '}
-          Still running on the old list: <span className="text-foreground">{names.join(', ')}</span>.
-        </>
-      )}
-    </p>
-  )
-}
-
 /** The user's own hosts, each with its Remove, under the file they are kept in. */
 interface UserHostsProps {
   readonly path: string
@@ -332,24 +245,13 @@ function UserHosts(props: UserHostsProps): React.ReactNode {
           No hosts yet, so <code className="font-mono">web_fetch</code> fetches nothing.
         </p>
       ) : (
-        <ul aria-label="allowed hosts" className="overflow-hidden rounded-sm border bg-card">
-          {hosts.map((host) => (
-            <li key={host} className="flex items-center gap-3 border-b px-3 py-1.5 text-sm last:border-b-0">
-              <span className="min-w-0 flex-1 truncate font-mono">{host}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                aria-label={`remove ${host}`}
-                onClick={() => onRemove(host)}
-              >
-                <XIcon aria-hidden="true" />
-                Remove
-              </Button>
-            </li>
-          ))}
-        </ul>
+        <RemovableList
+          label="allowed hosts"
+          hostNames={hosts}
+          busy={busy}
+          removeLabel={(host) => `remove ${host}`}
+          onRemove={onRemove}
+        />
       )}
     </div>
   )
@@ -391,43 +293,22 @@ interface ProjectHostsProps {
 }
 
 function ProjectHosts({ projects, onOpenProject }: ProjectHostsProps): React.ReactNode {
-  if (projects.length === 0) return null
   return (
-    <div className="grid gap-2">
-      <span className="font-mono text-meta font-semibold tracking-wider text-muted-foreground uppercase">
-        Added by trusted projects
-      </span>
-      {projects.map((project) => (
-        <div
-          key={project.projectId}
-          role="group"
-          aria-label={`hosts from ${project.title}`}
-          className="grid gap-1 rounded-sm border bg-card px-3 py-2 text-sm"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <LockIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
-            <span className="font-semibold">{project.title}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground" title={project.path}>
-              {project.path}
-            </span>
-            <Button type="button" variant="ghost" size="sm" onClick={() => onOpenProject(project.projectId)}>
-              Open project
-              <ExternalLinkIcon aria-hidden="true" />
-            </Button>
-          </div>
-          <ul aria-label={`allowed hosts from ${project.title}`} className="flex flex-wrap gap-1.5">
-            {project.hosts.map((host) => (
-              <li key={host} className="rounded-full border px-2 py-0.5 font-mono text-xs">
-                {host}
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs text-muted-foreground">
-            Read only here: for that project's threads only, from its own file.
-          </p>
-        </div>
-      ))}
-    </div>
+    <TrustedProjects
+      heading="Added by trusted projects"
+      projects={projects}
+      label={(project) => `hosts from ${project.title}`}
+      onOpenProject={onOpenProject}
+      render={(project) => (
+        <ul aria-label={`allowed hosts from ${project.title}`} className="flex flex-wrap gap-1.5">
+          {project.hosts.map((host) => (
+            <li key={host} className="rounded-full border px-2 py-0.5 font-mono text-xs">
+              {host}
+            </li>
+          ))}
+        </ul>
+      )}
+    />
   )
 }
 

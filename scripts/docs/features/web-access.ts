@@ -55,7 +55,8 @@ export const WEB_ACCESS: FeatureSpec = {
       '```',
     ].join('\n'),
     'A project you trust can add hosts for its own threads in its `.enso/config.json`; Settings lists them under the project, read only. Either way, the list is read when a session starts, so restart the thread after you change it. Settings names the threads still running on the old list.',
-    'For the Tavily fallback, put `TAVILY_API_KEY` in `ENSO_HOME/secrets.env`. It is read on every call, so no restart is needed.',
+    "Under **Searching**, choose the backend — the current model's own search, or DeepSeek — and the domains Tavily answers only from or leaves out. These are `webSearch` in `ENSO_HOME/config.json`, read when a session starts; Settings changes only the key you touch.",
+    'For the Tavily fallback, set the key under **Searching**, or put `TAVILY_API_KEY` in `ENSO_HOME/secrets.env` yourself. It is read on every call, so no restart is needed. Settings never shows the key again: only whether one is set, with **Replace** and **Remove**.',
   ],
   shots: [
     {

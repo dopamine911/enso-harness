@@ -38,7 +38,7 @@
  * @module
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { ensoSecretsPath, rootDotenvPath } from './paths.ts'
 
 /**
@@ -128,6 +128,52 @@ export function readDotenvFile(path: string): Map<string, string> {
  */
 export function readSecret(home: string, name: string): string | undefined {
   return readDotenvFile(ensoSecretsPath(home)).get(name)
+}
+
+/**
+ * What a secret write did — never echoing the value: written, already so, or refused with a reason
+ * that names no part of it.
+ *
+ * @group Secrets
+ */
+export type SecretWrite =
+  | { readonly kind: 'written' | 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * Set (`value`) or remove (`undefined`) one secret in the dotenv file at `path` — Settings' write
+ * path (#932). Every other line keeps its text; the name's line is replaced where it stood, or
+ * appended. The file is written owner-only beside the old one and renamed over it, and only once
+ * `parseDotenv` reads the value back exactly.
+ *
+ * ⚠ The value is never in a reason: a refusal says what is wrong with its shape, not what it was.
+ *
+ * @group Secrets
+ */
+export function writeSecret(path: string, name: string, value: string | undefined): SecretWrite {
+  if (value !== undefined && !/^[\x21-\x7e]+$/.test(value))
+    return { kind: 'refused', reason: 'a key is one line of printable characters, with no spaces' }
+  if (value !== undefined && /^["']/.test(value))
+    return { kind: 'refused', reason: 'a key that starts with a quote would be read without it' }
+  let text: string
+  try {
+    text = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  } catch (error: unknown) {
+    return { kind: 'refused', reason: `${path} could not be read (${String(error)}); nothing was changed` }
+  }
+  if (parseDotenv(text).get(name) === value) return { kind: 'unchanged' }
+  const lines = text.length === 0 ? [] : text.replace(/\r?\n$/, '').split(/\r?\n/)
+  const named = lines.map((line) => parseDotenv(line).has(name))
+  const at = named.indexOf(true)
+  const kept = lines.filter((_line, index) => !named[index])
+  if (value !== undefined) kept.splice(at === -1 ? kept.length : at, 0, `${name}=${value}`)
+  const after = kept.length === 0 ? '' : `${kept.join('\n')}\n`
+  if (parseDotenv(after).get(name) !== value)
+    return { kind: 'refused', reason: `the file would not read the ${name} it was given back; nothing was changed` }
+  const staged = `${path}.${process.pid}.tmp`
+  writeFileSync(staged, after, { mode: 0o600 })
+  renameSync(staged, path)
+  return { kind: 'written' }
 }
 
 /**

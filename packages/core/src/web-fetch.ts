@@ -168,17 +168,25 @@ export const WebFetchAllowlistChange = Type.Union([
 export type WebFetchAllowlistChange = Static<typeof WebFetchAllowlistChange>
 
 /**
+ * The trusted project a web tools setting comes from (#924, #932), as Settings names it: read only there.
+ *
+ * @group Web tools
+ */
+export const WebToolsProject = Type.Object({
+  projectId: Type.String(),
+  title: Type.String(),
+  /** The file the settings come from: `<project>/.enso/config.json`. */
+  path: Type.String(),
+})
+/** @group Web tools */
+export type WebToolsProject = Static<typeof WebToolsProject>
+
+/**
  * A trusted project's own hosts (#924): read-only in Settings, named by the project they come from.
  *
  * @group Web tools
  */
-export const WebFetchProjectHosts = Type.Object({
-  projectId: Type.String(),
-  title: Type.String(),
-  /** The file they come from: `<project>/.enso/config.json`. */
-  path: Type.String(),
-  hosts: Type.Array(Type.String()),
-})
+export const WebFetchProjectHosts = Type.Object({ ...WebToolsProject.properties, hosts: Type.Array(Type.String()) })
 /** @group Web tools */
 export type WebFetchProjectHosts = Static<typeof WebFetchProjectHosts>
 

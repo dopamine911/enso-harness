@@ -77,6 +77,8 @@ export interface EnsoServerOptions {
   threadSettings?: ProjectThreadSettingsSource
   /** The user's config file (`ENSO_HOME/config.json`), which Settings › Web tools edits (#924); absent, those routes refuse. */
   userConfigPath?: string
+  /** The user's secrets file (`ENSO_HOME/secrets.env`), where Settings › Web tools sets the Tavily key (#932); absent, that route refuses. */
+  userSecretsPath?: string
   /** The Web tools host check's one request (#924). ⓘ Injectable for `server-handler.test.ts`; absent, `fetch`. */
   hostCheckFetch?: HostCheckFetch
   /**
@@ -255,6 +257,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const { dispatchWebToolsRoute } = createWebToolsRoutes({
     userConfigPath: options.userConfigPath,
+    userSecretsPath: options.userSecretsPath,
     projects,
     threads,
     agentDir: options.agentDir,

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, test } from 'bun:test'
-import type { EnsoStoredThread, WebFetchAllowlist, WebFetchHostCheck } from '@enso/core'
+import type { EnsoStoredThread, WebFetchAllowlist, WebFetchHostCheck, WebSearchSettings } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import type { FetchLike } from '../browser-logging.ts'
@@ -14,7 +14,8 @@ const { WebToolsSection }: typeof WebToolsModule = await import('../web-tools-se
 /**
  * Settings › Web tools (#924), MOUNTED under happy-dom over a scripted server: what the page sends
  * for each thing a person types — nothing for a refused form, the host alone for a pasted URL once
- * confirmed, the redirect's host from Check — and what it shows of the server's answer.
+ * confirmed, the redirect's host from Check — and what it shows of the server's answer. Searching
+ * (#932): the backend and domain changes it sends, and a Tavily key sent once and never shown.
  */
 
 afterAll(releaseDom)
@@ -64,10 +65,32 @@ async function mountSection(options: {
     projects: [{ projectId: 'p1', title: 'docs-site', path: '/srv/docs/.enso/config.json', hosts: ['docs.p.example'] }],
     staleThreads: options.staleThreads ?? [],
   })
+  let search: WebSearchSettings = {
+    path: PATH,
+    backend: 'model',
+    includeDomains: [],
+    excludeDomains: [],
+    secretsPath: '/home/person/.enso/secrets.env',
+    tavilyKeySet: false,
+    projects: [],
+    staleThreads: [],
+  }
   const fetchImpl: FetchLike = async (url, init) => {
-    if (init?.method !== 'POST') return Response.json(listed())
+    const searching = url.startsWith('/api/settings/web-search')
+    if (init?.method !== 'POST') return Response.json(searching ? search : listed())
     const body = typeof init.body === 'string' ? init.body : ''
     posted.push(`${url} ${body}`)
+    if (url.endsWith('/tavily-key')) {
+      search = { ...search, tavilyKeySet: 'set' in (JSON.parse(body) as object) }
+      return Response.json(search)
+    }
+    if (searching) {
+      const change = JSON.parse(body) as { backend?: 'model' | 'deepseek'; list?: 'includeDomains'; add?: string }
+      if (change.backend !== undefined) search = { ...search, backend: change.backend }
+      if (change.list !== undefined && change.add !== undefined)
+        search = { ...search, [change.list]: [...search[change.list], change.add] }
+      return Response.json(search)
+    }
     if (url.endsWith('/check')) return Response.json(options.check ?? { kind: 'answered', status: 200 })
     const change = JSON.parse(body) as { add?: string; remove?: string }
     hosts = change.add === undefined ? hosts.filter((host) => host !== change.remove) : [...hosts, change.add]
@@ -107,9 +130,12 @@ async function click(mounted: Mounted, name: string): Promise<void> {
   await settle()
 }
 
-async function type(mounted: Mounted, text: string): Promise<void> {
-  const field = mounted.root.querySelector<HTMLInputElement>('#settings-web-fetch-host')
-  if (field === null) throw new Error('expected the host field')
+async function type(mounted: Mounted, text: string, fieldId = 'settings-web-fetch-host'): Promise<void> {
+  const field = await eventually(() => {
+    const found = mounted.root.querySelector<HTMLInputElement>(`#${fieldId}`)
+    if (found === null) throw new Error(`expected the #${fieldId} field`)
+    return found
+  })
   await act(async () => {
     Reflect.set(HTMLInputElement.prototype, 'value', text, field)
     field.dispatchEvent(new Event('input', { bubbles: true }))
@@ -185,4 +211,54 @@ test('a thread still on the old list is named by its title; a project’s hosts 
   const group = mounted.root.querySelector('[aria-label="hosts from docs-site"]')
   expect(group?.textContent).toContain('docs.p.example')
   expect(group?.querySelector('button[aria-label^="remove"]')).toBeNull()
+})
+
+/** The Searching group's form that holds the field `fieldId`, submitted. */
+async function submit(mounted: Mounted, fieldId: string): Promise<void> {
+  const form = mounted.root.querySelector(`#${fieldId}`)?.closest('form')
+  if (form === null || form === undefined) throw new Error(`expected the form of #${fieldId}`)
+  await act(async () => form.requestSubmit())
+  await settle()
+}
+
+test('Searching sends the backend chosen, and a domain normalised; a URL as a domain is refused and sends nothing', async () => {
+  const mounted = await mountSection({})
+  const deepseek = await eventually(() => {
+    const found = mounted.root.querySelector<HTMLInputElement>(
+      'input[name="settings-web-search-backend"][value="deepseek"]',
+    )
+    if (found === null) throw new Error('expected the DeepSeek choice')
+    return found
+  })
+  await act(async () => deepseek.click())
+  await settle()
+  await type(mounted, 'https://docs.bun.sh/guides', 'settings-web-search-includeDomains')
+  await submit(mounted, 'settings-web-search-includeDomains')
+  await eventually(() => expect(mounted.root.textContent).toContain('Type the domain alone: docs.bun.sh.'))
+  await type(mounted, ' Docs.Bun.sh ', 'settings-web-search-includeDomains')
+  await submit(mounted, 'settings-web-search-includeDomains')
+  expect(mounted.posted).toEqual([
+    '/api/settings/web-search {"backend":"deepseek"}',
+    '/api/settings/web-search {"list":"includeDomains","add":"docs.bun.sh"}',
+  ])
+  await eventually(() =>
+    expect(mounted.root.textContent).toContain('webSearch.backend · /home/person/.enso/config.json'),
+  )
+  await eventually(() => button(mounted, 'remove docs.bun.sh from only these domains'))
+})
+
+test('⚠ a Tavily key is sent once and never shown: the field empties and the page says only that a key is set', async () => {
+  const key = 'tvly-dev-0123456789abcdef'
+  const mounted = await mountSection({})
+  await eventually(() => expect(mounted.root.textContent).toContain('No key: there is no Tavily fallback.'))
+  await type(mounted, key, 'settings-tavily-key')
+  await submit(mounted, 'settings-tavily-key')
+  await eventually(() => expect(mounted.root.textContent).toContain('A key is set'))
+  expect(mounted.root.querySelector<HTMLInputElement>('#settings-tavily-key')?.value).toBe('')
+  expect(mounted.root.innerHTML).not.toContain(key)
+  await click(mounted, 'Remove')
+  expect(mounted.posted).toEqual([
+    `/api/settings/web-search/tavily-key {"set":"${key}"}`,
+    '/api/settings/web-search/tavily-key {"remove":true}',
+  ])
 })

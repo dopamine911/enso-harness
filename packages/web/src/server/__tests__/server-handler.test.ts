@@ -45,6 +45,7 @@ import {
   readEnsoThreadIncidents,
   readEnsoThreadJudgeCases,
   WebFetchAllowlist,
+  WebSearchSettings,
 } from '@enso/core'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
 import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
@@ -232,8 +233,11 @@ async function startWith(
     agentDir = mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     threadSettings,
     userConfigPath,
+    userSecretsPath,
     hostCheckFetch,
   }: {
+    /** The user's secrets file Settings › Web tools sets the Tavily key in (#932). */
+    readonly userSecretsPath?: string
     /** The user's config Settings › Web tools edits (#924); absent, those routes refuse. */
     readonly userConfigPath?: string
     /** The Web tools host check's one request (#924); absent, the real `fetch`. */
@@ -260,6 +264,7 @@ async function startWith(
     ...(promptsDir === undefined ? {} : { promptsDir }),
     ...(threadSettings === undefined ? {} : { threadSettings }),
     ...(userConfigPath === undefined ? {} : { userConfigPath }),
+    ...(userSecretsPath === undefined ? {} : { userSecretsPath }),
     ...(hostCheckFetch === undefined ? {} : { hostCheckFetch }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir,
@@ -1153,6 +1158,125 @@ test('⚠ a foreign page can neither change the allowlist nor read it (#924, #71
     403,
   )
   expect(readFileSync(userPath, 'utf8')).toBe(userText)
+})
+
+function postSearch(
+  url: string,
+  path: '' | '/tavily-key',
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/settings/web-search${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+async function searchOf(response: Response): Promise<WebSearchSettings> {
+  const answered: unknown = await response.json()
+  if (!Check(WebSearchSettings, answered)) throw new Error('the answer is not WebSearchSettings')
+  return answered
+}
+
+test('Searching round trip: the backend and a domain changed from the page, only those keys in the file (#932)', async () => {
+  const userText = '{\n  "projects": { "roots": ["/srv"] },\n  "webFetch": { "allowedHosts": ["a.example"] }\n}\n'
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const userPath = join(home, 'config.json')
+  writeFileSync(userPath, userText)
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    userSecretsPath: join(home, 'secrets.env'),
+  })
+  expect(await prompt(url, 'before-change', 'hi')).toBe(202)
+  await searchOf(await postSearch(url, '', { backend: 'deepseek' }))
+  const added = await searchOf(await postSearch(url, '', { list: 'excludeDomains', add: 'spam.example' }))
+  expect(added).toMatchObject({
+    backend: 'deepseek',
+    excludeDomains: ['spam.example'],
+    staleThreads: ['before-change'],
+  })
+  expect(readFileSync(userPath, 'utf8')).toStartWith(
+    '{\n  "projects": { "roots": ["/srv"] },\n  "webFetch": { "allowedHosts": ["a.example"] },\n',
+  )
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual({
+    ...JSON.parse(userText),
+    webSearch: { backend: 'deepseek', tavily: { excludeDomains: ['spam.example'] } },
+  })
+  expect((await postSearch(url, '', { list: 'excludeDomains', add: 'https://spam.example/' })).status).toBe(422)
+  expect((await postSearch(url, '', { backend: 'tavily' })).status).toBe(400)
+})
+
+test('⚠ the Tavily key: set from the page, then in no answer and no log line — only whether one is set (#932)', async () => {
+  const key = 'tvly-dev-SECRET0123456789'
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const secretsPath = join(home, 'secrets.env')
+  writeFileSync(secretsPath, 'DEEPSEEK_API_KEY=sk-deep-0123456789\n')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: secretsPath,
+  })
+  const answers: string[] = []
+  const answered = async (response: Response): Promise<number> => {
+    answers.push(await response.text())
+    return response.status
+  }
+  expect(await answered(await postSearch(url, '/tavily-key', { set: key }))).toBe(200)
+  expect(JSON.parse(answers[0] ?? '')).toMatchObject({ tavilyKeySet: true, secretsPath })
+  expect(readFileSync(secretsPath, 'utf8')).toBe(`DEEPSEEK_API_KEY=sk-deep-0123456789\nTAVILY_API_KEY=${key}\n`)
+  expect(await answered(await fetch(`${url}/api/settings/web-search`))).toBe(200)
+  // A malformed body is refused without quoting it; so is one the file could not hold.
+  expect(await answered(await postSearch(url, '/tavily-key', `{"set": ${key}}`))).toBe(400)
+  expect(await answered(await postSearch(url, '/tavily-key', { set: `${key} x` }))).toBe(422)
+  expect(await answered(await postSearch(url, '/tavily-key', { remove: true }))).toBe(200)
+  expect(readFileSync(secretsPath, 'utf8')).toBe('DEEPSEEK_API_KEY=sk-deep-0123456789\n')
+  for (const answer of answers) expect(answer).not.toContain('SECRET0123456789')
+  const logged = JSON.stringify(logs.records)
+  expect(logged).toContain('Tavily key')
+  expect(logged).not.toContain('SECRET0123456789')
+})
+
+test('a trusted project’s own webSearch is listed under it, apart from the user’s (#932)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-search-project-')))
+  mkdirSync(join(project, '.enso'))
+  writeFileSync(
+    join(project, '.enso', 'config.json'),
+    JSON.stringify({ webSearch: { backend: 'deepseek', tavily: { includeDomains: ['bun.sh'] } } }),
+  )
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-search-agent-'))
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: true }))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    launch: project,
+    agentDir,
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: join(home, 'secrets.env'),
+  })
+  const read = await searchOf(await fetch(`${url}/api/settings/web-search`))
+  expect(read).toMatchObject({ backend: 'model', includeDomains: [], tavilyKeySet: false })
+  expect(read.projects).toEqual([
+    expect.objectContaining({
+      path: join(project, '.enso', 'config.json'),
+      backend: 'deepseek',
+      includeDomains: ['bun.sh'],
+      excludeDomains: [],
+    }),
+  ])
+})
+
+test('⚠ a foreign page can neither change Searching, set the key, nor read it (#932, #717)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: join(home, 'secrets.env'),
+  })
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }
+  expect((await postSearch(url, '', { backend: 'deepseek' }, otherPort)).status).toBe(403)
+  expect((await postSearch(url, '/tavily-key', { set: 'tvly-foreign-123456' }, otherPort)).status).toBe(403)
+  expect((await fetch(`${url}/api/settings/web-search`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(
+    403,
+  )
+  expect(readdirSync(home)).toEqual([])
 })
 
 // A revoke fails closed AT ONCE, as removal does: never under a running thread of the project, and

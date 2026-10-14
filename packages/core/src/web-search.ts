@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { WebToolsProject } from './web-fetch.ts'
 
 /**
  * The web_search tool's shapes and config section (#63).
@@ -83,3 +84,90 @@ export const WebSearchConfig = Type.Object(
 )
 /** @group Web tools */
 export type WebSearchConfig = Static<typeof WebSearchConfig>
+
+/**
+ * Which list of `webSearch.tavily` a Settings change touches (#932).
+ *
+ * @group Web tools
+ */
+export const WebSearchDomainList = Type.Union([Type.Literal('includeDomains'), Type.Literal('excludeDomains')])
+/** @group Web tools */
+export type WebSearchDomainList = Static<typeof WebSearchDomainList>
+
+/**
+ * The backend as Settings names it (#932): `model`, the current model's own search (the key
+ * absent), or `deepseek`, pinned.
+ *
+ * @group Web tools
+ */
+export const WebSearchBackendChoice = Type.Union([Type.Literal('model'), Type.Literal('deepseek')])
+/** @group Web tools */
+export type WebSearchBackendChoice = Static<typeof WebSearchBackendChoice>
+
+/**
+ * One change to the user's `webSearch` from Settings › Web tools › Searching (#932): the backend
+ * chosen, or one domain added to or removed from a Tavily list. A domain to add must be in the form
+ * `readWebFetchHostInput` gives back for a bare host.
+ *
+ * @group Web tools
+ */
+export const WebSearchSettingsChange = Type.Union([
+  Type.Object({ backend: WebSearchBackendChoice }, { additionalProperties: false }),
+  Type.Object({ list: WebSearchDomainList, add: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+  Type.Object({ list: WebSearchDomainList, remove: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+])
+/** @group Web tools */
+export type WebSearchSettingsChange = Static<typeof WebSearchSettingsChange>
+
+/**
+ * The `TAVILY_API_KEY` change from Settings (#932): a key to set (or replace), or the key removed.
+ * ⚠ The key travels this way only, once; nothing answers it back.
+ *
+ * @group Web tools
+ */
+export const TavilyKeyChange = Type.Union([
+  Type.Object({ set: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+  Type.Object({ remove: Type.Literal(true) }, { additionalProperties: false }),
+])
+/** @group Web tools */
+export type TavilyKeyChange = Static<typeof TavilyKeyChange>
+
+/**
+ * A trusted project's own `webSearch` (#932), read only in Settings: its backend replaces the
+ * user's for its threads, its domains add to the user's lists (`mergeEnsoConfig`).
+ *
+ * @group Web tools
+ */
+export const WebSearchProjectSettings = Type.Object({
+  ...WebToolsProject.properties,
+  backend: Type.Optional(Type.Literal('deepseek')),
+  includeDomains: Type.Array(Type.String()),
+  excludeDomains: Type.Array(Type.String()),
+})
+/** @group Web tools */
+export type WebSearchProjectSettings = Static<typeof WebSearchProjectSettings>
+
+/**
+ * Settings › Web tools › Searching (#932): the user's `webSearch` and the file it is in, whether
+ * `TAVILY_API_KEY` is set in the secrets file (never the key), each trusted project's own
+ * `webSearch`, and the live threads still running on the settings as they were before the last
+ * change made here (they are read at session start; the key is read per call).
+ *
+ * @group Web tools
+ */
+export const WebSearchSettings = Type.Object({
+  path: Type.String(),
+  backend: WebSearchBackendChoice,
+  includeDomains: Type.Array(Type.String()),
+  excludeDomains: Type.Array(Type.String()),
+  /** Why the user's file could not be read; it is never overwritten then. */
+  unreadable: Type.Optional(Type.String()),
+  /** `ENSO_HOME/secrets.env`, where the key is kept. */
+  secretsPath: Type.String(),
+  tavilyKeySet: Type.Boolean(),
+  projects: Type.Array(WebSearchProjectSettings),
+  /** Thread ids still running on the settings as they were before the last change made here. */
+  staleThreads: Type.Array(Type.String()),
+})
+/** @group Web tools */
+export type WebSearchSettings = Static<typeof WebSearchSettings>

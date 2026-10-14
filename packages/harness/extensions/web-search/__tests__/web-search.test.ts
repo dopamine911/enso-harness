@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@enso/core'
+import { changeUserWebSearch } from '@enso/core/web-search-settings'
 import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecord } from '@logtape/logtape'
@@ -425,6 +429,24 @@ test('config tavily domain filters reach the fallback request', async () => {
   )
   await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }))
   expect(loaded.tavilyRequests[0]?.includeDomains).toEqual(['example.com'])
+})
+
+test('what Settings saves is what the next session searches with: the backend and the domain filters (#932)', async () => {
+  const configPath = join(mkdtempSync(join(tmpdir(), 'enso-web-search-settings-')), 'config.json')
+  changeUserWebSearch(configPath, { list: 'includeDomains', add: 'docs.bun.sh' })
+  const filtered = loadWebSearch(
+    { readConfigText: () => readFileSync(configPath, 'utf8') },
+    { TAVILY_API_KEY: 'tv-key' },
+  )
+  await withAuditCapture(() => run(filtered, { model: UNROUTED_MODEL }))
+  expect(filtered.tavilyRequests[0]?.includeDomains).toEqual(['docs.bun.sh'])
+  changeUserWebSearch(configPath, { backend: 'deepseek' })
+  const pinned = loadWebSearch(
+    { readConfigText: () => readFileSync(configPath, 'utf8') },
+    { DEEPSEEK_API_KEY: 'ds-key' },
+  )
+  await withAuditCapture(() => run(pinned, { model: ANTHROPIC_MODEL }))
+  expect(pinned.calls).toMatchObject({ deepseek: 1, anthropic: 0 })
 })
 
 test('both backends failing renders BOTH reasons', async () => {

@@ -468,8 +468,10 @@ export const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
   {
     helper: 'ensoSecretsPath',
     path: 'ENSO_HOME/secrets.env',
-    writer: 'Operator only; harness code reads and quarantines but never writes it.',
-    lifetime: 'Per-user until the operator edits or removes it; secret reads are per call.',
+    writer:
+      'The operator; and the web server, only `TAVILY_API_KEY`, when Settings › Web tools sets, replaces or removes it (#932) — that one line changed, every other kept, written owner-only and renamed over. Harness code reads and quarantines but never writes it.',
+    lifetime:
+      'Per-user until the operator edits or removes it, or Settings removes the Tavily key; secret reads are per call.',
     check: { file: 'packages/core/src/secrets.ts', contains: 'readDotenvFile(ensoSecretsPath(home)).get(name)' },
   },
 ]

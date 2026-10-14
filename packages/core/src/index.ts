@@ -562,5 +562,17 @@ export {
   type WebFetchHostInput,
   WebFetchProjectHosts,
   WebFetchToolParameters,
+  WebToolsProject,
 } from './web-fetch.ts'
-export { WEB_SEARCH_TIMEOUT_MS, WEB_SEARCH_TOOL_NAME, WebSearchConfig, WebSearchToolParameters } from './web-search.ts'
+export {
+  TavilyKeyChange,
+  WEB_SEARCH_TIMEOUT_MS,
+  WEB_SEARCH_TOOL_NAME,
+  WebSearchBackendChoice,
+  WebSearchConfig,
+  WebSearchDomainList,
+  WebSearchProjectSettings,
+  WebSearchSettings,
+  WebSearchSettingsChange,
+  WebSearchToolParameters,
+} from './web-search.ts'

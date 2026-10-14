@@ -26,7 +26,9 @@
     "./snapshot-store": "./src/snapshot-store.ts",
     "./thread-tree": "./src/thread-tree.ts",
     "./tree-setup": "./src/tree-setup.ts",
-    "./web-fetch-allowlist": "./src/web-fetch-allowlist.ts"
+    "./user-config-write": "./src/user-config-write.ts",
+    "./web-fetch-allowlist": "./src/web-fetch-allowlist.ts",
+    "./web-search-settings": "./src/web-search-settings.ts"
   },
   "dependencies": {
     "@logtape/file": "2.3.7",
