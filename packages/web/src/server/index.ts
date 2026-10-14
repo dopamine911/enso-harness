@@ -10,7 +10,7 @@ import { createLiteralRoutes } from './literal-routes.ts'
 import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
 import { createPermissionRoutes } from './permission-routes.ts'
 import { createProjectRoutes } from './project-routes.ts'
-import { createProjectRegistry } from './projects.ts'
+import { canonicalConfigPath, createProjectRegistry } from './projects.ts'
 import { createPromptLibrary, type PromptLibrary } from './prompt-library.ts'
 import { createPromptRoutes } from './prompt-routes.ts'
 import { createSettingsRoutes } from './settings-routes.ts'
@@ -259,7 +259,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const { dispatchPromptRoute } = promptRoutes
   const { dispatchPermissionRoute } = permissions
-  const { dispatchSettingsRoute } = createSettingsRoutes({ ensoHome: options.ensoHome, agentDir: options.agentDir })
+  const { dispatchSettingsRoute } = createSettingsRoutes({
+    ensoHome: options.ensoHome,
+    agentDir: options.agentDir,
+    // A project's own mode is keyed as new trees match it: the resolver's canonical, else the config's rule.
+    canonical: options.threadSettings?.canonical ?? ((key) => canonicalConfigPath(key)),
+  })
   const { previews } = reads
 
   /**

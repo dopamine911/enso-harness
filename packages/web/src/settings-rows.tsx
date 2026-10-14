@@ -132,6 +132,49 @@ export function SaveBar(props: {
   )
 }
 
+/**
+ * What a save would loosen, said before it happens: Save anyway, or go back. Shown only when
+ * something protects less than what is in force now — #933's rule for Settings: Security's
+ * thresholds and judge, and the trust an undecided project gets (#934).
+ */
+export function LooseningConfirm({
+  loosenings,
+  working,
+  onConfirm,
+  onCancel,
+}: {
+  loosenings: readonly string[]
+  working: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}): React.ReactNode {
+  return (
+    <div
+      role="alert"
+      aria-label="this loosens security"
+      className="grid gap-3 rounded-sm border border-refuse bg-card p-4 text-sm"
+    >
+      <p className="flex items-center gap-2 font-semibold text-refuse">
+        <TriangleAlertIcon aria-hidden="true" className="size-4" />
+        This save protects less than what is in force now
+      </p>
+      <ul className="grid list-disc gap-1 pl-6">
+        {loosenings.map((said) => (
+          <li key={said}>{said}</li>
+        ))}
+      </ul>
+      <span className="flex flex-wrap gap-2">
+        <Button variant="destructive" className={PAGE_BUTTON} disabled={working} onClick={onConfirm}>
+          Save anyway
+        </Button>
+        <Button variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={working} onClick={onCancel}>
+          Go back
+        </Button>
+      </span>
+    </div>
+  )
+}
+
 /** A save refused with 412: the file changed on disk since it was read, and nothing was written. */
 export function ConflictNotice({
   detail,

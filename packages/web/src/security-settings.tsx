@@ -18,7 +18,15 @@ import { cn } from './lib/utils.ts'
 import { OptionSelect } from './option-select.tsx'
 import { PAGE_BUTTON, PAGE_INPUT, PAGE_OUTLINE_BUTTON, SUB_TITLE } from './page-styles.ts'
 import { fetchSecuritySettings, saveJudgeKey, saveSecuritySettings } from './security-connection.ts'
-import { ConflictNotice, SaveBar, SettingRow, SettingsFileSection, SourceLine, useSending } from './settings-rows.tsx'
+import {
+  ConflictNotice,
+  LooseningConfirm,
+  SaveBar,
+  SettingRow,
+  SettingsFileSection,
+  SourceLine,
+  useSending,
+} from './settings-rows.tsx'
 
 /**
  * Settings › Security (#933): `config.json`'s user-only `security` section — whether an incident
@@ -374,48 +382,6 @@ function SaveProblemNotice({
   if (problem.kind === 'conflict')
     return <ConflictNotice detail={problem.detail} working={working} onReload={onReload} />
   return <FieldError>Not saved: {problem.detail}</FieldError>
-}
-
-/**
- * What a save would loosen, said before it happens: Save anyway, or go back. Shown only when
- * something protects less than what the file holds now.
- */
-function LooseningConfirm({
-  loosenings,
-  working,
-  onConfirm,
-  onCancel,
-}: {
-  loosenings: readonly string[]
-  working: boolean
-  onConfirm: () => void
-  onCancel: () => void
-}): React.ReactNode {
-  return (
-    <div
-      role="alert"
-      aria-label="this loosens security"
-      className="grid gap-3 rounded-sm border border-refuse bg-card p-4 text-sm"
-    >
-      <p className="flex items-center gap-2 font-semibold text-refuse">
-        <TriangleAlertIcon aria-hidden="true" className="size-4" />
-        This save protects less than what is in force now
-      </p>
-      <ul className="grid list-disc gap-1 pl-6">
-        {loosenings.map((said) => (
-          <li key={said}>{said}</li>
-        ))}
-      </ul>
-      <span className="flex flex-wrap gap-2">
-        <Button variant="destructive" className={PAGE_BUTTON} disabled={working} onClick={onConfirm}>
-          Save anyway
-        </Button>
-        <Button variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={working} onClick={onCancel}>
-          Go back
-        </Button>
-      </span>
-    </div>
-  )
 }
 
 /** The form over a readable file. */
