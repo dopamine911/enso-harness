@@ -172,23 +172,19 @@
 }
 
 .landing.origin .stack li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.landing.origin .stack-chip {
   padding: 4px 10px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
 }
 
-.landing.origin .stack li + li::before {
-  content: "→";
-  margin: 0 8px 0 -14px;
+.landing.origin .stack-arrow {
   color: var(--muted);
-}
-
-.landing.origin .stack li {
-  margin-left: 14px;
-}
-
-.landing.origin .stack li:first-child {
-  margin-left: 0;
 }
 
 /* ── Receipts ── */
@@ -221,14 +217,9 @@
   margin: 0 0 28px;
 }
 
-/* ── Inheritance ── */
+/* ── Every `Pairs` list on this page: the primitives in #debugger and the inheritance list ── */
 .landing.origin .factory-item {
   grid-template-columns: 220px 1fr;
-}
-
-.landing.origin .factory-item.converge span,
-.landing.origin .factory-item.converge strong {
-  color: var(--cyan);
 }
 
 .landing.origin .final .hero-actions {
@@ -241,6 +232,11 @@
   .landing.origin .receipts-grid {
     grid-template-columns: 1fr;
     gap: 20px;
+  }
+
+  /* The 220px rule outranks `landing.css`'s 90px mobile column, so the page restates it here. */
+  .landing.origin .factory-item {
+    grid-template-columns: 90px 1fr;
   }
 
   .landing.origin .loop {

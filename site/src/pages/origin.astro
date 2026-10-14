@@ -12,11 +12,9 @@ import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
 import Closing from '../components/Closing.astro'
 import Pairs from '../components/Pairs.astro'
 import SectionHead from '../components/SectionHead.astro'
+import { SITE_PATH as base, REPOSITORY_URL as github } from '../site-urls'
 import '../styles/landing.css'
 import '../styles/origin.css'
-
-const base = import.meta.env.BASE_URL.replace(/\/$/, '')
-const github = 'https://github.com/dopamine911/zen-harness-foundation'
 
 const trail = [
   {
@@ -175,7 +173,7 @@ const inheritance = [
           that survived. The projects are linked as receipts, if you want to dig deeper.
         </p>
       </SectionHead>
-      <ol class="trail">
+      <ol class="trail" role="list">
         {
           trail.map((step) => (
             <li class="trail-step">
@@ -201,7 +199,7 @@ const inheritance = [
     <section class="section" id="no-magic-bullet" aria-labelledby="layers-title">
       <div class="layers-panel">
         <div class="kicker">The layers I investigated</div>
-        <ul class="layers" aria-label="Layers that shape agent behavior">
+        <ul class="layers" role="list" aria-label="Layers that shape agent behavior">
           {layers.map((layer) => <li>{layer}</li>)}
         </ul>
         <h2 id="layers-title">Every layer helped.<br />Every layer could also be wrong.</h2>
@@ -225,12 +223,12 @@ const inheritance = [
         id="debugger-title"
       >
         <p class="section-intro">
-          If no single lever reliably fixes agent behavior, the job isn't finding the one right configuration. It's knowing
+          If no single lever reliably fixes agent behavior, the job isn't finding the one right configuration. It's knowing{' '}
           <strong>which lever to throw, when, and whether it changed the outcome.</strong> That's a debugging problem, and it
           gets a debugger's loop.
         </p>
       </SectionHead>
-      <ol class="loop" aria-label="The debugger loop">
+      <ol class="loop" role="list" aria-label="The debugger loop">
         {
           loop.map(({ step, meaning }, index) => (
             <li>
@@ -253,8 +251,19 @@ const inheritance = [
         <div>
           <h3>Debugging the whole system, not just the program</h3>
           <p>The thing being debugged is bigger than the code the agent writes:</p>
-          <ol class="stack" aria-label="The system being debugged, from human to program">
-            {stack.map((part) => <li>{part}</li>)}
+          <ol class="stack" role="list" aria-label="The system being debugged, from human to program">
+            {
+              stack.map((part, index) => (
+                <li>
+                  {index > 0 && (
+                    <span class="stack-arrow" aria-hidden="true">
+                      →
+                    </span>
+                  )}
+                  <span class="stack-chip">{part}</span>
+                </li>
+              ))
+            }
           </ol>
           <p>
             Developer tooling is strong near the program. Agent interfaces expose some of the conversation. Enso fills the
@@ -272,7 +281,7 @@ const inheritance = [
         </p>
       </SectionHead>
       <div class="receipts-grid">
-        <ul class="receipt-list" aria-label="Examples of receipts">
+        <ul class="receipt-list" role="list" aria-label="Examples of receipts">
           {receipts.map((receipt) => <li>{receipt}</li>)}
         </ul>
         <div class="receipts-copy">

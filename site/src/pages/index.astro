@@ -26,11 +26,10 @@ import Closing from '../components/Closing.astro'
 import Pairs from '../components/Pairs.astro'
 import Shot from '../components/Shot.astro'
 import landingFeatureGroups from '../generated/landing-features.json'
+import { SITE_PATH as base, REPOSITORY_URL as github } from '../site-urls'
 import '../styles/landing.css'
 
-const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 const feature = (slug: string): string => `${base}/features/${slug}/`
-const github = 'https://github.com/dopamine911/zen-harness-foundation'
 
 const factory = [
   ['Model', 'Which model is doing the work, and with how much effort?'],

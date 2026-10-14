@@ -471,6 +471,12 @@ html:has(.landing) {
   font-weight: 500;
 }
 
+/* `Pairs`' `highlightLast`: the row the others lead to. */
+.landing .factory-item.converge span,
+.landing .factory-item.converge strong {
+  color: var(--cyan);
+}
+
 .landing .note {
   margin-top: 28px;
   padding: 18px 20px;

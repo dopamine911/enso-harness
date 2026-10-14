@@ -8,10 +8,10 @@
  * one source for them; the rest of the markup is the landing's design.
  */
 import heroShot from '../assets/landing/01b-hero-transcript-crop.png'
+import { REPOSITORY_URL, SITE_PATH } from '../site-urls'
 import Shot from './Shot.astro'
 
 const hero = Astro.locals.starlightRoute.entry.data.hero
-const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 const [lead, rest] = (hero?.title ?? '').split('|')
 ---
 
@@ -21,8 +21,8 @@ const [lead, rest] = (hero?.title ?? '').split('|')
     <h1>{lead}{rest && <span>{rest}</span>}</h1>
     {hero?.tagline && <p class="lead">{hero.tagline}</p>}
     <div class="hero-actions">
-      <a class="button primary" href="https://github.com/dopamine911/zen-harness-foundation">View Enso on GitHub</a>
-      <a class="button" href={`${base}/features/`}>Read the docs</a>
+      <a class="button primary" href={REPOSITORY_URL}>View Enso on GitHub</a>
+      <a class="button" href={`${SITE_PATH}/features/`}>Read the docs</a>
     </div>
     <p class="quiet">Let the agent work. Stay close enough to understand the work.</p>
   </div>
