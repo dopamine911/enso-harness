@@ -2,8 +2,9 @@ import { expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { SettingsPlaces } from '../config-file.ts'
 import { writeDefaultProjectTrust } from '../project-trust.ts'
-import { type SettingsPlaces, readProjectsSettings, writeProjectsSettings } from '../projects-config-file.ts'
+import { readProjectsSettings, writeProjectsSettings } from '../projects-config-file.ts'
 
 /**
  * Settings › Projects & threads' files (#934): a save rewrites `config.json` whole, so it must never
