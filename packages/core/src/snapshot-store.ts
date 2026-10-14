@@ -95,6 +95,8 @@ import {
   readFileTexts,
   readTreeChanges,
   runGitIn,
+  scopePathspec,
+  type WorkTreeListing,
   withoutGitLocalVariables,
 } from './git.ts'
 
@@ -1572,13 +1574,15 @@ export function readCopyFileTexts(options: {
   const index = join(directory, 'enso-index')
   const runStore: GitRunner = (args, cwd) =>
     runGitIn(environment, args, cwd, { gitDirectory: directory, workTree: tree, index })
-  const listed = async (path: string): Promise<boolean> => {
-    const tracked = await runStore(['ls-files', '-z', '--cached', '--', `:(top,literal)${path}`], tree)
-    if (tracked.code === 0 && tracked.stdout.split('\0').includes(path)) return true
+  const listed = async (path: string): Promise<WorkTreeListing> => {
+    const tracked = await runStore(['ls-files', '-z', '--cached', '--', scopePathspec(path)], tree)
+    if (tracked.code !== 0) return { failed: `ls-files: ${tracked.stderr.trim()}` }
+    if (tracked.stdout.split('\0').includes(path)) return 'listed'
     const rules = await ignoreRulesOf(environment, store)
-    if ('refused' in rules) return false
+    if ('refused' in rules) return { failed: refusalText(rules) }
     const untracked = await storeUntrackedFiles(environment, store, rules, index)
-    return !('refused' in untracked) && untracked.kept.includes(path)
+    if ('refused' in untracked) return { failed: refusalText(untracked) }
+    return untracked.kept.includes(path) ? 'listed' : 'not-listed'
   }
   return readFileTexts(runStore, { root: tree, base, listed }, options.paths)
 }

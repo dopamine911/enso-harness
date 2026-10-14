@@ -2,9 +2,9 @@ import type { GrammarState, HighlighterCore, ThemedToken } from 'shiki/core'
 
 /**
  * Syntax highlighting for the Diff view (#461): a changed file's text, both sides, tokenised by
- * Shiki (MIT) and coloured with THE THEME'S OWN TOKENS — every role a `text-chart-*` or
- * `text-muted-foreground` class, so a highlighted line follows the theme Settings picks, and no
- * colour of Shiki's own reaches the page.
+ * Shiki (MIT) and coloured with THE THEME'S OWN TOKENS — every role a `text-chart-*`,
+ * `text-muted-foreground`, `text-ok`, `text-refuse` or `text-evidence` class, so a highlighted line
+ * follows the theme Settings picks, and no colour of Shiki's own reaches the page.
  *
  * ⚠ THE WHOLE FILE, NOT THE HUNK. A hunk can open inside a block comment or a template string, and
  * a grammar fed only the hunk would colour it as code. The file's text comes from
@@ -206,7 +206,11 @@ async function tokeniseFrom(pass: TokenisingPass, first: number, grammarState?: 
  * highlighter and its grammar loaded on first use.
  */
 export async function highlightLines(text: string, language: SyntaxLanguage): Promise<HighlightedLines> {
-  highlighter ??= createHighlighter()
+  // A load that failed is forgotten, so the next file tries again rather than staying plain until reload.
+  highlighter ??= createHighlighter().catch((error: unknown) => {
+    highlighter = undefined
+    throw error
+  })
   const loaded = await highlighter
   if (!loaded.getLoadedLanguages().includes(language))
     await loaded.loadLanguage((await GRAMMARS[language].load()).default)
