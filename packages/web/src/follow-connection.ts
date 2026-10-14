@@ -128,10 +128,11 @@ interface OpenRun {
   promptMessageId: string | undefined
   generation: number | undefined
   /**
-   * Assistant messages pi has begun in this run. A USER `message-start` after the first of
-   * them is a queued prompt being CLAIMED (#75), not the prompt that opened the run — the
-   * view then ends the current assistant bubble and starts a new one, so the reply lands
-   * after its question rather than inside the previous answer.
+   * Assistant messages pi has begun in this run since its last prompt. Every one after the first
+   * is a new model turn and gets its own bubble (#921), as the stored history draws it. A USER
+   * `message-start` after the first of them is a queued prompt being CLAIMED (#75), not the
+   * prompt that opened the run — the view then ends the current assistant bubble and starts a
+   * new one, so the reply lands after its question rather than inside the previous answer.
    */
   assistantMessages: number
   /**
@@ -494,7 +495,11 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
-   * A message boundary inside the run. Two of them rotate the assistant bubble:
+   * A message boundary inside the run. Three of them rotate the assistant bubble:
+   * - an ASSISTANT message after another one: a new model turn (#921). Thinking and text are
+   *   keyed by the bubble's id, so in one bubble each turn's thinking appended to the run's first
+   *   thinking part, above every later tool row. One bubble per assistant message is what the
+   *   stored history draws, so the live view and a reload read the same;
    * - a USER message after an assistant message has begun: pi claimed a queued prompt (#75), so
    *   the reply lands after its question rather than inside the previous answer. The run's own
    *   prompt arrives before any assistant message and rotates nothing;
@@ -507,7 +512,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (role === 'assistant') {
       // Whatever began before the refusal — the attempt's own message, or none when the provider
       // refused before pi started one — stays in the bubble the refusal's lines follow.
-      if (current.refused) rotateMessage(current)
+      if (current.refused || current.assistantMessages > 0) rotateMessage(current)
       current.assistantMessages += 1
       return
     }

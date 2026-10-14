@@ -5,17 +5,18 @@ import type { EnsoPromptStats, EnsoThreadStats, EnsoTurnStats } from '@enso/core
  * pi-livecraft's `onNavigate({ kind: 'turn' | 'message' | 'tool' })`, over our transcript.
  *
  * ⚠ THE TRANSCRIPT ON SCREEN IS NOT THE BRANCH, ROW FOR ROW. A resumed thread draws one bubble
- * per pi message (`transcript-to-messages.ts`); a LIVE run draws ONE assistant bubble for all its
- * turns (`follow-connection.ts` `openRun`), and a prompt another tab queued is no user bubble here
- * at all. So each target is found by what BOTH shapes carry:
+ * per pi message (`transcript-to-messages.ts`), and so does a LIVE run since #921
+ * (`follow-connection.ts` `observeMessageStart`) — but a live attempt refused before pi began its
+ * message has no bubble, and a prompt another tab queued is no user bubble here at all. So each
+ * target is found by what BOTH shapes carry:
  *   - a tool call by its `toolCallId`, which every step row carries (`data-tool-call-id`);
  *   - a prompt by its place among the user bubbles when their count is the branch's, and by its
  *     text otherwise (`promptBubbleIndex`);
  *   - a turn by its first tool call; a turn that made none by its prompt's assistant bubbles — the
- *     one at its place among the prompt's turns when there is a bubble per turn (a resumed thread),
- *     else the last (a live run's one bubble). NOT simply the last: a failed turn pi retries stays
- *     on the branch with no call (`_prepareRetry` keeps it in raw history), and the retry that
- *     follows under the same prompt is the last bubble.
+ *     one at its place among the prompt's turns when there is a bubble per turn, else the last.
+ *     NOT simply the last: a failed turn pi retries stays on the branch with no call
+ *     (`_prepareRetry` keeps it in raw history), and the retry that follows under the same prompt
+ *     is the last bubble.
  * What cannot be found is said by the drawer, never guessed at.
  */
 
@@ -114,8 +115,8 @@ function assistantBubblesOf(root: ParentNode, stats: EnsoThreadStats, prompt: nu
 }
 
 /**
- * A turn that made no call: its own bubble when the prompt has one per turn (resumed), else the
- * prompt's last (live: one bubble holds every turn of the run).
+ * A turn that made no call: its own bubble when the prompt has one per turn, else the prompt's
+ * last (the counts differ when a bubble is missing, e.g. a live attempt refused before it began).
  */
 function turnBubbleOf(root: ParentNode, stats: EnsoThreadStats, turn: EnsoTurnStats): Element | undefined {
   const replies = assistantBubblesOf(root, stats, turn.prompt)

@@ -1962,6 +1962,115 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
   await pane.unmount()
 })
 
+// ── #921: each model turn's thinking reads where that turn begins, live as after a reload ────────
+
+/** One node's row in {@link transcriptRows}, or undefined when it is none. */
+function transcriptRow(node: Node): string | undefined {
+  if (!(node instanceof Element)) return /SAID-\w+/.exec(node.textContent ?? '')?.[0]
+  if (node.hasAttribute('data-tool-call-id')) return `tool:${node.getAttribute('data-tool-call-id')}`
+  if (node.tagName === 'BUTTON' && /^(Thought|Thinking)/.test(node.textContent ?? '')) return 'thought'
+  return undefined
+}
+
+/**
+ * The pane's transcript as a reader meets it, bubble by bubble: a thinking card (`thought`), a
+ * step row (`tool:<id>`), a reply's words (`SAID-…`). Thinking is a card, not its text: a closed
+ * card draws no text, and whether one is open is not what is pinned.
+ */
+function transcriptRows(pane: MountedPane): string[][] {
+  return [...pane.container.querySelectorAll('[data-role="assistant"]')].map((bubble) => {
+    const rows: string[] = []
+    const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const row = transcriptRow(node)
+      if (row !== undefined && rows.at(-1) !== row) rows.push(row)
+    }
+    return rows
+  })
+}
+
+/** The thinking cards' labels, top to bottom. */
+const thoughtLabels = (pane: MountedPane): string[] =>
+  [...pane.container.querySelectorAll('[data-role="assistant"] button')]
+    .map((button) => button.textContent ?? '')
+    .filter((label) => /^(Thought|Thinking)/.test(label))
+
+test('⚠ thinking → call → result → thinking → call reads in that order live, and identically after a reload; each turn’s thinking is timed on its own (#921)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await sendPrompt(pane, 'draw a sunset')
+  const thinking = (seq: number, delta: string): EnsoFollowFrame => ({
+    type: 'observation',
+    seq,
+    observation: { kind: 'thinking-delta', contentIndex: 0, delta },
+  })
+  const call = (seq: number, toolCallId: string): EnsoFollowFrame => ({
+    type: 'observation',
+    seq,
+    observation: { kind: 'tool-call', toolCallId, toolName: 'bash', args: { command: `echo ${toolCallId}` } },
+  })
+  const result = (seq: number, toolCallId: string): EnsoFollowFrame => ({
+    type: 'observation',
+    seq,
+    observation: { kind: 'tool-result', toolCallId, toolName: 'bash', text: 'ok', complete: true, isError: false },
+  })
+  // Turn 1 thinks; the card is open and streaming while it does.
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'user', text: 'draw a sunset' } },
+    { type: 'observation', seq: 2, observation: { kind: 'message-start', role: 'assistant' } },
+    thinking(3, 'plan the stripes'),
+  )
+  await eventually(() => expect(thoughtLabels(pane)).toEqual(['Thinking...']))
+  await Bun.sleep(1100)
+  // ...then calls, gets its result, and turn 2 begins thinking.
+  await pane.settle(
+    call(4, 'c1'),
+    result(5, 'c1'),
+    { type: 'observation', seq: 6, observation: { kind: 'message-start', role: 'assistant' } },
+    thinking(7, 'settle the parameters'),
+  )
+  // Turn 1's card stopped when its turn did and says how long THAT turn thought; turn 2's is its own.
+  await eventually(() => {
+    const [first, second, ...rest] = thoughtLabels(pane)
+    expect(first).toMatch(/^Thought for [1-9]\d*s$/)
+    expect([second, ...rest]).toEqual(['Thinking...'])
+  })
+  await pane.settle(
+    call(8, 'c2'),
+    result(9, 'c2'),
+    { type: 'observation', seq: 10, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 11, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SAID-DONE' } },
+    { type: 'observation', seq: 12, observation: { kind: 'settled', aborted: false } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  const expected = [['thought', 'tool:c1'], ['thought', 'tool:c2'], ['SAID-DONE']]
+  await eventually(() => expect(transcriptRows(pane)).toEqual(expected))
+  await pane.unmount()
+
+  // The same run as a reload mounts it: one message per pi message, each result paired into the
+  // message holding its call — `transcript-to-messages.ts`'s shape, pinned in its own tests.
+  const turn = (id: string, thought: string, toolCallId: string): UIMessage => ({
+    id,
+    role: 'assistant',
+    parts: [
+      { type: 'thinking', content: thought },
+      { type: 'tool-call', id: toolCallId, name: 'bash', arguments: '{}', state: 'complete', output: 'ok' },
+      { type: 'tool-result', toolCallId, name: 'bash', content: 'ok', state: 'complete' },
+    ],
+  })
+  const messages = [
+    text('s-u1', 'user', 'draw a sunset'),
+    turn('s-a1', 'plan the stripes', 'c1'),
+    turn('s-a2', 'settle the parameters', 'c2'),
+    text('s-a3', 'assistant', 'SAID-DONE'),
+  ]
+  const threadId = crypto.randomUUID()
+  const reloaded = await mountPane({ history: storedHistory(threadId, messages) })
+  await reloaded.settle({ ...SNAPSHOT_IDLE, threadId, messageCount: messages.length })
+  await eventually(() => expect(transcriptRows(reloaded)).toEqual(expected))
+  await reloaded.unmount()
+})
+
 // ── #739: a long thread opens on its last page, and a chunk redraws only its own message ─────────
 
 const text = (id: string, role: 'user' | 'assistant', content: string): UIMessage => ({
@@ -2291,8 +2400,8 @@ test('⚠ an incident card reads after the message holding its tipping call, and
     { type: 'observation', seq: 8, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
-  // Live, one bubble holds the whole run (every turn of it), so the card follows the run's reply.
-  const firstRun = ['first prompt', 'CALLING-REPLY', 'WRAP-UP', 'Incident inc-live']
+  // Live, each turn is its own bubble (#921), so the card follows the turn holding its call — as a reload reads it.
+  const firstRun = ['first prompt', 'CALLING-REPLY', 'Incident inc-live', 'WRAP-UP']
   await eventually(() => expect(readingOrder(pane, firstRun)).toEqual(firstRun))
   await sendPrompt(pane, 'second prompt')
   await pane.settle(
