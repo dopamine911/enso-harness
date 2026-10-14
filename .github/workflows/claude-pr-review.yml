@@ -328,7 +328,12 @@ jobs:
             - Do NOT spawn subagents (Task tool is not available)
             - If diff is whitespace- or comment-only, post a one-line "Approve" note
 
+          # The model and effort are PINNED (#981): unpinned, the local reviewer ran on whatever the owner's
+          # Claude Code settings named (Opus 5.5 1M at `xhigh`, measured by logging the harness's argv), and the
+          # action on its own default. `scripts/review/workflow-config.ts` reads both from here, so the two
+          # reviewers run the same model at the same effort.
           claude_args: |
+            --model claude-sonnet-5-5 --effort medium
             --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
 
       - name: Post run indicator (sticky comment)

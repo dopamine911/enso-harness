@@ -112,3 +112,16 @@ test("⚠ the review job checks out the pull request's head, and the comment-lis
   const statusStep = workflow.jobs.review?.steps?.find((step) => step.name === 'Post run indicator (sticky comment)')
   expect(statusStep?.run).toContain('.user.login == \\"github-actions[bot]\\"')
 })
+
+/**
+ * ⚠ THE MODEL AND EFFORT ARE THE WORKFLOW'S (#981). Unpinned, the local reviewer ran on the owner's
+ * Claude Code settings (Opus 5.5 1M at `xhigh`); both reviewers now read them from `claude_args`.
+ */
+test("⚠ the real workflow pins the reviewer's model and effort, and a workflow without them pins nothing", () => {
+  const config = readReviewWorkflow(workflowText)
+  expect(config.model).toBe('claude-sonnet-5-5')
+  expect(config.effort).toBe('medium')
+  const unpinned = readReviewWorkflow(workflowText.replace('--model claude-sonnet-5-5 --effort medium', ''))
+  expect(unpinned.model).toBeUndefined()
+  expect(unpinned.effort).toBeUndefined()
+})

@@ -394,6 +394,9 @@ bun run review <n> [--dry-run]   # review one PR now; --dry-run writes the revie
   hook (`scripts/review/tool-grant-hook.ts`) and limited to the PR's worktree. Its GitHub token is
   read-only and covers this repository only. The review it writes is posted by the runner, with a second
   token the model never holds.
+- **Model and effort:** Sonnet 5.5 at medium effort, pinned in the workflow's `claude_args`
+  (`--model claude-sonnet-5-5 --effort medium`). Both reviewers read them there, so a review does not
+  follow the model and effort the owner uses for interactive work.
 - **Setup, once per machine:** `~/.config/enso-review/app.json` with the review App's `appId`,
   `installationId` and `privateKeyPath`. Without that file, reviews post as the machine's own `gh` login.
 - **State** lives in `~/.cache/enso-review/`: one folder per run, holding the review log, every tool

@@ -58,6 +58,8 @@ const BASE_OWNED_PATHS = ['.claude', '.mcp.json'] as const
 /** What the reviewer is told when its post is captured on a real run: the runner posts it next. */
 const CAPTURE_REPLY =
   'Recorded: the review comment will be posted to the pull request by the runner. The review is complete; stop here.'
+/** The docker-agent configuration each run writes into its folder. */
+const REVIEWER_CONFIGURATION_FILE = 'reviewer.yaml'
 /** A short SHA, as the workflow's comments print one. */
 const SHORT_SHA_LENGTH = 7
 /** The system directories the credential-less steps need beside bun's own: git, sh, coreutils. */
@@ -180,14 +182,20 @@ export function claudeSessionFolder(directory: string, home: string = homedir())
   return join(home, '.claude', 'projects', directory.replace(/[^A-Za-z0-9]/g, '-'))
 }
 
-/** The docker-agent configuration for one review: Claude Code on the user's login, nothing else. */
-function agentConfiguration(): string {
+/** The docker-agent configuration for one review: Claude Code on the user's login, at the model and effort the workflow names. */
+export function agentConfiguration(harness: {
+  readonly model: string | undefined
+  readonly effort: string | undefined
+}): string {
   return [
     'agents:',
     '  root:',
     `    description: PR reviewer configured from ${REVIEW_WORKFLOW_PATH} (#981)`,
     '    harness:',
     '      type: claude-code',
+    // docker-agent passes these to `claude` as `--model` / `--effort` (measured: its argv, logged).
+    ...(harness.model === undefined ? [] : [`      model: ${harness.model}`]),
+    ...(harness.effort === undefined ? [] : [`      effort: ${harness.effort}`]),
     '',
   ].join('\n')
 }
@@ -343,8 +351,7 @@ function writeGrant(tree: string, runDirectory: string, grant: ToolGrant): void 
 
 /** Runs the reviewer and answers docker-agent's exit code. Its output goes to `review.log`. */
 function runReviewer(tree: string, runDirectory: string, prompt: string, poster: Poster): number {
-  const configuration = join(runDirectory, 'reviewer.yaml')
-  writeFileSync(configuration, agentConfiguration())
+  const configuration = join(runDirectory, REVIEWER_CONFIGURATION_FILE)
   const log = Bun.file(join(runDirectory, 'review.log'))
   const reviewer = Bun.spawnSync(['docker', 'agent', 'run', configuration, '--exec', '--working-dir', tree, prompt], {
     stdout: log,
@@ -456,6 +463,7 @@ function reviewInWorktree(review: ReviewRun): ReviewResult {
     scope: plan.scope,
     headSha: pullRequest.headRefOid,
   }
+  writeFileSync(join(runDirectory, REVIEWER_CONFIGURATION_FILE), agentConfiguration(config))
   const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values), poster)
   const posted = options.dryRun ? existsSync(capture) : postCapturedReview(repository, options.number, capture, poster)
   if (!options.dryRun) {
