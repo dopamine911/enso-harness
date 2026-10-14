@@ -9,11 +9,9 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { REVIEW_QUEUE_DIRECTORY } from './review-paths.ts'
 
-/** Where queued pull request numbers wait. */
-const REVIEW_QUEUE_DIRECTORY = join(homedir(), '.cache', 'enso-review', 'queue')
 /** A queue entry's name: the pull request number, nothing else. */
 const QUEUE_ENTRY = /^\d+$/
 

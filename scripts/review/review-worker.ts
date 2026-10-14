@@ -27,13 +27,10 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { RUNS_DIRECTORY, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
 import { reviewPullRequest } from './review-pr.ts'
 import { drainReviewQueue } from './review-queue.ts'
-import { WORKER_LOG } from './review-status.ts'
 
-const WORKER_LOCK = join(homedir(), '.cache', 'enso-review', 'worker.lock')
 const DEFAULT_POLL_SECONDS = 180
 /** How often the queue is checked between polls. */
 const QUEUE_CHECK_MILLISECONDS = 10_000
@@ -88,44 +85,95 @@ function takeLock(): number | undefined {
       // A lock left by a worker that is gone: take it over.
     }
   }
-  mkdirSync(join(homedir(), '.cache', 'enso-review'), { recursive: true })
+  mkdirSync(RUNS_DIRECTORY, { recursive: true })
   writeFileSync(WORKER_LOCK, String(process.pid))
   return undefined
 }
 
-/** Reviews each pull request in turn; one that fails is logged and does not stop the rest. Answers the ones that failed. */
-async function reviewEach(numbers: readonly number[]): Promise<Set<number>> {
-  const failed = new Set<number>()
+/** What one review ended as, for the bookkeeping after a pass. `head` is the head it was at, when known. */
+export interface ReviewOutcome {
+  readonly number: number
+  readonly failed: boolean
+  readonly head: string | undefined
+}
+
+/** Reviews each pull request in turn; one that fails is logged and does not stop the rest. */
+async function reviewEach(numbers: readonly number[]): Promise<ReviewOutcome[]> {
+  const outcomes: ReviewOutcome[] = []
   for (const number of numbers) {
     try {
       const result = await reviewPullRequest({ number, dryRun: false })
       log(result.summary)
-      if (result.failed) failed.add(number)
+      outcomes.push({ number, failed: result.failed, head: result.head })
     } catch (error: unknown) {
       log(`#${number}: review failed — ${String(error)}`)
-      failed.add(number)
+      outcomes.push({ number, failed: true, head: undefined })
     }
   }
-  return failed
+  return outcomes
+}
+
+/** How many times a review may fail at one head before the worker stops trying it by itself. */
+export const MAXIMUM_ATTEMPTS_PER_HEAD = 3
+const SHORT_SHA_LENGTH = 7
+
+/** Failed attempts so far, per pull request, at the head they failed at. */
+export type FailureCounts = Map<number, { readonly head: string | undefined; readonly count: number }>
+
+/** A failed review's attempt count: one more when it failed at the same head as before, else a first. */
+function attemptCount(failures: FailureCounts, number: number, head: string | undefined): number {
+  const earlier = failures.get(number)
+  return earlier !== undefined && earlier.head === head ? earlier.count + 1 : 1
 }
 
 /**
- * Records the heads a poll saw, except those of pull requests whose review just failed. ⚠ A failed
- * review's head stays unseen, so the next poll tries it again; recording it would leave a failed head
- * unreviewed until the next push (#993's review).
+ * The bookkeeping after a pass; answers the lines to log.
+ *   - Every head the poll saw is recorded, except a failed review's.
+ *   - ⚠ A failed review's head is FORGOTTEN, even one the baseline or an earlier poll recorded, so
+ *     the next poll names it again. Only skipping the write was not enough: a queued review that failed
+ *     in a pass with no poll kept the baseline's head and was never retried (#993's review).
+ *   - After `MAXIMUM_ATTEMPTS_PER_HEAD` failures at one head, the head is recorded instead: a failure
+ *     that does not go away (docker down, a token that cannot be minted) would otherwise cost a
+ *     worktree, an install and a run folder every poll, and hold up every other review. A notify still
+ *     retries it, because queued numbers are reviewed whatever the recorded head.
+ *   - A success clears the pull request's count.
  */
-export function recordSeenHeads(
+export function afterReviews(
   lastSeenHeads: Map<number, string>,
+  failures: FailureCounts,
   open: readonly OpenPullRequest[] | undefined,
-  failed: ReadonlySet<number>,
-): void {
+  outcomes: readonly ReviewOutcome[],
+): string[] {
+  const failedNumbers = new Set(outcomes.filter((outcome) => outcome.failed).map((outcome) => outcome.number))
   for (const pullRequest of open ?? []) {
-    if (!failed.has(pullRequest.number)) lastSeenHeads.set(pullRequest.number, pullRequest.headRefOid)
+    if (!failedNumbers.has(pullRequest.number)) lastSeenHeads.set(pullRequest.number, pullRequest.headRefOid)
   }
+  const givenUp: string[] = []
+  for (const outcome of outcomes) {
+    if (!outcome.failed) {
+      failures.delete(outcome.number)
+      continue
+    }
+    const head = outcome.head ?? open?.find((pullRequest) => pullRequest.number === outcome.number)?.headRefOid
+    const count = attemptCount(failures, outcome.number, head)
+    failures.set(outcome.number, { head, count })
+    if (count < MAXIMUM_ATTEMPTS_PER_HEAD || head === undefined) {
+      lastSeenHeads.delete(outcome.number)
+      continue
+    }
+    lastSeenHeads.set(outcome.number, head)
+    givenUp.push(
+      `#${outcome.number}: giving up at ${head.slice(0, SHORT_SHA_LENGTH)} after ${count} failed reviews; bun run review-notify ${outcome.number} to retry`,
+    )
+  }
+  return givenUp
 }
 
-/** One pass: the queue, the poll when it is due, the reviews they name. Records the heads the poll saw. */
-async function workerPass(lastSeenHeads: Map<number, string>, poll: boolean): Promise<void> {
+/**
+ * One pass: the queue, the poll when it is due, the reviews they name, then the bookkeeping
+ * (`afterReviews`): heads the poll saw are recorded, a failed review's head is forgotten for a retry.
+ */
+async function workerPass(lastSeenHeads: Map<number, string>, failures: FailureCounts, poll: boolean): Promise<void> {
   let open: OpenPullRequest[] | undefined
   if (poll) {
     try {
@@ -134,8 +182,8 @@ async function workerPass(lastSeenHeads: Map<number, string>, poll: boolean): Pr
       log(`poll failed — ${String(error)}`)
     }
   }
-  const failed = await reviewEach(pullRequestsToReview(drainReviewQueue(), open, lastSeenHeads))
-  recordSeenHeads(lastSeenHeads, open, failed)
+  const outcomes = await reviewEach(pullRequestsToReview(drainReviewQueue(), open, lastSeenHeads))
+  for (const line of afterReviews(lastSeenHeads, failures, open, outcomes)) log(line)
 }
 
 /** What the command line asks of the worker. */
@@ -189,11 +237,12 @@ async function runUntilStopped(
   pollMilliseconds: number,
   firstPollAt: number,
 ): Promise<never> {
+  const failures: FailureCounts = new Map()
   let nextPoll = firstPollAt
   for (;;) {
     const poll = Date.now() >= nextPoll
     if (poll) nextPoll = Date.now() + pollMilliseconds
-    await workerPass(lastSeenHeads, poll)
+    await workerPass(lastSeenHeads, failures, poll)
     await Bun.sleep(QUEUE_CHECK_MILLISECONDS)
   }
 }
@@ -207,7 +256,7 @@ async function main(): Promise<void> {
     `review worker started: queue every ${QUEUE_CHECK_MILLISECONDS / MILLISECONDS_PER_SECOND}s, poll every ${options.pollSeconds}s`,
   )
   if (options.once) {
-    await workerPass(lastSeenHeads, options.reviewExisting)
+    await workerPass(lastSeenHeads, new Map(), options.reviewExisting)
     releaseWorkerLock()
     return
   }

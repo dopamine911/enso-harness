@@ -58,7 +58,7 @@ test('the status names the worker, the queue, each review in progress, and the r
   })
   expect(rendered).toContain('worker:      running, pid 841451, up 15m 02s, from /repos/zen-harness-foundation')
   expect(rendered).toContain('queue:       #970 #993')
-  expect(rendered).toContain('in progress: #969 at c9d85de, 2m 10s so far; last call: Read allow /t/a.ts')
+  expect(rendered).toContain('in progress: #969 at c9d85de, started 2m 10s ago; last call: Read allow /t/a.ts')
   expect(rendered).toContain('  2026-10-14T16:05:00Z #968: reviewed (full); …')
   const idle = renderReviewStatus({ worker: { kind: 'stale', pid: 7 }, queued: [], inProgress: [], recent: [] })
   expect(idle).toContain('stale lock names pid 7')
@@ -67,14 +67,32 @@ test('the status names the worker, the queue, each review in progress, and the r
 })
 
 test('the worker is none without a lock, stale when its pid is gone, and running with an uptime otherwise', () => {
-  const now = new Date('2026-10-14T16:30:00Z').getTime()
-  expect(workerFrom(undefined, undefined, '', now)).toEqual({ kind: 'none' })
-  expect(workerFrom('4242', undefined, '', now)).toEqual({ kind: 'stale', pid: 4242 })
-  expect(workerFrom('4242', '', '', now)).toEqual({ kind: 'stale', pid: 4242 })
-  expect(workerFrom('4242', '2026-10-14T16:15:00Z', '/repos/x (abc)', now)).toEqual({
+  expect(workerFrom(undefined, undefined, '')).toEqual({ kind: 'none' })
+  expect(workerFrom('4242', undefined, '')).toEqual({ kind: 'stale', pid: 4242 })
+  expect(workerFrom('4242', '  ', '')).toEqual({ kind: 'stale', pid: 4242 })
+  expect(workerFrom('4242', '  900\n', '/repos/x (abc)')).toEqual({
     kind: 'running',
     pid: 4242,
     uptime: '15m 00s',
     checkout: '/repos/x (abc)',
   })
+})
+
+test('a decision log line still being written reads as such, and Grep and Glob show their target', () => {
+  expect(
+    lastToolCall('{"tool":"Read","input":{"file_path":"/a"},"decision":{"kind":"allow"}}\n{"tool":"Bash","inp'),
+  ).toBe('(being written)')
+  expect(lastToolCall('{"tool":"Grep","input":{"pattern":"TODO","path":"src"},"decision":{"kind":"allow"}}')).toBe(
+    'Grep allow src',
+  )
+  expect(lastToolCall('{"tool":"Glob","input":{"pattern":"**/*.ts"},"decision":{"kind":"allow"}}')).toBe(
+    'Glob allow **/*.ts',
+  )
+})
+
+test('with no worker running, a run folder that kept its worktree is shown as abandoned', () => {
+  const run = { run: { number: 969, shortHead: 'c9d85de', startedAt: 0 }, elapsed: '2h 10m', lastCall: undefined }
+  expect(renderReviewStatus({ worker: { kind: 'none' }, queued: [], inProgress: [run], recent: [] })).toContain(
+    'abandoned  : #969 at c9d85de, started 2h 10m ago',
+  )
 })

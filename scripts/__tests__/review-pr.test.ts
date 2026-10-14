@@ -162,3 +162,27 @@ test('the run summary says what was posted, or that nothing was, with the exit c
     '#7: FAILED: no review comment was posted; docker-agent exited 1; the comment list was not built: x; log /r/review.log',
   )
 })
+
+/**
+ * ⚠ A FAILED RUN KEEPS THE HEAD REVIEWED BEFORE IT (#993's review): the retry then reviews only the
+ * commits since that review, and the head that failed is still unreviewed, so it is tried again.
+ */
+test('⚠ a failed status keeps the previously reviewed head, so the retry is new-commits from it', () => {
+  const failed = statusCommentBody({
+    posted: false,
+    headSha: HEAD,
+    scope: 'new-commits',
+    agentExitCode: 1,
+    previouslyReviewedHead: PREVIOUS,
+  })
+  expect(failed).toContain('❌')
+  expect(lastReviewedHeadOf(failed)).toBe(PREVIOUS)
+  expect(planReview(PULL_REQUEST, lastReviewedHeadOf(failed), ALWAYS_ANCESTOR)).toEqual({
+    kind: 'review',
+    scope: 'new-commits',
+    from: PREVIOUS,
+  })
+  expect(
+    lastReviewedHeadOf(statusCommentBody({ posted: false, headSha: HEAD, scope: 'full', agentExitCode: 1 })),
+  ).toBeUndefined()
+})

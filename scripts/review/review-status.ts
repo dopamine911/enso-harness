@@ -12,19 +12,16 @@
  *     runs the old code until restarted.
  *   - THE QUEUE: the pull requests notified and not yet taken.
  *   - IN PROGRESS: a run folder whose `tree/` worktree still exists is a review under way (the worktree
- *     is removed when a review ends), with its elapsed time and its last tool call.
+ *     is removed when a review ends, unless its worker was killed), with its elapsed time and its last
+ *     tool call. With no worker running, such a folder is shown as abandoned.
  *   - RECENT: the last lines of `worker.log`, which the worker appends every line it prints to.
  */
 
 import { existsSync, readdirSync, readFileSync, readlinkSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { RUNS_DIRECTORY, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
 import { queuedReviews } from './review-queue.ts'
 
-const RUNS_DIRECTORY = join(homedir(), '.cache', 'enso-review')
-const WORKER_LOCK = join(RUNS_DIRECTORY, 'worker.lock')
-/** The worker's own log, appended to by `review-worker.ts`. */
-export const WORKER_LOG = join(RUNS_DIRECTORY, 'worker.log')
 /** A run folder's name, as `review-pr.ts` makes it: `pr-<number>-<short head>-<start, epoch ms>`. */
 const RUN_DIRECTORY_NAME = /^pr-(\d+)-([0-9a-f]+)-(\d+)$/
 const RECENT_LOG_LINES = 8
@@ -56,17 +53,29 @@ export function readableDuration(milliseconds: number): string {
   return `${seconds}s`
 }
 
-/** The last tool call a run's decision log records, as one line, or `undefined` before the first. */
+/**
+ * The last tool call a run's decision log records, as one line, or `undefined` before the first.
+ * ⚠ The log is read while the hook may be writing it (a captured review is one long line), so a last
+ * line that does not parse yet is reported as unreadable, not thrown (#993's review).
+ */
 export function lastToolCall(decisionLogText: string): string | undefined {
   const lines = decisionLogText.split('\n').filter((line) => line.trim().length > 0)
   const last = lines.at(-1)
   if (last === undefined) return undefined
-  const record = JSON.parse(last) as {
+  let record: {
     tool?: string
-    input?: { command?: unknown; file_path?: unknown }
+    input?: { command?: unknown; file_path?: unknown; path?: unknown; pattern?: unknown }
     decision?: { kind?: string }
   }
-  const target = record.input?.command ?? record.input?.file_path
+  try {
+    record = JSON.parse(last) as typeof record
+  } catch {
+    return '(being written)'
+  }
+  const input = record.input ?? {}
+  const target = [input.command, input.file_path, input.path, input.pattern].find(
+    (inputField) => typeof inputField === 'string',
+  )
   const firstLine = typeof target === 'string' ? (target.split('\n')[0] ?? '') : ''
   return `${record.tool ?? '?'} ${record.decision?.kind ?? '?'} ${firstLine}`.trim()
 }
@@ -95,12 +104,15 @@ function workerLine(worker: ReviewStatus['worker']): string {
 /** The status as the terminal shows it. */
 export function renderReviewStatus(status: ReviewStatus): string {
   const queued = status.queued.length === 0 ? 'empty' : status.queued.map((number) => `#${number}`).join(' ')
+  // With no worker running, a run folder that still has its worktree is a review whose worker died
+  // (SIGKILL, a closed terminal, a reboot): its `finally` never removed the worktree (#993's review).
+  const label = status.worker.kind === 'running' ? 'in progress' : 'abandoned  '
   const inProgress =
     status.inProgress.length === 0
       ? ['in progress: nothing']
       : status.inProgress.map(
           (current) =>
-            `in progress: #${current.run.number} at ${current.run.shortHead}, ${current.elapsed} so far; last call: ${current.lastCall ?? 'none yet'}`,
+            `${label}: #${current.run.number} at ${current.run.shortHead}, started ${current.elapsed} ago; last call: ${current.lastCall ?? 'none yet'}`,
         )
   const recent = status.recent.length === 0 ? ['  (no worker.log yet)'] : status.recent.map((line) => `  ${line}`)
   return [workerLine(status.worker), `queue:       ${queued}`, ...inProgress, 'recent:', ...recent, ''].join('\n')
@@ -112,19 +124,23 @@ function run(command: readonly string[]): string | undefined {
 }
 
 /**
- * The worker, from what was read: the lock's text (`undefined`: no lock), the start time `ps` gave for
- * its pid (`undefined`: no such process), and its checkout's description.
+ * The worker, from what was read: the lock's text (`undefined`: no lock), the seconds its pid has run
+ * as `ps -o etimes=` prints them (`undefined` or empty: no such process), and its checkout's
+ * description. Elapsed seconds, not a start time: `ps -o lstart=` prints a locale-dependent local date
+ * that `new Date()` may not parse (#993's review).
  */
 export function workerFrom(
   lockText: string | undefined,
-  startedAt: string | undefined,
+  elapsedSeconds: string | undefined,
   checkout: string,
-  now: number,
 ): ReviewStatus['worker'] {
   if (lockText === undefined) return { kind: 'none' }
   const pid = Number(lockText)
-  if (startedAt === undefined || startedAt.length === 0) return { kind: 'stale', pid }
-  return { kind: 'running', pid, uptime: readableDuration(now - new Date(startedAt).getTime()), checkout }
+  const seconds = Number(elapsedSeconds?.trim())
+  if (elapsedSeconds === undefined || elapsedSeconds.trim().length === 0 || !Number.isFinite(seconds)) {
+    return { kind: 'stale', pid }
+  }
+  return { kind: 'running', pid, uptime: readableDuration(seconds * MILLISECONDS_PER_SECOND), checkout }
 }
 
 /** The checkout a process runs from, and its commit; read from `/proc`, so Linux only. */
@@ -137,11 +153,11 @@ function checkoutOf(pid: number): string {
   }
 }
 
-function readWorker(now: number): ReviewStatus['worker'] {
+function readWorker(): ReviewStatus['worker'] {
   const lockText = existsSync(WORKER_LOCK) ? readFileSync(WORKER_LOCK, 'utf8') : undefined
   const pid = Number(lockText)
-  const startedAt = lockText === undefined ? undefined : run(['ps', '-o', 'lstart=', '-p', String(pid)])
-  return workerFrom(lockText, startedAt, startedAt === undefined ? '' : checkoutOf(pid), now)
+  const elapsedSeconds = lockText === undefined ? undefined : run(['ps', '-o', 'etimes=', '-p', String(pid)])
+  return workerFrom(lockText, elapsedSeconds, elapsedSeconds === undefined ? '' : checkoutOf(pid))
 }
 
 function readInProgress(now: number): ReviewStatus['inProgress'] {
@@ -167,7 +183,7 @@ if (import.meta.main) {
   const now = Date.now()
   process.stdout.write(
     renderReviewStatus({
-      worker: readWorker(now),
+      worker: readWorker(),
       queued: queuedReviews(),
       inProgress: readInProgress(now),
       recent: readRecent(),
