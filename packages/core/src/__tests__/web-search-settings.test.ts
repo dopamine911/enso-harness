@@ -83,16 +83,28 @@ test('⚠ a key the file could not hold is refused without repeating it', () => 
   expect(readdirSync(join(path, '..'))).toEqual([])
 })
 
-test('the key’s line replaced wherever it is: an `export` line, every duplicate, a CRLF file kept CRLF (#978 review)', () => {
+test('the key’s line replaced wherever it is: an `export` line keeps its export, every duplicate goes, a CRLF file kept CRLF (#978 review)', () => {
   const exported = fileIn('secrets.env', 'export TAVILY_API_KEY=old\nA=1\n')
   expect(writeSecret(exported, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
-  expect(readFileSync(exported, 'utf8')).toBe('TAVILY_API_KEY=tvly-new\nA=1\n')
+  expect(readFileSync(exported, 'utf8')).toBe('export TAVILY_API_KEY=tvly-new\nA=1\n')
   const twice = fileIn('secrets.env', 'TAVILY_API_KEY=one\nA=1\nTAVILY_API_KEY=two\n')
   expect(writeSecret(twice, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
   expect(readFileSync(twice, 'utf8')).toBe('TAVILY_API_KEY=tvly-new\nA=1\n')
   const crlf = fileIn('secrets.env', 'A=1\r\nB=2\r\n')
   expect(writeSecret(crlf, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
   expect(readFileSync(crlf, 'utf8')).toBe('A=1\r\nB=2\r\nTAVILY_API_KEY=tvly-new\r\n')
+})
+
+test('a mixed-ending file: each line keeps its own ending, the replaced one too (#978 re-review)', () => {
+  const mixed = fileIn('secrets.env', 'A=1\nTAVILY_API_KEY=old\r\nB=2\n')
+  expect(writeSecret(mixed, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
+  expect(readFileSync(mixed, 'utf8')).toBe('A=1\nTAVILY_API_KEY=tvly-new\r\nB=2\n')
+  // Appended to a file whose last line has no ending: that line gets one first.
+  const unended = fileIn('secrets.env', 'A=1\r\nB=2')
+  expect(writeSecret(unended, 'C_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
+  expect(readFileSync(unended, 'utf8')).toBe('A=1\r\nB=2\r\nC_API_KEY=tvly-new\r\n')
+  expect(writeSecret(unended, 'C_API_KEY', undefined)).toEqual({ kind: 'written' })
+  expect(readFileSync(unended, 'utf8')).toBe('A=1\r\nB=2\r\n')
 })
 
 test('⚠ a symlinked secrets.env stays a link: the file behind it gets the key, owner-only (#978 review)', () => {

@@ -142,8 +142,10 @@ export type SecretWrite =
 
 /**
  * Set (`value`) or remove (`undefined`) one secret in the dotenv file at `path` — Settings' write
- * path (#932). Every other line keeps its text, and the file its line endings (CRLF stays CRLF);
- * the name's line is replaced where it stood, or appended. The file is written owner-only, only
+ * path (#932). Every other line keeps its text and its own line ending; the name's line is replaced
+ * where it stood, keeping its ending and an `export ` it had (a file `source`d into a shell still
+ * exports the key), or appended, ending CRLF when the file has any CRLF line. The file is written
+ * owner-only, only
  * once `parseDotenv` reads the value back exactly, through `replaceFileText`: a `secrets.env` kept
  * as a symlink (a dotfiles or password-store setup) stays a link, and the file behind it changes.
  *
@@ -163,17 +165,36 @@ export function writeSecret(path: string, name: string, value: string | undefine
     return { kind: 'refused', reason: `${path} could not be read (${String(error)}); nothing was changed` }
   }
   if (parseDotenv(text).get(name) === value) return { kind: 'unchanged' }
-  const eol = text.includes('\r\n') ? '\r\n' : '\n'
-  const lines = text.length === 0 ? [] : text.replace(/\r?\n$/, '').split(/\r?\n/)
-  const named = lines.map((line) => parseDotenv(line).has(name))
-  const at = named.indexOf(true)
-  const kept = lines.filter((_line, index) => !named[index])
-  if (value !== undefined) kept.splice(at === -1 ? kept.length : at, 0, `${name}=${value}`)
-  const after = kept.length === 0 ? '' : `${kept.join(eol)}${eol}`
+  const after = textWithSecret(text, name, value)
   if (parseDotenv(after).get(name) !== value)
     return { kind: 'refused', reason: `the file would not read the ${name} it was given back; nothing was changed` }
   replaceFileText(path, after, { mode: 0o600 })
   return { kind: 'written' }
+}
+
+/**
+ * `text` with `name`'s lines dropped and, given a `value`, its line where the first stood (its
+ * `export ` and ending kept) or appended (CRLF when the file has any). Every other line keeps its
+ * text and its own ending.
+ */
+function textWithSecret(text: string, name: string, value: string | undefined): string {
+  // Each line with its own ending; the last may have none.
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? []
+  const named = lines.map((line) => parseDotenv(line).has(name))
+  const at = named.indexOf(true)
+  const kept = lines.filter((_line, index) => !named[index])
+  if (value === undefined) return kept.join('')
+  if (at !== -1) {
+    const replaced = lines[at] ?? ''
+    const exported = /^\s*export\s+/.exec(replaced)?.[0] ?? ''
+    kept.splice(at, 0, `${exported}${name}=${value}${/\r?\n$/.exec(replaced)?.[0] ?? ''}`)
+    return kept.join('')
+  }
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const last = kept.length - 1
+  if (last >= 0 && !kept[last]?.endsWith('\n')) kept[last] = `${kept[last]}${eol}`
+  kept.push(`${name}=${value}${eol}`)
+  return kept.join('')
 }
 
 /**
