@@ -30,15 +30,21 @@ export type ChangedFileOutcome =
 /** The view's one way to the route; a test hands in its own. */
 export type ReadChangedFile = (change: Pick<EnsoGitFileChange, 'path' | 'oldPath'>) => Promise<ChangedFileOutcome>
 
-/** `GET /api/threads/:threadId/changes/file?path=…[&oldPath=…]`: a changed file whole, or why not. */
+/**
+ * `GET /api/threads/:threadId/changes/file?path=…[&oldPath=…]`: a changed file whole, or why not —
+ * or, given two of the thread's snapshots (#553), `GET …/prompt-runs/file`: the file at both.
+ */
 export async function readChangedFile(
   threadId: string,
   change: Pick<EnsoGitFileChange, 'path' | 'oldPath'>,
   fetchImpl: FetchLike,
+  snapshots?: { readonly from: string; readonly to: string },
 ): Promise<ChangedFileOutcome> {
-  const query = new URLSearchParams({ path: change.path })
+  const query = new URLSearchParams(snapshots === undefined ? {} : { from: snapshots.from, to: snapshots.to })
+  query.set('path', change.path)
   if (change.oldPath !== null) query.set('oldPath', change.oldPath)
-  const route = `/api/threads/${encodeURIComponent(threadId)}/changes/file?${query.toString()}`
+  const routeName = snapshots === undefined ? 'changes/file' : 'prompt-runs/file'
+  const route = `/api/threads/${encodeURIComponent(threadId)}/${routeName}?${query.toString()}`
   const read = await readSchemaRoute(route, EnsoThreadChangedFile, 'changed file', fetchImpl)
   if (read.kind === 'read') return { kind: 'read', file: read.payload }
   return { kind: 'failed', problem: read.kind === 'absent' ? 'the thread is no longer held here' : read.problem }

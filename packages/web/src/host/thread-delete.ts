@@ -8,7 +8,7 @@ import {
   type EnsoTreesListing,
   type ThreadTreeRecord,
 } from '@enso/core'
-import { projectSnapshotsDir, projectTreesDir, realpathOrSelf } from '@enso/core/paths'
+import { projectIdOfCwd, projectSnapshotsDir, projectTreesDir, realpathOrSelf } from '@enso/core/paths'
 import { forksOfStore } from '@enso/core/snapshot-store'
 import {
   disposeThreadTree,
@@ -21,7 +21,7 @@ import {
 import type { StoredThreads } from './stored-threads.ts'
 import { openLog } from './thread-log.ts'
 import type { TreeMaking } from './thread-tree-making.ts'
-import { projectIdOfCwd, treeRecordOf } from './thread-trees.ts'
+import { treeRecordOf } from './thread-trees.ts'
 
 /**
  * Deleting a thread (#571): its tree through the inventory, its store and the project's object store
