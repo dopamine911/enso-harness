@@ -290,7 +290,7 @@ export type EnsoStoredThread = Static<typeof EnsoStoredThread>
 
 /**
  * A thread's run as `GET /api/run-states` says it (#911): `busy` and `waiting` mean what they mean
- * on {@link EnsoStoredThread}, read at the moment the server took, released or dropped the thread.
+ * on {@link EnsoStoredThread}, read at the moment the server built, took, released or dropped the thread.
  *
  * @group Thread inspection
  */

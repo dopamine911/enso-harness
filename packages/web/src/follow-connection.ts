@@ -804,13 +804,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /**
    * Close every run the server has moved past: `RUN_FINISHED` for each, so TanStack's
-   * loading state resolves.
+   * loading state resolves. `aborted`: pi's settle said a Stop ended them (#766), which their
+   * ending carries (#914).
    *
    * @invariant prompt-run-settle/generation-fence A run closes only once the server has moved past its generation.
    * A run whose generation is still unknown (its receipt has not come back) or newer than the
    * server's is NOT closed: the frames ending an EARLIER run can arrive after this tab has
    * already opened the next one, and closing that one here would end it before it started.
-   * `aborted`: pi's settle said a Stop ended them (#766), which their ending carries (#914).
    */
   function finishRunsThrough(generation: number, aborted = false): void {
     for (const run of runs.values()) {
