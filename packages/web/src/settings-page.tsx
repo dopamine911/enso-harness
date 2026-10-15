@@ -3,6 +3,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   FolderIcon,
+  FolderTreeIcon,
   KeyRoundIcon,
   LayersIcon,
   LockIcon,
@@ -27,6 +28,7 @@ import { cn } from './lib/utils.ts'
 import { type ModelsSettingsState, useModelsSettings } from './models-settings.ts'
 import { SUB_TITLE } from './page-styles.ts'
 import { PermissionsSection, type PolicyEditor } from './permissions-settings.tsx'
+import { ProjectsSection } from './projects-settings.tsx'
 import { ProvidersSection } from './providers-settings.tsx'
 import { RolesSection } from './roles-settings.tsx'
 import { SecuritySection } from './security-settings.tsx'
@@ -235,6 +237,7 @@ const SECTION_LINKS: Readonly<Record<SettingsSection, { readonly label: string; 
   roles: { label: 'Roles', icon: <TagsIcon /> },
   permissions: { label: 'Permissions', icon: <LockIcon /> },
   security: { label: 'Security', icon: <ShieldAlertIcon /> },
+  projects: { label: 'Projects & threads', icon: <FolderTreeIcon /> },
   storage: { label: 'Storage', icon: <FolderIcon /> },
 }
 
@@ -326,6 +329,7 @@ function SectionBody({
   if (section === 'providers') return <ProvidersSection fetch={fetch} />
   if (section === 'roles') return <RolesSection fetch={fetch} />
   if (section === 'security') return <SecuritySection fetch={fetch} />
+  if (section === 'projects') return <ProjectsSection fetch={fetch} projects={projects} />
   return (
     <TreesSection
       fetch={fetch}
@@ -340,15 +344,15 @@ function SectionBody({
 /**
  * Where a section is kept, beside its title (the prototype's pill): this browser for Appearance, the
  * server's file for Permissions and for Providers' and Roles' `models` section — its real path once
- * read — and for Security (`config.json`, by name: the section reads its file itself, so its real path
- * is beside each field), and Storage measured on the server.
+ * read — and for Security and Projects & threads (`config.json`, by name: each section reads its
+ * file itself, so its real path is beside each field), and Storage measured on the server.
  */
 function savedWhere(section: SettingsSection, permissions: PolicyEditor, models: ModelsSettingsState): string {
   if (section === 'appearance') return 'Saved in this browser'
   if (section === 'storage') return 'Measured on the server when you open this'
   if (section === 'providers' || section === 'roles')
     return models.kind === 'loaded' ? `Saved on the server · ${models.settings.path}` : 'Saved on the server'
-  if (section === 'security') return 'Saved on the server · config.json'
+  if (section === 'security' || section === 'projects') return 'Saved on the server · config.json'
   const { state } = permissions
   return state.kind === 'loaded' ? `Saved on the server · ${state.policy.path}` : 'Saved on the server'
 }

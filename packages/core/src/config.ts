@@ -63,8 +63,10 @@ export type EnsoThreadTreeMode = Static<typeof EnsoThreadTreeMode>
  * set by a trusted project's own tiers, which override this file's (`readProjectThreadSettings` in
  * `@enso/core/project-config`). `projects` — per canonical project path, the user's own override
  * of the mode, `{ "/home/me/big-monorepo": "off" }` — is read from the user's file only.
+ *
+ * @group Configuration
  */
-const EnsoThreadsConfig = Type.Object(
+export const EnsoThreadsConfig = Type.Object(
   {
     tree: Type.Optional(EnsoThreadTreeMode),
     projects: Type.Optional(Type.Record(Type.String({ minLength: 1 }), EnsoThreadTreeMode)),
@@ -73,6 +75,8 @@ const EnsoThreadsConfig = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Configuration */
+export type EnsoThreadsConfig = Static<typeof EnsoThreadsConfig>
 
 /**
  * The whole config file.

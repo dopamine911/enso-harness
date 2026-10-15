@@ -11,10 +11,10 @@ import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
 import { createModelsRoutes } from './models-routes.ts'
 import { createPermissionRoutes } from './permission-routes.ts'
 import { createProjectRoutes } from './project-routes.ts'
-import { createProjectRegistry } from './projects.ts'
+import { canonicalConfigPath, createProjectRegistry } from './projects.ts'
 import { createPromptLibrary, type PromptLibrary } from './prompt-library.ts'
 import { createPromptRoutes } from './prompt-routes.ts'
-import { createSecurityRoutes } from './security-routes.ts'
+import { createSettingsRoutes } from './settings-routes.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createThreadControlRoutes } from './thread-control-routes.ts'
 import { createThreadReadRoutes } from './thread-read-routes.ts'
@@ -63,12 +63,10 @@ export interface EnsoServerOptions {
   /** The config file `projectRoots` came from, named when a refusal points at a root. */
   projectsConfigPath?: string
   /**
-   * The user's config file (`ENSO_HOME/config.json`) whose `models` section — favorites, hidden
-   * providers, roles, presets (#904) — the models routes read and write, user-only; absent (tests),
-   * those routes refuse and a role resolves to nothing.
+   * Enso's own home (`ENSO_HOME`, #421): never a project, nor anything under it (#866); its
+   * `config.json` is the file Settings' sections and the models routes (#904) read and write,
+   * user-only. Absent (tests), no such refusal, and those routes refuse.
    */
-  modelsConfigPath?: string
-  /** Enso's own home (`ENSO_HOME`, #421): never a project, nor anything under it (#866); absent (tests), no such refusal. */
   ensoHome?: string
   /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
   projectsStatePath?: string
@@ -241,7 +239,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const reads = createThreadReadRoutes({ threadRead, logsDir: options.logsDir, servesDirectory })
   const promptRoutes = createPromptRoutes({ prompts, threads, host, projects })
   const { dispatchModelsRoute, resolveRole } = createModelsRoutes({
-    configPath: options.modelsConfigPath,
+    ensoHome: options.ensoHome,
     providers: host.providers,
   })
   const controls = createThreadControlRoutes({
@@ -271,7 +269,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const { dispatchPromptRoute } = promptRoutes
   const { dispatchPermissionRoute } = permissions
-  const { dispatchSecurityRoute } = createSecurityRoutes({ ensoHome: options.ensoHome })
+  const { dispatchSettingsRoute } = createSettingsRoutes({
+    ensoHome: options.ensoHome,
+    agentDir: options.agentDir,
+    // A project's own mode is keyed as new trees match it: the resolver's canonical, else the config's rule.
+    canonical: options.threadSettings?.canonical ?? ((key) => canonicalConfigPath(key)),
+  })
   const { previews } = reads
 
   /**
@@ -348,7 +351,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (dispatchPromptRoute(request, response)) return
     if (dispatchPermissionRoute(request, response)) return
     if (dispatchModelsRoute(request, response)) return
-    if (dispatchSecurityRoute(request, response)) return
+    if (dispatchSettingsRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

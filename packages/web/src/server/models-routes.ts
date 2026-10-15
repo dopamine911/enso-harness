@@ -1,4 +1,3 @@
-import { existsSync, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   type EnsoAddableProvider,
@@ -15,13 +14,13 @@ import {
   type EnsoRoleResolution,
   ensoLogger,
   type HostCommandOption,
-  parseEnsoConfig,
   resolveModelRole,
 } from '@enso/core'
-import { readTextIfPresent } from '@enso/core/paths'
+import { ensoConfigPath } from '@enso/core/paths'
 import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
-import { writeAtomically } from '../host/atomic-file.ts'
+import { bytesOf } from '../host/atomic-file.ts'
+import { readConfigFile, writeConfigSections } from '../host/config-file.ts'
 import type { HostAuthQuestion } from '../host/host-flow-runs.ts'
 import { authEventText, isFlowCancelled, loginCodeQuestion } from '../host/host-flows.ts'
 import type { HostProviderFacts, HostProviders } from '../host/provider-settings.ts'
@@ -36,8 +35,9 @@ import { answerJson, answerOrFail, MAX_DIALOG_BODY_BYTES, readJsonBody, refuseWi
  * conditions below (#174): keep that spelling.
  *
  * ⚠ USER-ONLY (#904 decision 1): the section is read from the user's file alone, fresh on each
- * request — never merged with a project's `.enso/config.json`. A write keeps every other section of
- * the file as it is, and a file that is there and unreadable is NEVER overwritten.
+ * request — never merged with a project's `.enso/config.json`. A write is the whole file, as
+ * `config-file.ts` writes every Settings section of it: every other section kept as it is, and a
+ * file that is there and unreadable is NEVER overwritten.
  *
  * ⚠ AN API KEY IS SAID ONCE (#904 decision 3). It arrives in one login body (or one answer), goes
  * to pi's `login` — which stores it in pi's own `auth.json` (`AuthStorage`) — and is then forgotten:
@@ -53,8 +53,8 @@ const MAX_MODELS_BODY_BYTES = 256 * 1024
 
 /** What the models routes read from the server. */
 export interface ModelsRoutesState {
-  /** The user's config file; absent, the server reads no config and the section routes refuse. */
-  readonly configPath: string | undefined
+  /** `ENSO_HOME`: its `config.json`; absent (tests), the section routes refuse and a role resolves to nothing. */
+  readonly ensoHome: string | undefined
   readonly providers: HostProviders
 }
 
@@ -66,36 +66,31 @@ export interface ModelsRoutes {
 }
 
 type SectionRead =
-  | { readonly kind: 'read'; readonly models: EnsoModelsConfig }
+  | { readonly kind: 'read'; readonly path: string; readonly models: EnsoModelsConfig }
   | { readonly kind: 'refused'; readonly reason: string }
 
+const NO_USER_CONFIG = 'this server reads no user config, so it keeps no models settings'
+
 /** The `models` section of the user's file, fresh; absent is `{}`. */
-function readSection(configPath: string | undefined): SectionRead {
-  if (configPath === undefined) return { kind: 'refused', reason: 'this server reads no user config' }
-  const parsed = parseEnsoConfig(readTextIfPresent(configPath))
-  if (parsed.kind === 'unreadable') return { kind: 'refused', reason: `${configPath} is unreadable: ${parsed.reason}` }
-  return { kind: 'read', models: parsed.config.models ?? {} }
+function readSection(home: string | undefined): SectionRead {
+  if (home === undefined) return { kind: 'refused', reason: NO_USER_CONFIG }
+  const { path, parsed } = readConfigFile(home)
+  if (parsed.kind === 'unreadable') return { kind: 'refused', reason: `${path} is unreadable: ${parsed.reason}` }
+  return { kind: 'read', path, models: parsed.config.models ?? {} }
 }
 
-/** The section written over the user's file, every other section kept; atomic. */
-function writeSection(configPath: string, models: EnsoModelsConfig): SectionRead {
-  const text = readTextIfPresent(configPath)
-  const parsed = parseEnsoConfig(text)
-  if (parsed.kind === 'unreadable') {
-    return {
-      kind: 'refused',
-      reason: `${configPath} is unreadable (${parsed.reason}); fix or remove it — it is never overwritten`,
-    }
-  }
-  const { models: _previous, ...others } = parsed.config
-  const next = Object.keys(models).length === 0 ? others : { ...others, models }
-  const checked = parseEnsoConfig(JSON.stringify(next))
-  if (checked.kind === 'unreadable') return { kind: 'refused', reason: checked.reason }
-  // The rename installs the temporary file's inode, so it carries the mode: the file's own, else
-  // 0600 — never the umask's default, which would open the user's config from the second save on.
-  const mode = existsSync(configPath) ? statSync(configPath).mode & 0o777 : 0o600
-  writeAtomically(configPath, `${JSON.stringify(next, null, 2)}\n`, mode)
-  return { kind: 'read', models }
+/**
+ * The section written over the user's file, every other section kept. The page saves the section
+ * whole and holds no `ETag`, so the write is over whatever is on disk now — none, or the file there.
+ */
+function writeSection(home: string, models: EnsoModelsConfig): SectionRead {
+  const written = writeConfigSections(
+    home,
+    bytesOf(ensoConfigPath(home)) === undefined ? { kind: 'absent' } : { kind: 'present' },
+    ({ models: _replaced, ...kept }) => (Object.keys(models).length === 0 ? kept : { ...kept, models }),
+    () => readSection(home),
+  )
+  return written.kind === 'written' ? written.read : { kind: 'refused', reason: written.reason }
 }
 
 /** A route's body: its schema, what it is (`capped`, as in "a login request is"), what it must hold, and its cap. */
@@ -302,24 +297,21 @@ function providersListing(
 }
 
 export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
-  const { configPath, providers } = state
+  const { ensoHome, providers } = state
   let login: SettingsLogin | undefined
   let questions = 0
 
   const answerSection = (response: ServerResponse, read: SectionRead): void => {
-    if (read.kind === 'refused' || configPath === undefined) {
-      refuseWith(response, {
-        status: 422,
-        reason: read.kind === 'refused' ? read.reason : 'this server reads no user config',
-      })
+    if (read.kind === 'refused') {
+      refuseWith(response, { status: 422, reason: read.reason })
       return
     }
-    const settings: EnsoModelsSettings = { path: configPath, models: read.models }
+    const settings: EnsoModelsSettings = { path: read.path, models: read.models }
     answerJson(response, settings)
   }
 
   async function listing(): Promise<EnsoProvidersListing> {
-    const section = readSection(configPath)
+    const section = readSection(ensoHome)
     const hidden = section.kind === 'read' ? (section.models.hiddenProviders ?? []) : []
     const listed = providersListing(await providers.list(), hidden)
     return { ...listed, ...(login === undefined ? {} : { login: login.state }) }
@@ -332,13 +324,13 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   async function respondToSectionWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const models = await readClosedBody(request, response, SECTION_BODY)
     if (models === undefined) return
-    if (configPath === undefined) {
-      refuseWith(response, { status: 422, reason: 'this server reads no user config, so it keeps no models settings' })
+    if (ensoHome === undefined) {
+      refuseWith(response, { status: 422, reason: NO_USER_CONFIG })
       return
     }
-    const written = writeSection(configPath, models)
+    const written = writeSection(ensoHome, models)
     if (written.kind === 'refused') log.warn('models settings not saved: {reason}', { reason: written.reason })
-    else log.info('models settings saved to {path}', { path: configPath, roles: Object.keys(models.roles ?? {}) })
+    else log.info('models settings saved to {path}', { path: written.path, roles: Object.keys(models.roles ?? {}) })
     answerSection(response, written)
   }
 
@@ -497,7 +489,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   function dispatchSettingsRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
     if (request.method === 'GET' && url === '/api/models/settings')
-      return answered(response, () => answerSection(response, readSection(configPath)))
+      return answered(response, () => answerSection(response, readSection(ensoHome)))
     if (request.method === 'PUT' && url === '/api/models/settings')
       return answered(response, () => respondToSectionWrite(request, response))
     if (request.method === 'GET' && url === '/api/providers')
@@ -529,7 +521,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   return {
     dispatchModelsRoute,
     resolveRole(name, options) {
-      const section = readSection(configPath)
+      const section = readSection(ensoHome)
       if (section.kind === 'refused') return { kind: 'refused', role: name, reason: section.reason }
       return resolveModelRole(name, section.models, options)
     },

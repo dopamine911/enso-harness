@@ -19,7 +19,7 @@ const ROUTE_GROUP_PATHS: readonly string[] = [
   'packages/web/src/server/prompt-routes.ts',
   'packages/web/src/server/project-routes.ts',
   'packages/web/src/server/permission-routes.ts',
-  'packages/web/src/server/security-routes.ts',
+  'packages/web/src/server/settings-routes.ts',
   'packages/web/src/server/literal-routes.ts',
   'packages/web/src/server/models-routes.ts',
 ]
@@ -122,6 +122,28 @@ function literalRead(
 }
 
 const BODY_ERRORS = '400 malformed id/body; 403 untrusted origin'
+
+/** Settings' server-side writes (#933, #934): a control that builds nothing and logs its outcome. */
+function settingsWrite(
+  facts: Pick<RouteMetadata, 'handler' | 'input' | 'success' | 'errors'>,
+): Omit<RouteMetadata, 'method' | 'path'> {
+  return { ...facts, routeClass: 'control', builds: 'no', logs: 'yes' }
+}
+
+/** A settings read's errors: none but a server started without `ENSO_HOME`. */
+const SETTINGS_READ_ERRORS = '403 untrusted origin; 404 a server started without `ENSO_HOME`; 500 handler failure'
+
+/** A `config.json` section's save (#933, #934): its precondition, then the section's body. */
+const CONFIG_WRITE_INPUT =
+  'headers: exactly one precondition — `If-Match: <ETag>`, `If-Match: *` or `If-None-Match: *` (no file); body: '
+
+/** A `config.json` section's save's errors, `refused` the section's own 422s. */
+const configWriteErrors = (refused: string): string =>
+  `400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 404 no \`ENSO_HOME\`; 412 the file changed on disk since it was read; 413 body too large; 422 ${refused} — nothing written; 428 no precondition; 500 handler failure`
+
+/** A save beside the file's (the judge key, the trust default): no precondition, its own 422s. */
+const sideWriteErrors = (refused: string): string =>
+  `400 malformed body; 403 untrusted origin; 404 no \`ENSO_HOME\`; 413 body too large; 422 ${refused}; 500 handler failure`
 
 const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_ROUTE: threadRead('respondWithThread', '200 JSON', NO_LIVE_SESSION_ERRORS, { path: '/api/threads/:threadId' }),
@@ -502,6 +524,19 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     builds: 'no',
     logs: 'yes',
   },
+  PROJECT_TITLE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/title',
+    handler: 'respondToProjectRetitle → ProjectRegistry.retitle',
+    input: 'path: `projectId` (sixteen hex digits); body: `EnsoProjectTitleUpdate` — `{ "title": "…" }`, not blank',
+    success:
+      "200 `EnsoProject` JSON as it is now listed — the title, trimmed, stored in `ENSO_HOME/projects.json` (the launch project's too, as an entry for its path); the folder, its path and the id are untouched (#939)",
+    errors:
+      '400 malformed body, a blank title, or one that is not exactly `{ title }`; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   PROJECT_CONFIG_APPROVAL_READ_ROUTE: {
     method: 'GET',
     path: '/api/projects/:projectId/config-approval',
@@ -592,34 +627,47 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     logs: 'yes',
   },
   'GET /api/settings/security': literalRead({
-    handler: 'answerWithEtag → readSecuritySettings',
+    handler: 'respondToConfigSection → readSecuritySettings',
     success:
       "200 `EnsoSecuritySettingsRead` JSON (#933) — `ok` with the user's `config.json` `security` section as written, or `unreadable` with why (every consumer fails closed on such a file); both with the file's path, the secrets file's path and `judgeKeySet` — whether `TYPESAFE_API_KEY` is set, never its value — and an `ETag` header when there is a file",
-    errors: '403 untrusted origin; 404 a server started without `ENSO_HOME`; 500 handler failure',
+    errors: SETTINGS_READ_ERRORS,
   }),
-  'PUT /api/settings/security': {
-    handler: 'respondToSettingsWrite → writeSecuritySettings',
-    input:
-      'headers: exactly one precondition — `If-Match: <ETag>`, `If-Match: *` or `If-None-Match: *` (no file); body: `EnsoSecuritySettingsWrite` — `{ security }`, the whole section',
+  'PUT /api/settings/security': settingsWrite({
+    handler: 'respondToConfigSection → writeSecuritySettings',
+    input: `${CONFIG_WRITE_INPUT}\`EnsoSecuritySettingsWrite\` — \`{ security }\`, the whole section`,
     success:
       "200 `EnsoSecuritySettingsRead` JSON with its new `ETag` — every other key of `config.json` kept, empty objects dropped, the whole file validated with `parseEnsoConfig` and written to a temporary file renamed over; read by the guard at each new session's start",
-    errors:
-      '400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 404 no `ENSO_HOME`; 412 the file changed on disk since it was read; 413 body too large; 422 the file is unreadable now, or the result would be — nothing written; 428 no precondition; 500 handler failure',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-  },
-  'PUT /api/settings/security/judge-key': {
-    handler: 'respondToJudgeKeyWrite → writeJudgeKey',
+    errors: configWriteErrors('the file is unreadable now, or the result would be'),
+  }),
+  'PUT /api/settings/security/judge-key': settingsWrite({
+    handler: 'respondToSideWrite → writeJudgeKey',
     input: 'body: `EnsoJudgeKeyWrite` — `{ value }`, the key, or `null` to remove it',
     success:
       '200 `EnsoJudgeKeyState` JSON — only whether a key is set; `ENSO_HOME/secrets.env` rewritten `0600` with every other line kept, the key never logged or answered; read by the `jev` judge at its next call',
-    errors:
-      '400 malformed body; 403 untrusted origin; 404 no `ENSO_HOME`; 413 body too large; 422 not one token (spaces, quotes or `#`); 500 handler failure',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-  },
+    errors: sideWriteErrors('not one token (spaces, quotes or `#`)'),
+  }),
+  'GET /api/settings/projects': literalRead({
+    handler: 'respondToConfigSection → readProjectsSettings',
+    success:
+      "200 `EnsoProjectsSettingsRead` JSON (#934) — `ok` with the user's `config.json` `projects` and `threads` as written, or `unreadable` with why (every consumer fails closed on such a file); both with the file's path, pi's `settings.json` path and its `defaultProjectTrust` (`ask` when unset), and an `ETag` header when there is a file",
+    errors: SETTINGS_READ_ERRORS,
+  }),
+  'PUT /api/settings/projects': settingsWrite({
+    handler: 'respondToConfigSection → writeProjectsSettings',
+    input: `${CONFIG_WRITE_INPUT}\`EnsoProjectsSettingsWrite\` — \`{ projects?, threads }\`, each section whole (no \`projects\`: no roots fence)`,
+    success:
+      "200 `EnsoProjectsSettingsRead` JSON with its new `ETag` — every other key of `config.json` kept, empty lists dropped, the whole file validated with `parseEnsoConfig` and written to a temporary file renamed over; `threads` is read at each new tree and project page, `projects.roots` at the server's next start",
+    errors: configWriteErrors(
+      "the file is unreadable now, a root or a project's own mode is keyed by a path neither absolute nor `~/`, or the result would be unreadable",
+    ),
+  }),
+  'PUT /api/settings/projects/trust': settingsWrite({
+    handler: 'respondToSideWrite → writeDefaultProjectTrust',
+    input: 'body: `EnsoDefaultProjectTrustState` — `{ defaultProjectTrust }`: `ask`, `always` or `never`',
+    success:
+      "200 `EnsoDefaultProjectTrustState` JSON, the value read back — pi's `defaultProjectTrust` in the agent dir's `settings.json`, written by pi's own settings writer with every other key kept; read at each new thread and project page",
+    errors: sideWriteErrors("pi's settings file unreadable or not written"),
+  }),
   'GET /api/models/settings': literalRead({
     handler: 'answerSection → readSection',
     success:
@@ -630,7 +678,7 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     handler: 'respondToSectionWrite → writeSection',
     input: 'body: `EnsoModelsConfig` — the whole section',
     success:
-      "200 `EnsoModelsSettings` JSON — the section as written into the user's `config.json`, every other section kept, written to a temporary file and renamed over",
+      "200 `EnsoModelsSettings` JSON — the section as read back from the user's `config.json`, every other section kept, the whole file validated with `parseEnsoConfig` and written to a temporary file renamed over, in the file's own mode (`0600` when there was none)",
     errors:
       '400 malformed body (a role named other than lower-case letters, digits and -); 403 untrusted origin; 413 body too large; 422 the file is unreadable and is never overwritten, or the server reads no config; 500 handler failure',
     routeClass: 'control',

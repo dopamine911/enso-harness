@@ -61,7 +61,7 @@ async function start(
   const built: FakeThreadRecord[] = []
   const started = startEnsoServer({
     cwd: tmpdir(),
-    modelsConfigPath: configPath,
+    ensoHome: home,
     harnessPackageDir: harness,
     agentDir: join(home, 'pi-agent'),
     permissionRulesPath: join(home, 'permissions.json'),
