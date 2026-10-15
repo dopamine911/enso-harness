@@ -1966,11 +1966,14 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
 
 // ── #921: each model turn's thinking reads where that turn begins, live as after a reload ────────
 
+/** A thinking card's trigger label, streaming (`Thinking...`) or done (`Thought for 3s`). */
+const THINKING_CARD_LABEL = /^(Thought|Thinking)/
+
 /** One node's row in {@link transcriptRows}, or undefined when it is none. */
 function transcriptRow(node: Node): string | undefined {
   if (!(node instanceof Element)) return /SAID-\w+/.exec(node.textContent ?? '')?.[0]
   if (node.hasAttribute('data-tool-call-id')) return `tool:${node.getAttribute('data-tool-call-id')}`
-  if (node.tagName === 'BUTTON' && /^(Thought|Thinking)/.test(node.textContent ?? '')) return 'thought'
+  if (node.tagName === 'BUTTON' && THINKING_CARD_LABEL.test(node.textContent ?? '')) return 'thought'
   return undefined
 }
 
@@ -1995,7 +1998,10 @@ function transcriptRows(pane: MountedPane): string[][] {
 const thoughtLabels = (pane: MountedPane): string[] =>
   [...pane.container.querySelectorAll('[data-role="assistant"] button')]
     .map((button) => button.textContent ?? '')
-    .filter((label) => /^(Thought|Thinking)/.test(label))
+    .filter((label) => THINKING_CARD_LABEL.test(label))
+
+/** How long turn 1 of the #921 test thinks: `Date.now` jumps by it, so no test waits it out. */
+const TURN_THOUGHT_S = 3
 
 test('⚠ thinking → call → result → thinking → call reads in that order live, and identically after a reload; each turn’s thinking is timed on its own (#921)', async () => {
   const pane = await mountPane()
@@ -2023,7 +2029,10 @@ test('⚠ thinking → call → result → thinking → call reads in that order
     thinking(3, 'plan the stripes'),
   )
   await eventually(() => expect(thoughtLabels(pane)).toEqual(['Thinking...']))
-  await Bun.sleep(1100)
+  // The card times its thinking with `Date.now` (`reasoning.tsx`): the clock jumps ahead instead
+  // of the test sleeping, and keeps running, so `eventually`'s deadline still lapses on a failure.
+  const realNow = Date.now.bind(Date)
+  const clock = spyOn(Date, 'now').mockImplementation(() => realNow() + TURN_THOUGHT_S * 1000)
   // ...then calls, gets its result, and turn 2 begins thinking.
   await pane.settle(
     call(4, 'c1'),
@@ -2034,7 +2043,7 @@ test('⚠ thinking → call → result → thinking → call reads in that order
   // Turn 1's card stopped when its turn did and says how long THAT turn thought; turn 2's is its own.
   await eventually(() => {
     const [first, second, ...rest] = thoughtLabels(pane)
-    expect(first).toMatch(/^Thought for [1-9]\d*s$/)
+    expect(Number(/^Thought for (\d+)s$/.exec(first ?? '')?.[1])).toBeGreaterThanOrEqual(TURN_THOUGHT_S)
     expect([second, ...rest]).toEqual(['Thinking...'])
   })
   await pane.settle(
@@ -2047,6 +2056,7 @@ test('⚠ thinking → call → result → thinking → call reads in that order
   )
   const expected = [['thought', 'tool:c1'], ['thought', 'tool:c2'], ['SAID-DONE']]
   await eventually(() => expect(transcriptRows(pane)).toEqual(expected))
+  clock.mockRestore()
   await pane.unmount()
 
   // The same run as a reload mounts it: one message per pi message, each result paired into the
