@@ -1,13 +1,13 @@
 import { constants, copyFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { EnsoPermissionPolicyRead, EnsoPermissionPolicyRefusal } from '@enso/core'
-import { realpathOrSelf } from '@enso/core/paths'
+import { realpathOrSelf, replaceFileText } from '@enso/core/paths'
 import {
   ENSO_DEFAULT_PERMISSION_POLICY,
   permissionEngineConfigPath,
   withCatchAllFirst,
 } from '@enso/core/permission-rules'
-import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
+import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition } from './atomic-file.ts'
 import { policyProblems } from './permission-policy.ts'
 
 /**
@@ -26,7 +26,7 @@ import { policyProblems } from './permission-policy.ts'
  * and an edit made there is never overwritten unseen.
  *
  * In the host, beside the engine's schema, because the write is shaped by what the engine does:
- * it reloads on the modification time alone (`writeAtomically`), and its real-engine tests must
+ * it reloads on the modification time alone (`replaceFileText`), and its real-engine tests must
  * share `agent-host.test.ts`'s process-wide agent dir.
  */
 
@@ -91,7 +91,7 @@ export function writePermissionPolicy(
     const reason = `the engine would not run this policy as written (${problems.length} problem${problems.length === 1 ? '' : 's'}); nothing was saved`
     return { kind: 'refused', refusal: { reason, problems } }
   }
-  writeAtomically(policyPath, `${JSON.stringify(normalized, null, 2)}\n`)
+  replaceFileText(policyPath, `${JSON.stringify(normalized, null, 2)}\n`)
   return { kind: 'written', read: readPermissionPolicy(policyPath, agentDir) }
 }
 
@@ -129,7 +129,7 @@ export function resetPermissionPolicy(
   const conflict = conflictOf(policyPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
   const backup = condition.kind === 'absent' ? undefined : copyAside(realpathOrSelf(policyPath))
-  writeAtomically(policyPath, `${JSON.stringify(ENSO_DEFAULT_PERMISSION_POLICY, null, 2)}\n`)
+  replaceFileText(policyPath, `${JSON.stringify(ENSO_DEFAULT_PERMISSION_POLICY, null, 2)}\n`)
   const read = readPermissionPolicy(policyPath, agentDir)
   return backup === undefined ? { kind: 'reset', read } : { kind: 'reset', backup, read }
 }

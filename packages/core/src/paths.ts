@@ -20,7 +20,7 @@
  * @module
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   chmodSync,
   closeSync,
@@ -41,6 +41,7 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -109,28 +110,42 @@ function fileBehindLinks(path: string): string {
 
 /**
  * Replace the file at `path` with `text` in one step: written beside the file it names, then renamed
- * over it — a reader never sees half a file. Settings' writes (#924) go through here.
+ * over it — a reader sees the old file or the new one, never half of one. Settings' writes go through
+ * here: the permission policy (#474), `config.json` (#924, #933) and `secrets.env` (#933).
  *
  * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config file kept as a symlink (into a dotfiles repo,
  * say) stays a link, and the file behind it changes — or is made, when the link points at a file
  * not there yet; a link into a directory not there is an error, never replaced. The file keeps its
- * own mode. Nothing staged is left behind when the write or the rename throws: the error is rethrown.
+ * own mode unless `mode` is given (`secrets.env` is written `0600`); a new file without one gets the
+ * umask's. The staged file is always newly made, so it is never readable wider for a moment. Nothing
+ * staged is left behind when the write or the rename throws: the error is rethrown.
+ *
+ * ⚠ THE MODIFICATION TIME MUST MOVE. The permission engine reloads a policy only when the file's
+ * `mtimeMs` differs from the one it last read (`config/policy-loader.ts`), and Linux stamps it from
+ * a coarse clock — one tick is milliseconds. A write landing in the same tick as the last one (a
+ * reset just after a hand edit) kept the OLD policy in force, silently. Found by
+ * `agent-host.test.ts`'s reset test.
  *
  * @group Workspace paths
  */
-export function replaceFileText(path: string, text: string): void {
+export function replaceFileText(path: string, text: string, mode?: number): void {
   const target = fileBehindLinks(path)
-  const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined
-  const staged = `${target}.${process.pid}.tmp`
+  const previous = existsSync(target) ? statSync(target) : undefined
+  const fileMode = mode ?? (previous === undefined ? undefined : previous.mode & 0o7777)
+  const staged = `${target}.${process.pid}.${randomUUID()}.tmp`
   try {
-    writeFileSync(staged, text, mode === undefined ? undefined : { mode })
-    // writeFileSync's mode is masked by the umask; the file's own mode is restored exactly.
-    if (mode !== undefined) chmodSync(staged, mode)
+    writeFileSync(staged, text, fileMode === undefined ? { flag: 'wx' } : { flag: 'wx', mode: fileMode })
+    // writeFileSync's mode is masked by the umask; the file's mode is set exactly.
+    if (fileMode !== undefined) chmodSync(staged, fileMode)
     renameSync(staged, target)
   } catch (error: unknown) {
     rmSync(staged, { force: true })
     throw error
   }
+  if (previous === undefined) return
+  const written = statSync(target)
+  if (written.mtimeMs > previous.mtimeMs) return
+  utimesSync(target, written.atime, (previous.mtimeMs + 1) / 1000)
 }
 
 /**

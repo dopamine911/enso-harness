@@ -5,9 +5,9 @@ import {
   localJudgeUrlProblem,
   parseEnsoConfig,
 } from '@enso/core'
-import { ensoConfigPath, ensoSecretsPath } from '@enso/core/paths'
+import { ensoConfigPath, ensoSecretsPath, replaceFileText } from '@enso/core/paths'
 import { parseDotenv, readSecret } from '@enso/core/secrets'
-import { bytesOf, conflictOf, etagOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
+import { bytesOf, conflictOf, etagOf, type WriteCondition } from './atomic-file.ts'
 
 /**
  * Settings › Security's files (#933): the `security` section of the user's `config.json`, and the
@@ -91,7 +91,7 @@ export function writeSecuritySettings(
   const text = `${JSON.stringify(next, null, 2)}\n`
   const checked = parseEnsoConfig(text)
   if (checked.kind === 'unreadable') return { kind: 'refused', reason: `nothing was saved: ${checked.reason}` }
-  writeAtomically(configPath, text)
+  replaceFileText(configPath, text)
   return { kind: 'written', read: readSecuritySettings(home) }
 }
 
@@ -119,6 +119,6 @@ export function writeJudgeKey(home: string, value: string | null): JudgeKeyWrite
   const lines = text.split(/\r?\n/).filter((line) => !parseDotenv(line).has(ENSO_JUDGE_KEY_NAME))
   while (lines.length > 0 && lines.at(-1) === '') lines.pop()
   if (value !== null) lines.push(`${ENSO_JUDGE_KEY_NAME}=${value}`)
-  writeAtomically(secretsPath, lines.length === 0 ? '' : `${lines.join('\n')}\n`, OWNER_ONLY_FILE_MODE)
+  replaceFileText(secretsPath, lines.length === 0 ? '' : `${lines.join('\n')}\n`, OWNER_ONLY_FILE_MODE)
   return { kind: 'written', judgeKeySet: (readSecret(home, ENSO_JUDGE_KEY_NAME) ?? '').length > 0 }
 }
