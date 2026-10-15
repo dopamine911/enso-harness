@@ -298,6 +298,8 @@ test('an operator denial in the pre-#496 shape still counts, and says the button
   expect(out.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied Run command: No')
 })
 
+// #928: outside a gate a non-zero exit is the command answering, not a tool error — but for a gate
+// the exit IS the result: the same `Command exited with code 1` is still `fail`.
 test("⚠ a gate run records its outcome from the result's isError; pending is unknown, a guard's refusal is refused", () => {
   const out = evalOf([
     call('g1', 'bash', { command: 'bun run check' }),
@@ -319,6 +321,7 @@ test("⚠ a gate run records its outcome from the result's isError; pending is u
     'unknown',
     'refused',
   ])
+  expect(out.scorecard.signals).toMatchObject({ toolErrors: 0, nonZeroExits: 1 })
 })
 
 test('bash commands classify by the first matching pattern: pr-create above pr-edit, push, commit, branch, destructive', () => {
@@ -363,6 +366,13 @@ test('S3 fires when the same tool is called again within the window after an err
     call('c2', 'bash', { command: 'y' }),
   ])
   expect(fine.scorecard.signals.S3_retryAfterErrorFires).toBe(0)
+  // #928: `grep` finding nothing exited 1 — the command answered; no error to retry after.
+  const answered = evalOf([
+    call('c1', 'bash', { command: 'grep needle src' }),
+    result('c1', 'bash', '(no output)\n\nCommand exited with code 1', { isError: true }),
+    call('c2', 'bash', { command: 'grep other src' }),
+  ])
+  expect(answered.scorecard.signals).toMatchObject({ S3_retryAfterErrorFires: 0, toolErrors: 0, nonZeroExits: 1 })
 })
 
 test('S5 fires per span of three or more consecutive requests under 50 output tokens', () => {

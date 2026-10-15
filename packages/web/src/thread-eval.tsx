@@ -139,6 +139,7 @@ const SIGNAL_ROWS = [
   ['S1_duplicateToolClusters', 'S1 duplicate tool clusters'],
   ['S3_retryAfterErrorFires', 'S3 retries after an error'],
   ['toolErrors', 'tool errors'],
+  ['nonZeroExits', 'commands that exited non-zero'],
   ['S5_outputCollapseSpans', 'S5 output collapse spans'],
   ['S19_timeGaps', 'S19 time gaps'],
   ['S20_rareCommandMatches', 'S20 rare command matches'],

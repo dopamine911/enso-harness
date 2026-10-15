@@ -7,7 +7,7 @@ import type { StreamChunk } from '@tanstack/ai'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from '../custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from '../follow-connection.ts'
 import { pageLeaving } from '../page-leaving.ts'
-import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
+import { createScriptedFetch, isFollowRequest, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 /**
  * The adapter is the ONLY place AG-UI is made (#112). These drive it with a scripted server
@@ -1000,4 +1000,94 @@ test('close() during the opening fetch ends the subscription instead of throwing
   connection.close()
   await drained
   expect(chunks).toEqual([])
+})
+
+/**
+ * The scripted server's fetch, telling when a follow has opened: `frame` writes onto the follow
+ * that is open, so a frame written before the subscription's fetch goes to the previous follow
+ * (or nowhere, for the first). Take the
+ * promise before the subscription asks.
+ */
+function watchFollows(server: ScriptedFetch): { fetch: typeof fetch; nextFollow: () => Promise<void> } {
+  let waiting = Promise.withResolvers<void>()
+  const watched = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const response = await server.fetch(input, init)
+    if (isFollowRequest(input)) {
+      const opened = waiting
+      waiting = Promise.withResolvers<void>()
+      opened.resolve()
+    }
+    return response
+  }
+  return { fetch: Object.assign(watched, { preconnect: server.fetch.preconnect }), nextFollow: () => waiting.promise }
+}
+
+// PR #974 review: a run the stopped client's reset forgot must not be closed into the next
+// subscription — its RUN_ERROR would be yielded ahead of that subscription's snapshot.
+test('a prompt answered after the client stopped taking chunks closes no run into the next subscription', async () => {
+  const server = createScriptedFetch({ promptStatus: { status: 409, body: 'a run is already in progress' } })
+  const follows = watchFollows(server)
+  const connection = createFollowConnection({ threadId: 't1', fetch: follows.fetch })
+  const stopped = connection.subscribe()[Symbol.asyncIterator]()
+  let followed = follows.nextFollow()
+  const first = stopped.next()
+  await followed
+  server.frame(SNAPSHOT_IDLE)
+  await first
+  const release = server.holdPrompt()
+  const sending = connection.send(
+    [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'late' }] }],
+    undefined,
+    undefined,
+    { threadId: 't1', runId: 'r-late', clientTools: [], forwardedProps: {} },
+  )
+  // The client throws handling the chunk it holds: the subscription stops, its runs are forgotten.
+  await stopped.throw?.(new TypeError('the stream processor broke')).catch(() => undefined)
+  release()
+  await sending
+  const next = connection.subscribe()[Symbol.asyncIterator]()
+  followed = follows.nextFollow()
+  const opened = next.next()
+  await followed
+  server.frame(SNAPSHOT_IDLE)
+  expect((await opened).value).toEqual({ type: EventType.CUSTOM, name: 'snapshot', value: SNAPSHOT_IDLE })
+  connection.close()
+  await next.return?.(undefined)
+})
+
+// PR #974 re-review: a run the closing follow already ended is not ended again when its prompt
+// is answered after — one RUN_ERROR, and none queued ahead of the next subscription's snapshot.
+test('a run the closing follow ended is not ended a second time by its late prompt answer', async () => {
+  const server = createScriptedFetch({ promptStatus: { status: 409, body: 'a run is already in progress' } })
+  const follows = watchFollows(server)
+  const connection = createFollowConnection({ threadId: 't1', fetch: follows.fetch })
+  const closing = connection.subscribe()[Symbol.asyncIterator]()
+  let followed = follows.nextFollow()
+  const first = closing.next()
+  await followed
+  server.frame(SNAPSHOT_IDLE)
+  await first
+  const release = server.holdPrompt()
+  const sending = connection.send(
+    [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'held' }] }],
+    undefined,
+    undefined,
+    { threadId: 't1', runId: 'r-held', clientTools: [], forwardedProps: {} },
+  )
+  server.closeFollow()
+  const chunks: StreamChunk[] = []
+  for (let step = await closing.next(); step.done !== true; step = await closing.next()) chunks.push(step.value)
+  release()
+  await sending
+  expect(chunks.filter((chunk) => chunk.type === EventType.RUN_ERROR)).toEqual([
+    { type: EventType.RUN_ERROR, runId: 'r-held', message: 'the follow closed before the run settled' },
+  ])
+  const next = connection.subscribe()[Symbol.asyncIterator]()
+  followed = follows.nextFollow()
+  const opened = next.next()
+  await followed
+  server.frame(SNAPSHOT_IDLE)
+  expect((await opened).value).toEqual({ type: EventType.CUSTOM, name: 'snapshot', value: SNAPSHOT_IDLE })
+  connection.close()
+  await next.return?.(undefined)
 })

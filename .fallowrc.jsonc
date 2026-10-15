@@ -21,6 +21,8 @@
     "scripts/enso-thread.ts",
     // Spawned by `test/docs-gate.test.ts` and run by hand: `bun scripts/docs/<name>.ts`.
     "scripts/docs/*.ts",
+    // Run by Claude Code as a PreToolUse hook, named by path in the settings `review-pr.ts` writes (#981).
+    "scripts/review/tool-grant-hook.ts",
     // Named by path in `site/astro.config.ts` (Starlight's `customCss` and `components`).
     "site/src/styles/theme.css",
     "site/src/components/LandingHero.astro"
@@ -279,6 +281,10 @@
       { "name": "harness-extension-tests", "patterns": ["packages/harness/extensions/**/__tests__/**"] },
       { "name": "harness-extensions", "patterns": ["packages/harness/extensions/**"] },
       { "name": "host-tests", "patterns": ["packages/web/src/host/**/__tests__/**"] },
+      // The page over the real server (#915): the one test that drives the browser's follow adapter
+      // and TanStack's client against the real follow route, because the bug it pins lived between
+      // them. A one-file zone, so `server-tests` and `browser-tests` still may not reach each other.
+      { "name": "page-follow-tests", "patterns": ["packages/web/src/server/__tests__/follow-page.test.ts"] },
       { "name": "server-tests", "patterns": ["packages/web/src/server/**/__tests__/**"] },
       { "name": "browser-tests", "patterns": ["packages/web/src/**/__tests__/**"] },
       { "name": "host", "patterns": ["packages/web/src/host/**"] },
@@ -304,6 +310,7 @@
       { "from": "harness-extensions", "allow": ["core", "harness-core", "judge-backends"] },
       { "from": "host-tests", "allow": ["host", "core", "test-support"] },
       { "from": "host", "allow": ["core"] },
+      { "from": "page-follow-tests", "allow": ["server-tests", "server", "browser", "host", "core", "test-support"] },
       { "from": "server-tests", "allow": ["server", "core", "host", "test-support"] },
       { "from": "server", "allow": ["core", "host"] },
       { "from": "browser-tests", "allow": ["browser", "core", "test-support"] },

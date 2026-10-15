@@ -34,6 +34,7 @@ import {
   type CommandJudge,
   DEFAULT_GUARD_POLICY,
   DEFAULT_RISK_THRESHOLDS,
+  ENSO_JUDGE_KEY_NAME,
   type EnsoJudgeOutcome,
   type EnsoJudgeQuestion,
   type EnsoThreadJudgeCases,
@@ -42,12 +43,7 @@ import {
 } from '../packages/core/src/index.ts'
 import { ensoHome } from '../packages/core/src/paths.ts'
 import { knownSecretValues, readSecret } from '../packages/core/src/secrets.ts'
-import {
-  createJevJudge,
-  createLocalJudge,
-  JEV_KEY_NAME,
-  jevRequestOf,
-} from '../packages/harness/extensions/guards/judge-backends.ts'
+import { createJevJudge, createLocalJudge, jevRequestOf } from '../packages/harness/extensions/guards/judge-backends.ts'
 import { corpusThreads, type JudgeCorpus } from './judge-corpus.ts'
 import {
   fetchJson,
@@ -85,7 +81,7 @@ type ReplayBackend =
 function replayJudge(backend: ReplayBackend): CommandJudge {
   if (backend.kind === 'local') return createLocalJudge({ ...backend, timeoutMs: 120_000, retries: 1 })
   const home = ensoHome(process.env)
-  return createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: 10_000, retries: 2 })
+  return createJevJudge({ apiKey: () => readSecret(home, ENSO_JUDGE_KEY_NAME), timeoutMs: 10_000, retries: 2 })
 }
 
 export type JudgeQuery =

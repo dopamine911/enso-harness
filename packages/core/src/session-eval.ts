@@ -4,6 +4,7 @@ import { readEnsoGuardDenial } from './guard.ts'
 import { ENSO_LOG_EVENTS } from './log-stats.ts'
 import type { EnsoLogLine } from './log.ts'
 import { readRecordedMode } from './permission-modes.ts'
+import { shellExitCodeOf } from './runtime-entries.ts'
 import {
   ENSO_RISK_LEVELS,
   type EnsoRiskLevel,
@@ -37,10 +38,13 @@ import type { EnsoTranscriptEntry, EnsoTranscriptMessage, EnsoTranscriptToolResu
  *   - A queued prompt and an interrupt are LOG facts (`prompt … queued`, `run … told to abort`);
  *     the branch cannot say them. The log keeps 14 days, so both are `null` — unknown, never `0` —
  *     when no log day was read.
- *   - A gate run records its outcome: pi's bash tool throws on a non-zero exit (`bash.js`,
+ *   - A gate run records its outcome: pi's bash tool marks a non-zero exit `isError` (`bash.js`,
  *     `Command exited with code N`), so the result's `isError` is a structured boolean, not the text
- *     the script refused to parse. `refused` when a guard or the permission engine refused the run;
- *     `unknown` while pending.
+ *     the script refused to parse — for a gate the exit IS the result, so a non-zero one is `fail`.
+ *     `refused` when a guard or the permission engine refused the run; `unknown` while pending.
+ *   - Outside a gate, a non-zero exit is the command answering, not the tool failing (#928): `grep`
+ *     with no match, `test -f`. `toolErrors` (and S3, which reads them) leaves these out;
+ *     `nonZeroExits` counts them apart.
  *   - Refusals are four counts that never mix: a guard's (policy, `enso-guard-denial`), a rule's
  *     (the permission engine — a rule you wrote or `auto`'s classifier, `enso-permission-denial`,
  *     #464), the operator's (a person: a No on a prompt, and a declined ask) and the provider's
@@ -214,7 +218,10 @@ export const EnsoEvalScorecard = Type.Object(
       {
         S1_duplicateToolClusters: Type.Integer({ minimum: 0 }),
         S3_retryAfterErrorFires: Type.Integer({ minimum: 0 }),
+        /** Error results that were neither a refusal nor a command's non-zero exit (#928). */
         toolErrors: Type.Integer({ minimum: 0 }),
+        /** `bash` commands that ran and exited non-zero (#928): `isError` to pi, the command answering to us. */
+        nonZeroExits: Type.Integer({ minimum: 0 }),
         S5_outputCollapseSpans: Type.Integer({ minimum: 0 }),
         S19_timeGaps: Type.Integer({ minimum: 0 }),
         S20_rareCommandMatches: Type.Integer({ minimum: 0 }),
@@ -903,6 +910,25 @@ function spanOf(transcript: readonly EnsoTranscriptEntry[]): [string, string] | 
 }
 
 /**
+ * The error results nothing refused, split (#928): a shell command's non-zero exit is the command
+ * answering, counted apart; every other one is a tool error, by call id → its tool, which S3 reads.
+ */
+function errorResultsOf(
+  transcript: readonly EnsoTranscriptEntry[],
+  refused: ReadonlySet<string>,
+): { readonly errors: ReadonlyMap<string, string>; readonly nonZeroExits: number } {
+  const errors = new Map<string, string>()
+  let nonZeroExits = 0
+  for (const transcriptEntry of transcript) {
+    if (transcriptEntry.kind !== 'tool-result' || !transcriptEntry.isError) continue
+    if (refused.has(transcriptEntry.toolCallId)) continue
+    if (shellExitCodeOf(transcriptEntry) !== undefined) nonZeroExits += 1
+    else errors.set(transcriptEntry.toolCallId, transcriptEntry.toolName.toLowerCase())
+  }
+  return { errors, nonZeroExits }
+}
+
+/**
  * What the pure eval answers: the route adds the thread's identity and liveness.
  *
  * @group Session eval
@@ -920,12 +946,7 @@ export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
   const risk = sessionRiskOfTranscript(transcript)
   const events = mergeByTime(withSignalEvents(branchOnly, transcript, risk.signals), logEvents(log))
   const calls = toolCallRows(transcript)
-  const errors = new Map<string, string>()
-  for (const transcriptEntry of transcript) {
-    if (transcriptEntry.kind === 'tool-result' && transcriptEntry.isError && !refused.has(transcriptEntry.toolCallId)) {
-      errors.set(transcriptEntry.toolCallId, transcriptEntry.toolName.toLowerCase())
-    }
-  }
+  const { errors, nonZeroExits } = errorResultsOf(transcript, refused)
   const humans = events.filter((event) => HUMAN_KINDS.has(event.kind))
   const humanDenominator = Math.max(1, humans.length)
   const assistantMessages = transcript.filter(
@@ -986,6 +1007,7 @@ export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
         S1_duplicateToolClusters: duplicateToolClusters(calls),
         S3_retryAfterErrorFires: retryAfterError(calls, errors),
         toolErrors: errors.size,
+        nonZeroExits,
         S5_outputCollapseSpans: outputCollapseSpans(turnStats),
         S19_timeGaps: timeGaps(transcript, calls),
         S20_rareCommandMatches: rare.matches,

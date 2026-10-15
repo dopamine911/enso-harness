@@ -1,15 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
-import {
-  constants,
-  copyFileSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  type Stats,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs'
+import { constants, copyFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
   ENSO_EMPTY_RULE_RECORD,
@@ -25,16 +14,8 @@ import {
   withCatchAllFirst,
 } from '@enso/core/permission-rules'
 import { Check } from 'typebox/value'
+import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
 import { policyProblems } from './permission-policy.ts'
-
-/**
- * What a write expects on disk: the server's `WriteCondition` (#443), stated here because the host
- * imports only core. `absent` — no file; `matches` — the version read; `present` — whatever is there.
- */
-type WriteCondition =
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'matches'; readonly etag: string }
-  | { readonly kind: 'present' }
 
 /**
  * The user's permission policy on disk, as Settings reads and writes it (#474):
@@ -67,27 +48,11 @@ function recordPathOf(policyPath: string): string {
 }
 
 /**
- * A strong entity tag for the policy's bytes and, when there is one, the record's, quoted as HTTP
- * writes one (the prompt library's). A hand edit to either file is a new version.
+ * The `ETag` of the policy's bytes and, when there is one, the record's (#945): a hand edit to
+ * either file is a new version. With no record it is the policy's own `etagOf`.
  */
-function etagOf(policy: Uint8Array, record: Uint8Array | undefined): string {
-  const hash = createHash('sha256').update(policy)
-  if (record !== undefined) hash.update('\0record\0').update(record)
-  return `"${hash.digest('hex')}"`
-}
-
-function errorCode(error: unknown): unknown {
-  return error instanceof Error && 'code' in error ? error.code : undefined
-}
-
-/** The file's bytes, or `undefined` when there is none. */
-function bytesOf(path: string): Buffer | undefined {
-  try {
-    return readFileSync(path)
-  } catch (error: unknown) {
-    if (errorCode(error) === 'ENOENT') return undefined
-    throw error
-  }
+function policyEtagOf(policy: Uint8Array, record: Uint8Array | undefined): string {
+  return etagOf(record === undefined ? policy : Buffer.concat([policy, Buffer.from('\0record\0'), record]))
 }
 
 /** Where the engine writes its review log: beside its config, under `logs/`. */
@@ -125,7 +90,7 @@ export function readPermissionPolicy(policyPath: string, agentDir: string): Enso
   }
   const recordPath = recordPathOf(policyPath)
   const recordBytes = bytesOf(recordPath)
-  const etag = etagOf(bytes, recordBytes)
+  const etag = policyEtagOf(bytes, recordBytes)
   let parsed: unknown
   try {
     parsed = JSON.parse(bytes.toString('utf8'))
@@ -147,52 +112,16 @@ export function readPermissionPolicy(policyPath: string, agentDir: string): Enso
   }
 }
 
-/** Why the files on disk are not what `condition` expects, or `undefined` when they are. */
-function conflictOf(policyPath: string, condition: WriteCondition): string | undefined {
-  const bytes = bytesOf(policyPath)
-  if (condition.kind === 'absent') return bytes === undefined ? undefined : `${policyPath} already exists`
-  if (bytes === undefined) return `${policyPath} is no longer there: it was deleted since it was opened`
-  const recordPath = recordPathOf(policyPath)
-  if (condition.kind === 'matches' && etagOf(bytes, bytesOf(recordPath)) !== condition.etag) {
-    return `${policyPath} or ${recordPath} changed on disk since it was opened — reload to see the version there now`
-  }
-  return undefined
-}
-
-function statOrUndefined(path: string): Stats | undefined {
-  try {
-    return statSync(path)
-  } catch (error: unknown) {
-    if (errorCode(error) === 'ENOENT') return undefined
-    throw error
-  }
-}
-
 /**
- * Write `text` to the file behind `path` in one step: a temporary file beside it, renamed over it.
- * The policy, and Enso's record (#945) — which the engine never reads, so moving its time is
- * harmless — and, a policy's write having failed, the record's previous bytes put back.
- *
- * ⚠ THE MODIFICATION TIME MUST MOVE. The engine reloads a policy only when the file's `mtimeMs`
- * differs from the one it last read (`config/policy-loader.ts`), and Linux stamps it from a coarse
- * clock — one tick is milliseconds. A write landing in the same tick as the last one (a reset just
- * after a hand edit) kept the OLD policy in force, silently. Found by this file's reset test.
+ * Why the files on disk are not what `condition` expects, or `undefined` when they are: the
+ * policy's own `conflictOf`, but a version read names the record too (`policyEtagOf`).
  */
-function writeAtomically(path: string, text: string | Buffer): void {
-  const target = realpathOrSelf(path)
-  const previous = statOrUndefined(target)
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  writeFileSync(temporary, text, { flag: 'wx' })
-  try {
-    renameSync(temporary, target)
-  } catch (error: unknown) {
-    rmSync(temporary, { force: true })
-    throw error
-  }
-  if (previous === undefined) return
-  const written = statSync(target)
-  if (written.mtimeMs > previous.mtimeMs) return
-  utimesSync(target, written.atime, (previous.mtimeMs + 1) / 1000)
+function policyConflictOf(policyPath: string, condition: WriteCondition): string | undefined {
+  const bytes = condition.kind === 'matches' ? bytesOf(policyPath) : undefined
+  if (condition.kind !== 'matches' || bytes === undefined) return conflictOf(policyPath, condition)
+  const recordPath = recordPathOf(policyPath)
+  if (policyEtagOf(bytes, bytesOf(recordPath)) === condition.etag) return undefined
+  return `${policyPath} or ${recordPath} changed on disk since it was opened — reload to see the version there now`
 }
 
 const isEmptyRecord = (record: EnsoRuleRecord): boolean =>
@@ -202,7 +131,8 @@ const isEmptyRecord = (record: EnsoRuleRecord): boolean =>
  * Write the policy and, when given, Enso's record (#945): both, or the record put back. The record
  * goes first — a rule switched off leaves the policy only once the record holds it — and when the
  * policy's write then fails, the record that was on disk is put back (or, none there, removed). Each
- * write is atomic, the pair is not: a crash between them leaves the new record over the old policy.
+ * write is atomic (`writeAtomically`; the engine never reads the record, so moving its time is
+ * harmless), the pair is not: a crash between them leaves the new record over the old policy.
  * What is in force does not change; a rule being switched off reads as still in force (`liveRecord`
  * on the page), one being switched back on is in neither file, and a group being turned off leaves
  * its rules as yours. A record the same as on disk is not rewritten, and an empty one is not created
@@ -244,7 +174,7 @@ export function writePermissionPolicy(
   write: EnsoPermissionPolicyWrite,
   condition: WriteCondition,
 ): PermissionPolicyWrite {
-  const conflict = conflictOf(policyPath, condition)
+  const conflict = policyConflictOf(policyPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
   const { file, record } = write
   const permission = file.permission
@@ -294,7 +224,7 @@ export function resetPermissionPolicy(
   agentDir: string,
   condition: WriteCondition,
 ): PermissionPolicyReset {
-  const conflict = conflictOf(policyPath, condition)
+  const conflict = policyConflictOf(policyPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
   const backup = condition.kind === 'absent' ? undefined : copyAside(realpathOrSelf(policyPath))
   const { record, problem } = recordOf(bytesOf(recordPathOf(policyPath)))
