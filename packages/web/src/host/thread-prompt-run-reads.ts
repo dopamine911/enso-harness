@@ -1,5 +1,5 @@
 import type { EnsoGitFileChange, EnsoThreadPromptRuns } from '@enso/core'
-import type { ChangedFilePaths, ChangedFileTexts } from '@enso/core/git'
+import { GitReadError, type ChangedFilePaths, type ChangedFileTexts } from '@enso/core/git'
 import { readSnapshotChanges, readSnapshotFileTexts, readSnapshotTrees } from '@enso/core/snapshot-store'
 import type { StoredThreads } from './stored-threads.ts'
 import { openLog, type ThreadLog } from './thread-log.ts'
@@ -100,8 +100,8 @@ export function createThreadPromptRunReads(host: ThreadPromptRunReadsHost): Thre
 
   /**
    * Two recorded snapshots compared. git failing to compare them — a commit the store no longer
-   * holds — is a refusal with git's words; only the git read is caught, so a log or directory read
-   * that fails still throws.
+   * holds — is a refusal with git's words; only a {@link GitReadError} is caught, so any other
+   * fault of the read, or a log or directory read that fails, still throws.
    */
   async function readPromptRunChanges(
     threadId: string,
@@ -113,7 +113,8 @@ export function createThreadPromptRunReads(host: ThreadPromptRunReadsHost): Thre
     try {
       return { kind: 'read', read: await readSnapshotChanges({ directory: store.read, from, to, environment }) }
     } catch (error) {
-      return { kind: 'refused', reason: `git could not compare the snapshots: ${String(error)}` }
+      if (!(error instanceof GitReadError)) throw error
+      return { kind: 'refused', reason: `git could not compare the snapshots: ${error.message}` }
     }
   }
 

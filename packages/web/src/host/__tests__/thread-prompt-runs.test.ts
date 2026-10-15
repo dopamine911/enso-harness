@@ -298,6 +298,19 @@ test('a file is read whole at two recorded snapshots, the old side at `oldPath`;
   ).toEqual({ kind: 'read', read: { oldText: { kind: 'none' }, newText: { kind: 'none' } } })
 })
 
+test('⚠ a file at a recorded snapshot the store has lost is `unavailable` with git’s words, never a throw', async () => {
+  const { reads, moved } = await promptRunsOnAStore()
+  const read = await reads.readPromptRunFileTexts(
+    't',
+    { from: moved, to: LOST_SNAPSHOT },
+    { path: 'b.txt', oldPath: null },
+  )
+  expect(read).toMatchObject({
+    kind: 'read',
+    read: { oldText: { kind: 'text', text: 'two\n' }, newText: { kind: 'unavailable' } },
+  })
+})
+
 test('a read that fails outside git — the sessions cannot be listed — throws, a fault and not a refusal', async () => {
   const reads = createThreadPromptRunReads({
     environment: {},

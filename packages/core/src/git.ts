@@ -277,6 +277,16 @@ export function gitChildEnvironment(): NodeJS.ProcessEnv {
 
 // ── Reading a repository ───────────────────────────────────────────────────────────────────────
 
+/**
+ * git answering a read with a failure — its words, or that it never ran or answered in time — as
+ * the read throws it: a caller may refuse this, and let any other fault of the read throw on.
+ *
+ * @group Git
+ */
+export class GitReadError extends Error {
+  override readonly name = 'GitReadError'
+}
+
 /** git's first line on stderr, for an `unavailable` reason; a git that never ran says so. */
 function reasonOf(result: GitResult): string {
   const line = result.stderr.trim().split('\n')[0]?.trim()
@@ -644,7 +654,7 @@ async function diffedFiles(
   const whole = await runGit([...listing, '--patch', ...range], root)
   // Too much output to hold, or no answer in time: the files and their counts, without patches.
   const read = whole.code === 0 ? whole : await runGit([...listing, ...range], root)
-  if (read.code !== 0) throw new Error(reasonOf(read))
+  if (read.code !== 0) throw new GitReadError(reasonOf(read))
   const { listed, counts, parts } = parseDiff(read.stdout)
   // A split that does not account for the list sends no patch rather than risk pairing a file
   // with another's.
