@@ -452,7 +452,8 @@ export const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
   {
     helper: 'ensoProjectsPath',
     path: 'ENSO_HOME/projects.json',
-    writer: 'The web server, when a page registers or removes a project (#395); written whole and renamed over.',
+    writer:
+      'The web server, when a page registers, renames (#939) or removes a project (#395); written whole and renamed over. A renamed launch folder is kept as an entry for its path.',
     lifetime: 'Per-user until a project is removed; entries outside the configured roots are kept but not served.',
     check: { file: 'packages/web/src/server/projects.ts', contains: 'renameSync(staging, statePath)' },
   },

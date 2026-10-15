@@ -5,6 +5,7 @@ import {
   EnsoProjectConfigReview,
   EnsoProjectSettings,
   type EnsoProjectSettingsUpdate,
+  type EnsoProjectTitleUpdate,
   EnsoProjectTrust,
   type EnsoProjectTrustUpdate,
   type EnsoStoredThread,
@@ -202,15 +203,19 @@ export async function removeProject(
 }
 
 /**
- * One of a project's own resources — its `settings` (#754), its `trust` (#873) or its
- * `config-approval` (#753) — read, or with `update` written by a PUT, and the answer checked against `schema`.
+ * One of a project's own resources — its `settings` (#754), its `trust` (#873), its
+ * `config-approval` (#753) or its `title` (#939) — read, or with `update` written by a PUT, and the
+ * answer checked against `schema`. The title is write-only (no GET route), so it always carries its
+ * `update`.
  */
 async function projectResource<Schema extends TSchema>(
-  request: {
-    readonly projectId: string
-    readonly resource: 'settings' | 'trust' | 'config-approval'
-    readonly update?: unknown
-  },
+  request:
+    | {
+        readonly projectId: string
+        readonly resource: 'settings' | 'trust' | 'config-approval'
+        readonly update?: unknown
+      }
+    | { readonly projectId: string; readonly resource: 'title'; readonly update: unknown },
   schema: Schema,
   fetchImpl: FetchLike,
 ): Promise<ProjectRequestOutcome<Static<Schema>>> {
@@ -241,6 +246,19 @@ export function saveProjectSettings(
   fetchImpl: FetchLike = fetch,
 ): Promise<ProjectRequestOutcome<EnsoProjectSettings>> {
   return projectResource({ projectId, resource: 'settings', update }, EnsoProjectSettings, fetchImpl)
+}
+
+/**
+ * `PUT /api/projects/:id/title` (#939): the name the project is shown by — the folder keeps its own;
+ * the project as it is now listed.
+ */
+export function renameProject(
+  projectId: string,
+  title: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectRequestOutcome<EnsoProject>> {
+  const update: EnsoProjectTitleUpdate = { title }
+  return projectResource({ projectId, resource: 'title', update }, EnsoProject, fetchImpl)
 }
 
 /**
