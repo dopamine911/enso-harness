@@ -8,6 +8,7 @@ import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import type { ProjectRegistry } from './projects.ts'
 import { answerJson, answerOrFail, readCappedBody, refuseWith } from './request-plumbing.ts'
+import { followRunStates } from './run-states-route.ts'
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 
 /**
@@ -205,6 +206,11 @@ export function createLiteralRoutes(state: LiteralRoutesState): LiteralRoutes {
     }
     if (request.method === 'GET' && url === '/api/stored-threads') {
       answerOrFail(respondWithStoredThreads(response), response)
+      return true
+    }
+    if (request.method === 'GET' && url === '/api/run-states') {
+      // No log line (#144's rule for a reader's presence): a page holds this open while it shows a run it has not opened.
+      followRunStates(threads, response, sseKeepaliveMs)
       return true
     }
     if (request.method === 'GET' && url === '/api/trees') {

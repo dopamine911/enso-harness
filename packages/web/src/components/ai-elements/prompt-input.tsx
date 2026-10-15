@@ -24,6 +24,8 @@
  *   `nanoid()` → `crypto.randomUUID()`; `InputGroup*` shells → plain `div`s and this repo's
  *   `Textarea`; `@repo/shadcn-ui/...` → `@/`; removed `"use client"` (Vite SPA)
  * - `Promise.withResolvers` in `convertBlobUrlToDataUrl` (project rule)
+ * - `initialFiles`: the attachments the form opens holding — what the page's Reload kept (#919),
+ *   as `data:` URLs; upstream always opened empty
  * - TAKEN BACK for the `/` command palette (#338): `PromptInputActionMenu`,
  *   `PromptInputActionMenuTrigger`, `PromptInputActionMenuContent`, `PromptInputActionMenuItem`
  *   (the `/` button and its dropdown, on shadcn `dropdown-menu`) and `PromptInputCommand`,
@@ -209,6 +211,8 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" 
 	maxFileSize?: number;
 	onError?: (err: PromptInputError) => void;
 	onSubmit: (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+	/** What the form opens holding (#919): attachments a reload kept, as `data:` URLs. Read once. */
+	initialFiles?: readonly PromptAttachment[];
 };
 
 export const PromptInput = ({
@@ -219,12 +223,13 @@ export const PromptInput = ({
 	maxFileSize,
 	onError,
 	onSubmit,
+	initialFiles,
 	children,
 	...props
 }: PromptInputProps): React.ReactNode => {
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const formRef = useRef<HTMLFormElement | null>(null);
-	const [files, setFiles] = useState<PromptAttachment[]>([]);
+	const [files, setFiles] = useState<PromptAttachment[]>(() => [...(initialFiles ?? [])]);
 
 	// Keep a ref to files for cleanup on unmount (avoids stale closure)
 	const filesRef = useRef(files);

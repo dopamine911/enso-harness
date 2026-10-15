@@ -1,12 +1,13 @@
 import { type EnsoForkReceipt, ensoLogger } from '@enso/core'
 import type { ConnectionStatus, UIMessage } from '@tanstack/ai-client'
 import { type ChatUIHost, createChatHook } from '@tanstack/ai-react/ui'
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef } from 'react'
 import { ChatLayout } from './chat-layout.tsx'
 import { ChatPromptInput } from './composer.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
 import { createFixtureChat } from './fixture-conversation.ts'
 import { ForkContext, forkFromPage, offerPaneFork, RestoreContext, restoreFromPage } from './fork-thread.ts'
+import { cn } from './lib/utils.ts'
 import { ChatMessageRow } from './message-row.tsx'
 import { isFixtureMode } from './page-mode.ts'
 import {
@@ -15,12 +16,77 @@ import {
   DebugOpenContext,
   type LaunchActions,
   LaunchActionsContext,
+  type PaneSlot,
+  PaneSlotContext,
   type ThreadView,
   type PaneView,
   PaneViewContext,
 } from './pane-context.ts'
 import { ThreadStoresContext, useStore } from './store.ts'
+import { PaneHeader } from './thread-panes.tsx'
 import { getThreadStores, type ThreadStores, threadTitleFromMessage, updateThreadSummary } from './thread-stores.ts'
+
+/**
+ * Where the page places a pane of several (#938): its index left to right, how many are open,
+ * whether they are side by side (else tabs, one on screen), and how it is focused and closed.
+ */
+export interface PanePlace {
+  readonly index: number
+  readonly count: number
+  readonly sideBySide: boolean
+  /** Focus this pane, and its prompt when `prompt`. */
+  readonly onFocus: (prompt: boolean) => void
+  readonly onClose: () => void
+}
+
+/** A pane's box and slot: off screen, the only pane (or the tab on screen), or one of a row. */
+interface PaneFrame {
+  readonly slot: PaneSlot
+  readonly visible: boolean
+  readonly className: string
+  readonly style: React.CSSProperties | undefined
+}
+
+/** Off screen: laid out, unpainted, out of reach (#370, #472). */
+const OFF_SCREEN = 'invisible absolute inset-0 flex min-h-0 min-w-0 flex-col [content-visibility:hidden]'
+
+/** The pane on screen alone, or as the tab shown: it fills the box. */
+const SHOWN_ALONE = 'absolute inset-0 flex min-h-0 min-w-0 flex-col'
+
+const NO_SLOT: PaneSlot = { peek: false, number: undefined, narrow: false, focus: (): void => undefined }
+
+/**
+ * Where a pane is drawn (#938): side by side, a flex item in its order, the focused one under the
+ * primary's top border; the focused pane alone (or as the tab on screen) filling the box; any other
+ * off screen.
+ */
+function paneFrame(
+  active: boolean,
+  position: Pick<PanePlace, 'index' | 'count' | 'sideBySide'> | undefined,
+  focus: (prompt: boolean) => void,
+): PaneFrame {
+  if (position === undefined) {
+    return { slot: NO_SLOT, visible: active, className: active ? SHOWN_ALONE : OFF_SCREEN, style: undefined }
+  }
+  const { index, count, sideBySide } = position
+  const slot: PaneSlot = {
+    peek: sideBySide && !active,
+    number: count > 1 ? index + 1 : undefined,
+    narrow: sideBySide,
+    focus,
+  }
+  if (!sideBySide) return { slot, visible: active, className: active ? SHOWN_ALONE : OFF_SCREEN, style: undefined }
+  return {
+    slot,
+    visible: true,
+    className: cn(
+      'relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col border-t-2',
+      active ? 'border-t-primary' : 'border-t-transparent bg-background',
+      index > 0 && 'border-l',
+    ),
+    style: { order: index },
+  }
+}
 
 /**
  * One thread's pane and its chat factory (#90): the widget map every thread renders through, bound
@@ -172,53 +238,20 @@ function useSubscriptionFailureRecord(
   }, [threadId, connectionStatus, error])
 }
 
-/**
- * One thread's pane: its chat factory, its stores in context, its summary kept current for
- * the rail.
- *
- * Stays mounted while another thread is on screen — see `createThreadChatHook` for why hiding,
- * not unmounting, is load-bearing. ⚠ And never `hidden` (#370): a `display: none` pane comes back
- * resized, and the stick-to-bottom scroller re-pins a reader who had scrolled up — the tabs' trap
- * (#362), one level up. Every pane fills the same box (`absolute inset-0`), so a switch moves
- * nothing; one off screen is `content-visibility: hidden`, which skips its style, layout and paint
- * like `display: none` but keeps its layout and scroll state, and costs a switch no more than
- * `hidden` does (#472). `invisible` stays as the fallback where `content-visibility` is unsupported
- * (otherwise the later panes would paint over the shown one); `inert` keeps an off-screen pane out
- * of the tab order and the accessibility tree.
- *
- * ⓘ Mounted alone by `__tests__/chat-screen.test.tsx`, two of them, to pin that an off-screen pane
- * renders no debug column.
- */
-export function ThreadPane({
-  threadId,
-  active,
-  debugOpen,
-  view = 'chat',
-  onView = KEEP_VIEW,
-  onForked,
-  launchActions,
-}: {
-  threadId: string
-  active: boolean
-  /** The page's `?debug` switch; the column itself opens only in the active pane. */
-  debugOpen: boolean
-  /** The page's view (#361); shown only in the active pane. Mounted alone (a test), the chat. */
-  view?: ThreadView
-  /** Changes the page's view. Mounted alone there is no page, so the view stays as it is. */
-  onView?: (view: ThreadView) => void
-  /** The page opens a fork this pane made (#433). Mounted alone there is no page, and no fork is offered. */
-  onForked?: (receipt: EnsoForkReceipt) => void
-  /** What the launch panel does on the page (#877). Mounted alone, it offers no thread to pick up. */
-  launchActions?: LaunchActions
-}): React.ReactNode {
-  const stores = getThreadStores(threadId)
-  const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
-  const chat = useAppChat()
+/** The fork and the restore a pane offers (#433, #551): on a page, not on a pane mounted alone. */
+function usePaneForks(
+  stores: ThreadStores,
+  messages: readonly UIMessage[],
+  onForked: ((receipt: EnsoForkReceipt) => void) | undefined,
+): {
+  forkAt: ((messageId: string | undefined) => void) | undefined
+  restoreAt: ((messageId: string) => void) | undefined
+} {
   // A fork reads the transcript when it is asked for, not per chunk: the latest committed list.
-  const latestMessages = useRef(chat.messages)
+  const latestMessages = useRef(messages)
   useEffect(() => {
-    latestMessages.current = chat.messages
-  }, [chat.messages])
+    latestMessages.current = messages
+  }, [messages])
   const forkAt = useMemo(
     () =>
       onForked === undefined
@@ -242,31 +275,156 @@ export function ThreadPane({
           },
     [stores, onForked],
   )
+  return { forkAt, restoreAt }
+}
+
+/**
+ * The pane's frame (#938), kept as one object while its place holds: what its context says to the
+ * layout must not change identity per streamed chunk. The focus it offers reads the page's latest.
+ */
+function usePaneFrame(active: boolean, place: PanePlace | undefined): PaneFrame {
+  const latest = useRef(place)
+  useEffect(() => {
+    latest.current = place
+  }, [place])
+  const focus = useCallback((prompt: boolean): void => latest.current?.onFocus(prompt), [])
+  const index = place?.index
+  const count = place?.count
+  const sideBySide = place?.sideBySide
+  return useMemo(
+    () =>
+      paneFrame(
+        active,
+        index === undefined || count === undefined ? undefined : { index, count, sideBySide: sideBySide === true },
+        focus,
+      ),
+    [active, index, count, sideBySide, focus],
+  )
+}
+
+/**
+ * Beside the focused pane, a click anywhere in it focuses it (#938), as the prototype's pane does:
+ * its content is inert, so the click lands on the pane, and nothing in it acts until it is focused.
+ * Its own buttons — the title, the flag, the close, the composer's stand-in — do what they say. The
+ * pointer's way in; the keyboard's are those buttons and Alt+number.
+ */
+function useClickToFocus(slot: PaneSlot): React.RefObject<HTMLDivElement | null> {
+  const box = useRef<HTMLDivElement | null>(null)
+  const { peek, focus } = slot
+  useEffect(() => {
+    const element = box.current
+    if (!peek || element === null) return undefined
+    const onClick = (event: MouseEvent): void => {
+      if (event.target instanceof Element && event.target.closest('button') !== null) return
+      focus(false)
+    }
+    element.addEventListener('click', onClick)
+    return () => element.removeEventListener('click', onClick)
+  }, [peek, focus])
+  return box
+}
+
+/**
+ * One thread's pane: its chat factory, its stores in context, its summary kept current for
+ * the rail.
+ *
+ * Stays mounted while another thread is on screen — see `createThreadChatHook` for why hiding,
+ * not unmounting, is load-bearing. ⚠ And never `hidden` (#370): a `display: none` pane comes back
+ * resized, and the stick-to-bottom scroller re-pins a reader who had scrolled up — the tabs' trap
+ * (#362), one level up. Every pane fills the same box (`absolute inset-0`), so a switch moves
+ * nothing; one off screen is `content-visibility: hidden`, which skips its style, layout and paint
+ * like `display: none` but keeps its layout and scroll state, and costs a switch no more than
+ * `hidden` does (#472). `invisible` stays as the fallback where `content-visibility` is unsupported
+ * (otherwise the later panes would paint over the shown one); `inert` keeps an off-screen pane out
+ * of the tab order and the accessibility tree.
+ *
+ * Side by side (#938), every pane of the page's layout is a flex item of the box, in its order —
+ * the same element, so streaming, scroll and draft carry over. The focused one draws the page's
+ * header at its top and holds the composer; one beside it draws its own header, and a click
+ * anywhere in it focuses it.
+ *
+ * ⓘ Mounted alone by `__tests__/chat-screen.test.tsx`, two of them, to pin that an off-screen pane
+ * renders no debug column.
+ */
+export function ThreadPane({
+  threadId,
+  active,
+  place,
+  header,
+  debugOpen,
+  view = 'chat',
+  onView = KEEP_VIEW,
+  onForked,
+  launchActions,
+}: {
+  threadId: string
+  /** The focused pane on screen: the page's composer is its (#707). */
+  active: boolean
+  /** Where the page's layout has it (#938); undefined off screen, and mounted alone. */
+  place?: PanePlace | undefined
+  /** The page's header, drawn at the top of the focused pane (#938). */
+  header?: React.ReactNode
+  /** The page's `?debug` switch; the column itself opens only in the active pane. */
+  debugOpen: boolean
+  /** This pane's view (#361, #938); shown while it is on screen. Mounted alone (a test), the chat. */
+  view?: ThreadView
+  /** Changes a pane's view — this one's, `threadId` (#938). Mounted alone there is no page, so the view stays as it is. */
+  onView?: (view: ThreadView, threadId: string) => void
+  /** The page opens a fork this pane made (#433). Mounted alone there is no page, and no fork is offered. */
+  onForked?: (receipt: EnsoForkReceipt) => void
+  /** What the launch panel does on the page (#877). Mounted alone, it offers no thread to pick up. */
+  launchActions?: LaunchActions
+}): React.ReactNode {
+  const stores = getThreadStores(threadId)
+  const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
+  const chat = useAppChat()
+  const { forkAt, restoreAt } = usePaneForks(stores, chat.messages, onForked)
   useThreadSummary(stores, chat.messages, chat.sessionGenerating)
   useSubscriptionFailureRecord(threadId, chat.connectionStatus, chat.error)
-  const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
+  const frame = usePaneFrame(active, place)
+  const { visible, slot } = frame
+  const open = useCallback((chosen: ThreadView): void => onView(chosen, threadId), [onView, threadId])
+  const paneView = useMemo<PaneView>(() => ({ shown: visible ? view : undefined, open }), [visible, view, open])
+  const box = useClickToFocus(slot)
   return (
-    <div
-      inert={!active}
-      className={
-        active
-          ? 'absolute inset-0 flex min-h-0 min-w-0 flex-col'
-          : 'invisible absolute inset-0 flex min-h-0 min-w-0 flex-col [content-visibility:hidden]'
-      }
-    >
+    <div ref={box} inert={!visible} data-pane-thread={threadId} className={frame.className} style={frame.style}>
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
           <PaneViewContext.Provider value={paneView}>
-            <ForkContext.Provider value={forkAt}>
-              <RestoreContext.Provider value={restoreAt}>
-                <LaunchActionsContext.Provider value={launchActions}>
-                  <chat.AppChat />
-                </LaunchActionsContext.Provider>
-              </RestoreContext.Provider>
-            </ForkContext.Provider>
+            <PaneSlotContext.Provider value={slot}>
+              <PaneTop threadId={threadId} active={active} header={header} onClose={place?.onClose} />
+              <ForkContext.Provider value={forkAt}>
+                <RestoreContext.Provider value={restoreAt}>
+                  <LaunchActionsContext.Provider value={launchActions}>
+                    <chat.AppChat />
+                  </LaunchActionsContext.Provider>
+                </RestoreContext.Provider>
+              </ForkContext.Provider>
+            </PaneSlotContext.Provider>
           </PaneViewContext.Provider>
         </DebugOpenContext.Provider>
       </ThreadStoresContext.Provider>
     </div>
   )
+}
+
+/**
+ * A pane's top (#938): the page's header in the focused pane, its own header in a pane beside it —
+ * its title, its place, its flag and its close — and nothing off screen.
+ */
+function PaneTop({
+  threadId,
+  active,
+  header,
+  onClose,
+}: {
+  threadId: string
+  active: boolean
+  header: React.ReactNode
+  onClose: (() => void) | undefined
+}): React.ReactNode {
+  const { peek, number, focus } = useContext(PaneSlotContext)
+  if (active) return header
+  if (!peek || number === undefined || onClose === undefined) return null
+  return <PaneHeader threadId={threadId} number={number} onFocus={(): void => focus(false)} onClose={onClose} />
 }

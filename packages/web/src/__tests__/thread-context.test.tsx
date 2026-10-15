@@ -193,3 +193,30 @@ test('the section a library prompt wrote carries its name: a system prompt its p
   expect(elementLabel(preamble, null)).toBe('preamble')
   expect(elementLabel(preamble, 'unreadable')).toBe('preamble')
 })
+
+// #913: the request in flight is a bar of its own — pi's `next` as its input, its output so far — said as estimates.
+test('a request in flight draws an in-progress bar of estimates; with none run yet, it is the only bar', () => {
+  const AT = 1_700_000_000_000
+  const live = {
+    runSince: AT - 60_000,
+    request: { startedAt: AT - 432_000, thinking: 18_000, text: 0, tool: 0 },
+    now: AT,
+  }
+  const drawn = (context: EnsoThreadContext): string =>
+    renderToStaticMarkup(
+      <ThreadStoresContext.Provider value={mintThread()}>
+        <ThreadContextView outcome={{ kind: 'read', payload: context }} live={live} />
+      </ThreadStoresContext.Provider>,
+    )
+  const markup = drawn(STORED)
+  expect(markup).toContain('data-in-flight=""')
+  expect(markup).toContain('request 3 in progress · 7m 12s')
+  expect(markup).toContain('output ≈4.5K so far (~18K chars)')
+  expect(markup).toContain('the provider')
+  const first = drawn({ ...STORED, requests: [] }).replaceAll('’', "'")
+  expect(first).toContain('request 1 in progress')
+  expect(first).toContain('the first response is still running')
+  expect(first).not.toContain('a bar appears for each model request')
+  // At rest, no bar but the counted ones.
+  expect(text(STORED)).not.toContain('in progress')
+})

@@ -10,6 +10,7 @@ import {
   type EnsoIncidentResolution,
   type EnsoHostCommandRun,
   ensoLogger,
+  type EnsoMessageStart,
   type EnsoObservation,
   type EnsoPromptBody,
   type EnsoPromptImage,
@@ -26,8 +27,10 @@ import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
+import { PAGE_HEALTH_TIMING, reportPageFault } from './page-health.ts'
 import { pageLeaving } from './page-leaving.ts'
-import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
+import { createStore, type Store } from './store.ts'
+import { type AguiIdentifiers, extensionErrorMessage, observationToAguiEvents } from './to-agui.ts'
 
 /**
  * The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over
@@ -66,6 +69,9 @@ import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
  */
 
 const followLog = ensoLogger('browser', 'follow')
+
+/** The `runId` prefix of a run another client started, synthesised from its generation. */
+const EXTERNAL_RUN = 'external-'
 
 /**
  * The wire validator, compiled once at module load — the `@enso/core` convention
@@ -119,18 +125,28 @@ export interface FollowConnectionOptions {
 interface OpenRun {
   readonly runId: string
   /**
-   * The assistant message the view is streaming into. Rotates when pi claims a queued prompt (#75),
-   * and when pi starts a new attempt after a refused one (#382).
+   * The assistant message the view is streaming into. Rotates on every assistant message after the
+   * run's first (#921); when pi delivers a prompt — a queued one it claims (#75), one steered in
+   * right after the opening prompt, or the opening prompt of a run another client started (#917),
+   * but not the opening prompt of a run this page sent (`awaitingOwnOpeningPrompt`); and when pi
+   * starts a new attempt after a refused one (#382).
    */
   messageId: string
   /** The receipt's `messageId` — how a `prompt-rejected` names this run. Undefined for a run another client started. */
   promptMessageId: string | undefined
   generation: number | undefined
   /**
-   * Assistant messages pi has begun in this run. A USER `message-start` after the first of
-   * them is a queued prompt being CLAIMED (#75), not the prompt that opened the run — the
-   * view then ends the current assistant bubble and starts a new one, so the reply lands
-   * after its question rather than inside the previous answer.
+   * A run THIS page sent, whose opening prompt pi has not yet delivered: TanStack already drew
+   * that one, so its `message-start` adds nothing. Every other USER `message-start` is a prompt
+   * pi delivers — queued behind the run, steered in right after its opening prompt, or the
+   * opening prompt of a run another client started — and is drawn (#917). Cleared also by the
+   * first assistant message: past it, the opening prompt is behind the run.
+   */
+  awaitingOwnOpeningPrompt: boolean
+  /**
+   * Assistant messages pi has begun in this run since the last prompt it delivered. Every one
+   * after the first is a new model turn and gets its own bubble (#921), as the stored history
+   * draws it.
    */
   assistantMessages: number
   /**
@@ -139,6 +155,12 @@ interface OpenRun {
    * said about it (`refused: …`, `retrying in …`) read between the two, not after the reply.
    */
   refused: boolean
+  /** When this page opened it (`Date.now()`): the run's elapsed time on the status bar (#914). */
+  readonly startedAt: number
+  /** pi's settle said a Stop ended it (#766) — set as the settle closes it. */
+  aborted: boolean
+  /** What failed in it while it ran (#914): an extension's error. The run's ending carries it. */
+  error: string | undefined
 }
 /** The parts of the last user message, whichever shape TanStack hands over — `UIMessage.parts` or `ModelMessage.content`. */
 function latestUserParts(messages: Array<UIMessage> | Array<ModelMessage>): readonly MessagePart[] {
@@ -159,6 +181,11 @@ function textOf(parts: readonly MessagePart[]): string {
 
 /** The `data:<mime>;base64,<data>` URL the composer submits, split. Anything else is not an inline image. */
 const DATA_URL = /^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/
+
+/** How many times per `stallMs` the hand-over watchdog looks: a stall is said within a quarter window of its threshold. */
+const STALL_SAMPLES_PER_WINDOW = 4
+/** The watchdog's shortest tick, for the tests' shortened `stallMs`: never a busy loop. */
+const MIN_WATCHDOG_TICK_MS = 10
 
 /**
  * The user's image parts as the wire takes them (#68): inline bytes only. `EnsoPromptImage`
@@ -204,7 +231,11 @@ function dataUrlOf(value: string): [string, string] | undefined {
  * the server kept the stream open (all of a run, keepalives every 5 s), so a subscription that had
  * to stop could not, whatever the `fetch` underneath did with the same signal.
  */
-async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<unknown> {
+export async function* readSseFrames(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  heard: () => void,
+): AsyncGenerator<unknown> {
   const reader = body.getReader()
   const cancel = (): void => {
     // A body the fetch already failed rejects the cancel too: the read it ends is what matters.
@@ -217,6 +248,8 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
     while (!signal.aborted) {
       const { value, done } = await reader.read()
       if (done) return
+      // Any byte is the server heard from (#914) — a keepalive comment as much as a frame.
+      heard()
       buffered += decoder.decode(value, { stream: true })
       const lines = buffered.split('\n')
       buffered = lines.pop() ?? ''
@@ -251,6 +284,87 @@ export type DialogAnswerOutcome = 'answered' | 'gone' | 'refused' | 'unreachable
  * `unreachable` the request never got an answer (network). The run is still in flight.
  */
 export type AbortOutcome = 'aborted' | 'idle' | 'gone' | 'unreachable'
+
+/**
+ * Whether this page is receiving the thread's updates (#914), from the follow's BYTES — the
+ * server's `: keepalive` every 5 s included — not from the events they carry, which a quiet run
+ * may go minutes without.
+ *
+ *   live    the follow is open and the server is heard from;
+ *   silent  the follow is open and not one byte has arrived for `silentMs` (the 5 s keepalive
+ *           missed twice): a dead connection the browser has not noticed, or a server that hung;
+ *   ended   the follow closed, failed, never opened, or was abandoned after going silent.
+ *
+ * `since` is when the page last heard from the server. A silent follow that is heard from again is
+ * live again, and missed nothing: the bytes were held, not lost. An ended one stays ended — the
+ * follow has no cursor to resume from (`server/follow.ts`, `resume/cold-then-live`), so what the
+ * thread did meanwhile reaches this page only through a reload (`live-view-check.ts`).
+ */
+export type LiveView = { readonly state: 'live' } | { readonly state: 'silent' | 'ended'; readonly since: number }
+
+/** A tool call the model is writing now (#914): pi's `toolcall_start` until its `toolcall_end`. */
+export interface ComposingCall {
+  readonly toolCallId: string
+  readonly toolName: string
+  /**
+   * The arguments as they have streamed so far (#913): cut mid-JSON. The same text the call's
+   * transcript row shows once it lands whole — a `write` being composed is drawn from it, labelled
+   * as not applied.
+   */
+  readonly args: string
+}
+
+/**
+ * The model request in flight (#913): from pi's `turn_start` (or the assistant message's start)
+ * until the assistant message ends, when the provider's count replaces every figure here. The
+ * output is counted in CHARACTERS as it streams — an estimate, said as one wherever it is shown.
+ */
+export interface RequestPulse {
+  /** When this page saw the request open (`Date.now()`). */
+  readonly startedAt: number
+  /** Characters of thinking streamed so far. */
+  readonly thinking: number
+  /** Characters of reply text streamed so far. */
+  readonly text: number
+  /** Characters of tool-call arguments streamed so far. */
+  readonly tool: number
+}
+
+/** How the last run on this page ended (#914). */
+export interface RunEnding {
+  /** A Stop ended it: pi's settle said `aborted` (#766). */
+  readonly aborted: boolean
+  /** It ended on an error — a refused prompt, an extension's failure — with the error's words. */
+  readonly error: string | undefined
+}
+
+/**
+ * What the follow says of the run (#914, #913), read on each render by the status bar and by the
+ * Context, Stats and Diff views (`ThreadViewOverlay`).
+ */
+export interface RunPulse {
+  /** When the oldest run open on this page opened (`Date.now()`); undefined while none is. */
+  readonly runStartedAt: number | undefined
+  /** The tool call the model is writing now; undefined while it writes none. */
+  readonly composing: ComposingCall | undefined
+  /** The model request in flight (#913); undefined between requests and at rest. */
+  readonly request: RequestPulse | undefined
+  /** How the last run ended; undefined before one has, and once the next opens. */
+  readonly ended: RunEnding | undefined
+}
+
+/**
+ * Whether a frame is the run's output (#914) — what "possibly stuck" waits on. Not a snapshot or a
+ * status (the run's lifecycle, not its work), and not an extension's fire-and-forget UI request: the
+ * harness's status line and widgets are re-sent every minute or so whatever the model does — measured
+ * live, one a minute through a model request that never answered, which kept the page from ever
+ * calling it stuck.
+ */
+function carriesOutput(frame: EnsoFollowFrame): boolean {
+  if (frame.type !== 'observation') return false
+  const { observation } = frame
+  return observation.kind !== 'extension-ui-request' || observation.blocking
+}
 
 /** What `abort()` returns: the outcome, and the prompts pi had waiting — handed back to the composer (#75). Empty unless `aborted`. */
 export interface AbortResult {
@@ -347,6 +461,30 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * the bubble before a rotation the same batch made.
    */
   readonly streamMessageId: () => string | undefined
+  /**
+   * When this page last applied the follow (#919), `Date.now()`: the client took back the last
+   * chunk handed to it, or a frame that passed the wire check and queued none was observed with
+   * nothing waiting. Undefined while no follow is open, and from the moment the server closes one —
+   * nothing is being applied, and a dropped follow is said otherwise.
+   * What the page's server check compares the server's listing against (`page-behind-check.ts`).
+   */
+  readonly appliedAt: () => number | undefined
+  /** Whether this page is receiving the thread's updates (#914) — see {@link LiveView}. */
+  readonly liveView: Store<LiveView>
+  /**
+   * When the follow last carried the run's output (#914), `Date.now()`: an observation, never a
+   * keepalive, a snapshot or a status, nor an extension's fire-and-forget UI request (`carriesOutput`).
+   * Undefined before the first. What "no output for 3 min" is measured from.
+   */
+  readonly outputAt: () => number | undefined
+  /** What the follow says of the run now (#914) — see {@link RunPulse}. */
+  readonly pulse: () => RunPulse
+  /**
+   * Give up on a SILENT follow (#914): its socket closes and it ends as one the server closed
+   * would — the run's error, `follow-ended`, `disconnected`. The page's live-view check calls it
+   * once it knows a reload is the way back. Nothing while the follow is live or already ended.
+   */
+  readonly abandon: () => void
 }
 
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
@@ -400,8 +538,22 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /** Chunks waiting for the subscription loop to take them — pushed by frames and by `send`. */
   const queue: StreamChunk[] = []
+  /** `appliedAt`'s answer: set while a follow is open, undefined otherwise. */
+  let appliedAt: number | undefined
   let wake: (() => void) | undefined
   const runs = new Map<string, OpenRun>()
+  /** `liveView`'s value: live until the follow goes silent or ends (#914). */
+  const liveView = createStore<LiveView>({ state: 'live' })
+  /** `outputAt`'s answer: when the follow last carried a frame. */
+  let outputAt: number | undefined
+  /** The tool call the model is writing now — mutated per delta, copied out by `pulse` (#914). */
+  let composing: { toolCallId: string; toolName: string; args: string } | undefined
+  /** The model request in flight — mutated per delta, copied out by `pulse` (#913). */
+  let request: { startedAt: number; thinking: number; text: number; tool: number } | undefined
+  /** How the last run on this page ended; cleared when the next opens (#914). */
+  let lastEnding: RunEnding | undefined
+  /** Ends the open follow as the server closing it would (`abandon`); undefined while none is open. */
+  let cutFollow: (() => void) | undefined
   /**
    * A frame that fails the wire schema has been reported on this connection.
    * Once, not per frame: the usual cause is a version mismatch — a tab from an earlier bundle
@@ -448,17 +600,28 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     wake = undefined
   }
 
-  function openRun(runId: string, promptMessageId: string | undefined, generation: number | undefined): OpenRun {
+  function openRun(
+    runId: string,
+    promptMessageId: string | undefined,
+    generation: number | undefined,
+    origin: 'this-page' | 'another-client',
+  ): OpenRun {
     const run: OpenRun = {
       runId,
       messageId: crypto.randomUUID(),
       promptMessageId,
       generation,
+      awaitingOwnOpeningPrompt: origin === 'this-page',
       assistantMessages: 0,
       refused: false,
+      startedAt: Date.now(),
+      aborted: false,
+      error: undefined,
     }
     runs.set(runId, run)
     current = run
+    // The status bar says how the last run ended until the next prompt (#914): this is the next.
+    lastEnding = undefined
     push(
       { type: EventType.RUN_STARTED, threadId, runId },
       { type: EventType.TEXT_MESSAGE_START, messageId: run.messageId, role: 'assistant' },
@@ -467,14 +630,96 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
-   * End a run: its closing chunk, once. A run no longer open says nothing — closed already, or
-   * forgotten when the client stopped taking chunks (`consumerStopped`): TanStack reset it, and a
-   * late receipt's chunk would be yielded ahead of the next subscription's snapshot.
+   * The run is over for the client: its closing chunk, once. `known` is false when this page cannot
+   * tell HOW it ended — the follow closed under it — so no ending is recorded, and the bar says the
+   * live view is lost instead. A run no longer open says nothing — closed already, or forgotten when
+   * the client stopped taking chunks (`consumerStopped`): TanStack reset it, and a late receipt's
+   * chunk would be yielded ahead of the next subscription's snapshot.
    */
-  function closeRun(run: OpenRun, chunk: StreamChunk): void {
+  function closeRun(run: OpenRun, chunk: StreamChunk, known = true): void {
     if (!runs.delete(run.runId)) return
     if (current === run) current = undefined
+    if (runs.size === 0) {
+      composing = undefined
+      request = undefined
+    }
+    if (known) {
+      const error = chunk.type === EventType.RUN_ERROR ? chunk.message : run.error
+      lastEnding = { aborted: run.aborted, error }
+    }
     push(chunk)
+  }
+
+  /**
+   * A tool call the model is writing (#914), off pi's own `message_update` events, which cross as
+   * `unmapped` (`host/map-events.ts`): `toolcall_start` names the tool, each `toolcall_delta` adds to
+   * its arguments, `toolcall_end` ends it. The arguments are kept whole (#913): the Diff view draws a
+   * `write` being composed from them — the same text the call's row holds once it lands.
+   */
+  function observeComposing(event: unknown): void {
+    if (typeof event !== 'object' || event === null) return
+    const { type, assistantMessageEvent: update } = event as {
+      type?: unknown
+      assistantMessageEvent?: { type?: unknown; id?: unknown; toolName?: unknown; delta?: unknown }
+    }
+    if (type !== 'message_update' || update === undefined) return
+    if (update.type === 'toolcall_start') {
+      composing = {
+        toolCallId: typeof update.id === 'string' ? update.id : '',
+        toolName: typeof update.toolName === 'string' ? update.toolName : 'a tool call',
+        args: '',
+      }
+      return
+    }
+    if (update.type === 'toolcall_delta' && typeof update.delta === 'string') {
+      observeToolArguments(update.delta)
+      return
+    }
+    if (update.type === 'toolcall_end') composing = undefined
+  }
+
+  /** A piece of a call's arguments: the call's text grows, and so does the request's output (#913). */
+  function observeToolArguments(delta: string): void {
+    if (current !== undefined) request ??= { startedAt: Date.now(), thinking: 0, text: 0, tool: 0 }
+    if (request !== undefined) request.tool += delta.length
+    if (composing !== undefined) composing.args += delta
+  }
+
+  /**
+   * The request in flight (#913): opened by `turn-start` — or, for a page that joined mid-request,
+   * the assistant message's start or its first delta, timed from when this page saw it — grown by
+   * each delta, ended by the assistant message's end, whose usage is the provider's count.
+   */
+  function observeRequest(observation: EnsoObservation): void {
+    if (observation.kind === 'turn-start') {
+      request = { startedAt: Date.now(), thinking: 0, text: 0, tool: 0 }
+      return
+    }
+    if (observation.kind === 'message-end') {
+      if (observation.role === 'assistant') request = undefined
+      return
+    }
+    const opens =
+      (observation.kind === 'message-start' && observation.role === 'assistant') ||
+      observation.kind === 'thinking-delta' ||
+      observation.kind === 'text-delta'
+    if (!opens || current === undefined) return
+    request ??= { startedAt: Date.now(), thinking: 0, text: 0, tool: 0 }
+    if (observation.kind === 'thinking-delta') request.thinking += observation.delta.length
+    else if (observation.kind === 'text-delta') request.text += observation.delta.length
+  }
+
+  function pulse(): RunPulse {
+    let runStartedAt: number | undefined
+    for (const run of runs.values()) {
+      if (runStartedAt === undefined || run.startedAt < runStartedAt) runStartedAt = run.startedAt
+    }
+    return {
+      runStartedAt,
+      composing: composing === undefined ? undefined : { ...composing },
+      request: request === undefined ? undefined : { ...request },
+      ended: lastEnding,
+    }
   }
 
   /** End the run's assistant bubble and open a new one after it: everything that follows lands there. */
@@ -489,30 +734,65 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
-   * A message boundary inside the run. Two of them rotate the assistant bubble:
-   * - a USER message after an assistant message has begun: pi claimed a queued prompt (#75), so
-   *   the reply lands after its question rather than inside the previous answer. The run's own
-   *   prompt arrives before any assistant message and rotates nothing;
+   * The prompt pi has just DELIVERED, as a user bubble between the assistant bubble that ends and
+   * the one that opens (#917). A prompt typed during a run is not in the transcript while pi holds
+   * it — only in the queue above the composer — so this is where it lands, on every page following
+   * the thread, when pi actually sends it. Text only: pi's `message-start` carries the words, not
+   * the images a queued prompt was sent with; a reload draws those from the stored branch.
+   */
+  function deliverPrompt(run: OpenRun, text: string): void {
+    const ended = run.messageId
+    const prompt = crypto.randomUUID()
+    run.messageId = crypto.randomUUID()
+    run.refused = false
+    push(
+      { type: EventType.TEXT_MESSAGE_END, messageId: ended },
+      { type: EventType.TEXT_MESSAGE_START, messageId: prompt, role: 'user' },
+      ...(text.length === 0 ? [] : [{ type: EventType.TEXT_MESSAGE_CONTENT as const, messageId: prompt, delta: text }]),
+      { type: EventType.TEXT_MESSAGE_END, messageId: prompt },
+      { type: EventType.TEXT_MESSAGE_START, messageId: run.messageId, role: 'assistant' },
+    )
+  }
+
+  /**
+   * A message boundary inside the run. Three of them rotate the assistant bubble:
+   * - an ASSISTANT message after another one: a new model turn (#921). Thinking and text are
+   *   keyed by the bubble's id, so in one bubble each turn's thinking appended to the run's first
+   *   thinking part, above every later tool row. One bubble per assistant message is what the
+   *   stored history draws, so the live view and a reload read the same;
+   * - a USER message pi delivers: a queued prompt pi claimed (#75), one it steered in right after
+   *   the run's opening prompt (pi polls its queue as the loop begins; in `"all"` mode it sends
+   *   every waiting prompt back to back), or the opening prompt of a run another page started.
+   *   Its bubble goes in there (#917), and the reply lands after its question rather than inside
+   *   the previous answer. Only the opening prompt of a run THIS page sent adds nothing: TanStack
+   *   already put it there (`awaitingOwnOpeningPrompt`);
    * - an ASSISTANT message after a refused attempt: pi's retry (#382). Without it the refused
    *   attempt and the reply that got through share one bubble, and a line said between them has
    *   nowhere to go but after both.
    */
-  function observeMessageStart(role: string): void {
+  function observeMessageStart(observation: EnsoMessageStart): void {
     if (current === undefined) return
-    if (role === 'assistant') {
-      // Whatever began before the refusal — the attempt's own message, or none when the provider
-      // refused before pi started one — stays in the bubble the refusal's lines follow.
-      if (current.refused) rotateMessage(current)
+    if (observation.role === 'assistant') {
+      // Any assistant message after one already begun is a new model turn, with its own bubble
+      // (#921). After a refusal, so is the retry even when this view saw no message begin before
+      // it (a page that joined mid-attempt): the refused attempt keeps the bubble the refusal's
+      // lines follow. Both at once rotate once.
+      if (current.refused || current.assistantMessages > 0) rotateMessage(current)
       current.assistantMessages += 1
+      current.awaitingOwnOpeningPrompt = false
       return
     }
-    if (role !== 'user' || current.assistantMessages === 0) return
-    rotateMessage(current)
+    if (observation.role !== 'user') return
+    if (current.awaitingOwnOpeningPrompt) {
+      current.awaitingOwnOpeningPrompt = false
+      return
+    }
+    deliverPrompt(current, observation.text ?? '')
     current.assistantMessages = 0
   }
 
   function idsOf(run: OpenRun | undefined): AguiIdentifiers {
-    return { threadId, runId: run?.runId ?? `external-${threadId}`, messageId: run?.messageId ?? threadId }
+    return { threadId, runId: run?.runId ?? `${EXTERNAL_RUN}${threadId}`, messageId: run?.messageId ?? threadId }
   }
 
   /** The server's latest word on the thread, from the last snapshot or status frame. */
@@ -524,16 +804,18 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /**
    * Close every run the server has moved past: `RUN_FINISHED` for each, so TanStack's
-   * loading state resolves.
+   * loading state resolves. `aborted`: pi's settle said a Stop ended them (#766), which their
+   * ending carries (#914).
    *
    * @invariant prompt-run-settle/generation-fence A run closes only once the server has moved past its generation.
    * A run whose generation is still unknown (its receipt has not come back) or newer than the
    * server's is NOT closed: the frames ending an EARLIER run can arrive after this tab has
    * already opened the next one, and closing that one here would end it before it started.
    */
-  function finishRunsThrough(generation: number): void {
+  function finishRunsThrough(generation: number, aborted = false): void {
     for (const run of runs.values()) {
       if (run.generation === undefined || run.generation > generation) continue
+      run.aborted = aborted
       closeRun(run, { type: EventType.RUN_FINISHED, threadId, runId: run.runId })
     }
   }
@@ -558,7 +840,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     for (const run of runs.values()) {
       if (run.generation === generation || run.generation === undefined) return
     }
-    openRun(`external-${generation}`, undefined, generation)
+    openRun(`${EXTERNAL_RUN}${generation}`, undefined, generation, 'another-client')
   }
 
   async function declineUnreadable(id: string): Promise<void> {
@@ -593,7 +875,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /** What an observation does to this adapter's own state before its chunks cross. */
   function observeBeforeCrossing(observation: EnsoObservation): void {
-    if (observation.kind === 'message-start') observeMessageStart(observation.role)
+    if (observation.kind === 'message-start') observeMessageStart(observation)
     if (observation.kind === 'provider-refused' && current !== undefined) current.refused = true
     if (observation.kind === 'extension-ui-request' && observation.blocking && observation.dialog === undefined) {
       if (observation.id.length > 0) void declineUnreadable(observation.id)
@@ -602,6 +884,23 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       options.onToolResultDescriptor?.(observation.toolCallId, observation.descriptor)
     }
     if (observation.kind === 'turn-start') options.onTurnStart?.()
+    observeRun(observation)
+  }
+
+  /**
+   * What the follow says of the run (#914): the request in flight (`observeRequest`, #913), a call
+   * the model is writing — ended once pi runs it, and a new message starts none — and an
+   * extension's failure, which ends the client's run now (`to-agui.ts`); pi's run settles later,
+   * and its ending says it too. Read through `pulse()` by the status bar and the views.
+   */
+  function observeRun(observation: EnsoObservation): void {
+    observeRequest(observation)
+    if (observation.kind === 'unmapped') observeComposing(observation.event)
+    if (observation.kind === 'tool-call' || observation.kind === 'message-start') composing = undefined
+    if (observation.kind !== 'extension-error') return
+    const error = extensionErrorMessage(observation)
+    if (current !== undefined) current.error = error
+    lastEnding = { aborted: false, error }
   }
 
   function observe(frame: EnsoFollowFrame): void {
@@ -618,7 +917,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       // Nothing queued behind a settled run can be refused any more: pi claimed it (it ran
       // inside this run) or a stop cleared it (the receipt said so). Forget the ids.
       queuedPrompts.clear()
-      finishRunsThrough(serverGeneration)
+      finishRunsThrough(serverGeneration, observation.aborted)
       return
     }
     if (observation.kind === 'prompt-rejected') {
@@ -702,15 +1001,44 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       current = undefined
     }
     for (const run of runs.values()) {
-      closeRun(run, {
-        type: EventType.RUN_ERROR,
-        runId: run.runId,
-        message: 'the follow closed before the run settled',
-      })
+      closeRun(
+        run,
+        { type: EventType.RUN_ERROR, runId: run.runId, message: 'the follow closed before the run settled' },
+        false,
+      )
     }
-    if (!follow.aborted) push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
+    if (!follow.aborted) {
+      followLost()
+      push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
+    }
     wake?.()
     wake = undefined
+  }
+
+  /** The follow is gone (#914): the live view ends as of when the server was last heard from. */
+  function followLost(heardAt = Date.now()): void {
+    const view = liveView.get()
+    if (view.state === 'ended') return
+    liveView.set({ state: 'ended', since: view.state === 'silent' ? view.since : heardAt })
+  }
+
+  /**
+   * The watchdog on hearing from the server (#914): no byte for `silentMs` — the 5 s keepalive
+   * missed twice, read every second — and the live view is silent until one arrives. Not a fault by itself: the
+   * page's live-view check decides whether to wait or to ask for a reload (`live-view-check.ts`).
+   */
+  function watchSilence(state: Following): () => void {
+    const { silentMs } = PAGE_HEALTH_TIMING
+    const timer = setInterval(
+      () => {
+        if (state.ended || liveView.get().state !== 'live' || Date.now() - state.heardAt < silentMs) return
+        const seconds = Math.round((Date.now() - state.heardAt) / 1000)
+        log.warn('the follow has been silent for {seconds}s: no event and no keepalive', { seconds })
+        liveView.set({ state: 'silent', since: state.heardAt })
+      },
+      Math.min(Math.max(silentMs / 4, 10), 1000),
+    )
+    return () => clearInterval(timer)
   }
 
   /**
@@ -735,6 +1063,39 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       "this page stopped applying the thread's updates: handling a {chunk} chunk failed. What it shows is as of then, and the thread may have moved on — reload the page to catch up",
       { chunk: name },
     )
+    reportPageFault({
+      trigger: 'stalled',
+      threadId,
+      error: `the chat client stopped taking chunks while handling a ${name} chunk`,
+    })
+  }
+
+  /**
+   * The watchdog on applying (#919): a chunk handed to the client and not taken back for
+   * `stallMs` is a stall, said once per subscription. ⚠ TanStack handles a chunk synchronously
+   * and asks for the next (`consumeSubscription`); a hand-over that lasts seconds is a client that
+   * will not come back — #915's shape when the throw does not even reach its loop. One timer per
+   * subscription, not one per chunk: deltas are handed thousands at a time.
+   */
+  function watchHandOver(state: Following): () => void {
+    const { stallMs } = PAGE_HEALTH_TIMING
+    const tickMs = Math.max(stallMs / STALL_SAMPLES_PER_WINDOW, MIN_WATCHDOG_TICK_MS)
+    const timer = setInterval(() => {
+      if (state.stalled || state.handing === undefined || Date.now() - state.handedAt < stallMs) return
+      state.stalled = true
+      const name = state.handing.type === EventType.CUSTOM ? state.handing.name : state.handing.type
+      const seconds = Math.round((Date.now() - state.handedAt) / 1000)
+      problem(
+        "this page has not applied the thread's updates for {seconds}s: a {chunk} chunk is still being handled. What it shows may be out of date — reload the page to catch up",
+        { seconds, chunk: name },
+      )
+      reportPageFault({
+        trigger: 'stalled',
+        threadId,
+        error: `a ${name} chunk handed to the chat client ${seconds}s ago was never taken back`,
+      })
+    }, tickMs)
+    return () => clearInterval(timer)
   }
 
   /** One subscription's state the pump and the yielding loop share. */
@@ -745,26 +1106,51 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     consumerGone: boolean
     /** The chunk handed over and not yet taken back: the one being handled if the client stops. */
     handing: StreamChunk | undefined
+    /** When `handing` was handed over (`Date.now()`). */
+    handedAt: number
+    /** The watchdog has said this subscription stalled (`watchHandOver`). */
+    stalled: boolean
+    /** When the follow last carried a byte, a keepalive included (`watchSilence`, #914). */
+    heardAt: number
+  }
+
+  /** One frame off the follow: observed if this page can read it, then the applied mark when nothing waits. */
+  function takeFrame(raw: unknown, state: Following): void {
+    // One that fails `admitted` applied nothing: the page is as stale as before it came.
+    if (!admitted(raw)) return
+    if (carriesOutput(raw)) outputAt = Date.now()
+    observe(raw)
+    // A frame that queued nothing for the client is applied once it is observed.
+    if (queue.length === 0 && state.handing === undefined) appliedAt = Date.now()
   }
 
   /**
    * Frames off the follow, observed into the queue, on their own loop so `send` can interleave
    * chunks. Ends when the server closes the follow, the wire fails, or `follow` aborts.
    */
-  async function pumpFrames(frames: AsyncGenerator<unknown>, follow: AbortSignal, state: Following): Promise<void> {
+  async function pumpFrames(
+    frames: AsyncGenerator<unknown>,
+    follow: AbortSignal,
+    state: Following,
+    cut: AbortSignal,
+  ): Promise<void> {
     try {
       for await (const raw of frames) {
         if (follow.aborted) break
-        if (admitted(raw)) observe(raw)
+        takeFrame(raw, state)
       }
-      // The server closed it: `followClosed` says so on the page; this is the record of why.
-      if (!follow.aborted && !leaving()) log.warn('the follow ended: the server closed it')
+      // The server closed it, or this page gave up on it in silence (`abandon`): `followClosed`
+      // says so on the page; this is the record of why.
+      const why = cut.aborted ? 'abandoned after it went silent' : 'the server closed it'
+      if (!follow.aborted && !leaving()) log.warn('the follow ended: {why}', { why })
     } catch (error) {
       // ⚠ #664: a stream the browser cut because the page is leaving is not a failure — every
       // reload logged "the follow failed: TypeError: network error" for each followed thread.
       if (!follow.aborted && !leaving()) problem('the follow failed: {error}', { error: String(error) })
     } finally {
       state.ended = true
+      appliedAt = undefined
+      cutFollow = undefined
       followClosed(follow, state.consumerGone)
     }
   }
@@ -795,12 +1181,41 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (opening.kind === 'refused') {
       // A throwing fetch is the same fact as a refusing one (#274) — unless the CALLER is the
       // one leaving, in which case there is nothing to report and the cancel is theirs to see.
-      if (!abort.aborted) yield* followNeverOpened(opening.detail)
+      if (!abort.aborted) {
+        followLost()
+        yield* followNeverOpened(opening.detail)
+      }
       throw opening.failure
     }
     // The pump fills the queue; this loop hands it over, waiting when nothing is queued.
-    const state: Following = { ended: false, consumerGone: false, handing: undefined }
-    const pump = pumpFrames(readSseFrames(opening.body, follow), follow, state)
+    const state: Following = {
+      ended: false,
+      consumerGone: false,
+      handing: undefined,
+      handedAt: 0,
+      stalled: false,
+      heardAt: Date.now(),
+    }
+    appliedAt = Date.now()
+    if (liveView.get().state !== 'live') liveView.set({ state: 'live' })
+    // `abandon`'s cut ends the read the way the server closing the stream would: not `follow`, which
+    // is this page's own end and says nothing.
+    const cut = new AbortController()
+    cutFollow = (): void => cut.abort()
+    const heard = (): void => {
+      state.heardAt = Date.now()
+      if (liveView.get().state !== 'silent') return
+      log.info('the follow is heard from again')
+      liveView.set({ state: 'live' })
+    }
+    const pump = pumpFrames(
+      readSseFrames(opening.body, AbortSignal.any([follow, cut.signal]), heard),
+      follow,
+      state,
+      cut.signal,
+    )
+    const unwatch = watchHandOver(state)
+    const unwatchSilence = watchSilence(state)
     try {
       while (!abort.aborted) {
         const next = takeQueued()
@@ -812,10 +1227,16 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
           continue
         }
         state.handing = next
+        state.handedAt = Date.now()
         yield next
         state.handing = undefined
+        // Once the pump has ended, nothing yielded applies a follow: the follow is gone.
+        if (!state.ended) appliedAt = Date.now()
       }
     } finally {
+      unwatch()
+      unwatchSilence()
+      appliedAt = undefined
       consumerStopped(state, abort)
       stop.abort()
       await pump
@@ -828,7 +1249,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     signal?: AbortSignal,
     runContext?: RunAgentInputContext,
   ): Promise<void> {
-    const run = openRun(runContext?.runId ?? crypto.randomUUID(), undefined, undefined)
+    const run = openRun(runContext?.runId ?? crypto.randomUUID(), undefined, undefined, 'this-page')
     const parts = latestUserParts(messages)
     const message = textOf(parts)
     const { images, refused } = imagesOf(parts)
@@ -911,11 +1332,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     }
   }
 
+  /** A {@link post} carrying `body` as JSON: every route but `abort` and `continue` takes one. */
+  function postJson(route: string, what: string, body: unknown): Promise<Response | undefined> {
+    return post(route, what, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  }
+
   async function answerDialog(answer: DialogAnswer): Promise<DialogAnswerOutcome> {
-    const response = await post('dialog', `dialog ${answer.id}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(answer),
-    })
+    const response = await postJson('dialog', `dialog ${answer.id}`, answer)
     if (response === undefined) return 'unreachable'
     if (response.status === 204) return 'answered'
     const outcome: DialogAnswerOutcome = response.status === 404 ? 'gone' : 'refused'
@@ -943,10 +1366,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function changeMode(mode: string): Promise<ModeChangeOutcome> {
-    const response = await post('mode', `mode ${mode}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
-    })
+    const response = await postJson('mode', `mode ${mode}`, { mode })
     if (response === undefined) return 'unreachable'
     if (response.status === 204) return 'told'
     const outcome: ModeChangeOutcome = response.status === 409 ? 'busy' : 'refused'
@@ -955,10 +1375,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function runHostCommand(run: EnsoHostCommandRun): Promise<HostCommandOutcome> {
-    const response = await post('command', `/${run.name}${run.value === undefined ? '' : ` ${run.value}`}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(run),
-    })
+    const response = await postJson('command', `/${run.name}${run.value === undefined ? '' : ` ${run.value}`}`, run)
     if (response === undefined) return 'unreachable'
     // 204: applied (`/model`, `/thinking`). 202: STARTED (`/login`, `/logout`, #338 slice 3) — the
     // flow's questions and progress arrive on the feed; told is what this route can say.
@@ -979,10 +1396,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       admission: 'enqueue',
       ...(images.length === 0 ? {} : { images: [...images] }),
     }
-    const response = await post('prompt', 'queued prompt', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const response = await postJson('prompt', 'queued prompt', body)
     if (response === undefined) return 'unreachable'
     if (response.status !== 202) {
       problem('queued prompt refused: {status} {body}', { status: response.status, body: await response.text() })
@@ -1005,6 +1419,12 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return 'queued'
   }
 
+  function abandon(): void {
+    if (liveView.get().state !== 'silent') return
+    log.warn('abandoning the silent follow: a reload is the way back')
+    cutFollow?.()
+  }
+
   function close(): void {
     if (released.signal.aborted) return
     log.info('follow released')
@@ -1012,10 +1432,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function configure(configuration: EnsoSessionConfiguration): Promise<ConfigureOutcome> {
-    const response = await post('configure', 'configure', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(configuration),
-    })
+    const response = await postJson('configure', 'configure', configuration)
     if (response === undefined) return { outcome: 'unreachable' }
     if (response.status === 204) return { outcome: 'told' }
     const body = await response.text()
@@ -1033,10 +1450,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function fork(entryId: string): Promise<EnsoForkReceipt | undefined> {
-    const response = await post('fork', 'fork', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entryId }),
-    })
+    const response = await postJson('fork', 'fork', { entryId })
     if (response === undefined) return undefined
     if (response.status !== 200) {
       problem('fork refused: {status} {body}', { status: response.status, body: await response.text() })
@@ -1061,10 +1475,11 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     incidentId: string,
     resolution: EnsoIncidentResolution,
   ): Promise<IncidentResolveOutcome> {
-    const response = await post(`incidents/${encodeURIComponent(incidentId)}/resolve`, `resolve ${incidentId}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(resolution),
-    })
+    const response = await postJson(
+      `incidents/${encodeURIComponent(incidentId)}/resolve`,
+      `resolve ${incidentId}`,
+      resolution,
+    )
     if (response === undefined) return { outcome: 'unreachable' }
     if (response.status === 204) return { outcome: 'told' }
     const reason = await response.text()
@@ -1086,5 +1501,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     resolveIncident,
     close,
     streamMessageId: () => streamMessageId,
+    appliedAt: () => appliedAt,
+    liveView,
+    outputAt: () => outputAt,
+    pulse,
+    abandon,
   }
 }

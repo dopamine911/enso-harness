@@ -162,6 +162,12 @@ export const EnsoFollowSnapshot = Type.Object(
     trailingRefusal: Type.Optional(EnsoProviderRefusal),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
     openDialogs: Type.Array(EnsoOpenDialog),
+    /**
+     * The prompts pi holds behind the run in flight (#917), the interrupting ones first — the same
+     * lists a later `queue` observation carries whole. Absent when nothing waits or the thread is
+     * not live. So a page that opens mid-run lists what an earlier page queued.
+     */
+    queue: Type.Optional(EnsoQueuedPrompts),
     interrupted: Type.Optional(EnsoInterruptedTail),
     /** Where the branch's runs were stopped (#766), oldest first; absent when none was — see `EnsoStoppedAfter`. */
     stoppedAfter: Type.Optional(EnsoStoppedAfter),

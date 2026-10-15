@@ -1,5 +1,15 @@
 import { expect, test } from 'bun:test'
-import { readPageUrl, readThreadUrl, showsPage, urlForPage, urlForThread, urlOpeningThread } from '../thread-url.ts'
+import { closePane, openBeside, singlePane } from '../pane-layout.ts'
+import {
+  readPageUrl,
+  readPaneLayout,
+  readThreadUrl,
+  showsPage,
+  urlForPage,
+  urlForPanes,
+  urlForThread,
+  urlOpeningPanes,
+} from '../thread-url.ts'
 
 // The URL is the source of truth for the active thread (#142): what it names, and what it cannot.
 // @pins resume/url-names-thread
@@ -89,7 +99,7 @@ test('a URL names a project’s page and its tab beside its thread; no tab is Th
   expect(showsPage(storage, { kind: 'project', projectId: 'p-app', tab: 'storage' })).toBe(true)
   expect(showsPage(storage, { kind: 'project', projectId: 'p-app', tab: 'threads' })).toBe(false)
   expect(showsPage(storage, { kind: 'project', projectId: 'p-other', tab: 'storage' })).toBe(false)
-  expect(urlOpeningThread(storage, 't2')).toBe('?thread=t2')
+  expect(urlOpeningPanes(storage, singlePane('t2'))).toBe('?thread=t2')
 })
 
 // @pins resume/url-names-page
@@ -112,8 +122,8 @@ test('opening a page keeps the thread and every other parameter; opening a threa
   expect(urlForPage(onSettings, { kind: 'settings', section: 'storage' })).toBe(
     `?debug=&thread=${THREAD}&page=settings&section=storage`,
   )
-  expect(urlOpeningThread(onSettings, 't2')).toBe('?debug=&thread=t2')
-  expect(urlOpeningThread('?log=debug', 't3')).toBe('?log=debug&thread=t3')
+  expect(urlOpeningPanes(onSettings, singlePane('t2'))).toBe('?debug=&thread=t2')
+  expect(urlOpeningPanes('?log=debug', singlePane('t3'))).toBe('?log=debug&thread=t3')
   // The page's own rewrite of its thread (a delete, a failed resume) keeps the page.
   expect(urlForThread(onSettings, 't4')).toBe('?debug=&thread=t4&page=settings&section=appearance')
   // A page with no sections writes none, and drops the section of the page it replaced.
@@ -122,4 +132,38 @@ test('opening a page keeps the thread and every other parameter; opening a threa
   expect(showsPage(onProjects, { kind: 'projects' })).toBe(true)
   expect(showsPage(onSettings, { kind: 'settings', section: 'storage' })).toBe(false)
   expect(showsPage(onSettings, { kind: 'settings', section: 'appearance' })).toBe(true)
+})
+
+const SECOND = '1b8f1c55-3f1e-4c1a-9a51-2f0a6c1d7e42'
+const THIRD = 'c0ffee00-1234-4abc-8def-0123456789ab'
+
+// Threads side by side (#938): `?thread=` stays the focused pane's, `?panes=` lists them all.
+// @pins resume/url-names-panes
+test('a URL names its panes beside the focused thread, which an old link without them opens alone (#938)', () => {
+  expect(readPaneLayout(`?thread=${SECOND}&panes=${THREAD},${SECOND}`, SECOND)).toEqual({
+    threadIds: [THREAD, SECOND],
+    focused: 1,
+  })
+  // A link from before panes is its one thread.
+  expect(readPaneLayout(`?thread=${THREAD}`, THREAD)).toEqual(singlePane(THREAD))
+  // A list that does not hold the focused thread is not the page's: the thread alone.
+  expect(readPaneLayout(`?thread=${THREAD}&panes=${SECOND},${THIRD}`, THREAD)).toEqual(singlePane(THREAD))
+  // What cannot be a thread is left out, a thread twice is once, and no more than three are open.
+  expect(
+    readPaneLayout(`?thread=${THREAD}&panes=../etc,${THREAD},${SECOND},${THREAD},${THIRD},${'f'.repeat(36)}`, THREAD),
+  ).toEqual({ threadIds: [THREAD, SECOND, THIRD], focused: 0 })
+})
+
+// @pins resume/url-names-panes
+test('writing panes keeps every other parameter; one pane writes no list, and a reload reads back what was written (#938)', () => {
+  const two = openBeside(singlePane(THREAD), SECOND)
+  expect(two).toEqual({ threadIds: [THREAD, SECOND], focused: 1 })
+  if (two === undefined) throw new Error('expected a second pane')
+  const written = urlForPanes('?debug', two)
+  expect(readThreadUrl(written)).toEqual({ kind: 'resume', threadId: SECOND })
+  expect(readPaneLayout(written, SECOND)).toEqual(two)
+  // Closing back to one pane takes the list away, and opening from a page drops the page alone.
+  const one = urlForPanes(written, closePane(two, 0))
+  expect(one).toBe(`?debug=&thread=${SECOND}`)
+  expect(urlOpeningPanes(`${written}&page=settings&section=storage`, two)).toBe(written)
 })

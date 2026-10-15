@@ -32,7 +32,9 @@ export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) =>
  * the run has ended is `aborted` (#130): pi emits no result for a call its abort interrupted
  * (and a torn tail on resume has none either), so without the run's state a stopped call read
  * `running…` forever — a state presented as live when it is not (`architecture.md`, invariant
- * 5). Error is the envelope's `error`, not the descriptor's. The step row, the status bar's
+ * 5). Error is the envelope's `error`, not the descriptor's — or `state: 'error'` with no `error`
+ * field, which TanStack's `updateToolResultPart` produces when the error is empty; its reason is
+ * then the string content. The step row, the status bar's
  * `running <tool>`, and this renderer all read this; a fifth state is added here and nowhere
  * else. The narrowed result rides along so a consumer that branches on `status` has it typed
  * for that branch.
@@ -47,6 +49,9 @@ export type ToolResultState =
 export function toolResultState(result: ToolResultPart | undefined, runOpen: boolean): ToolResultState {
   if (result === undefined) return runOpen ? { status: 'pending' } : { status: 'aborted' }
   if (result.error !== undefined) return { status: 'error', result, error: result.error }
+  if (result.state === 'error') {
+    return { status: 'error', result, error: typeof result.content === 'string' ? result.content : '' }
+  }
   return { status: 'done', result }
 }
 

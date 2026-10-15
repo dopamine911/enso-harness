@@ -23,28 +23,45 @@ export interface ListingState<Row> {
 
 export interface ListingStore<Row> extends Store<ListingState<Row>> {
   readonly refresh: () => Promise<void>
+  /** Change rows between refreshes — what the page heard of them since (#911). A change that changes no row wakes nobody. */
+  readonly update: (change: (rows: readonly Row[]) => readonly Row[]) => void
 }
 
-/** `what` names the list in the schema refusal: "the server's {what} did not match its schema". */
+/** What a refresh's rows are corrected by as they land, fixed as the refresh starts (#911). */
+export type CorrectFetched<Row> = () => (rows: readonly Row[]) => readonly Row[]
+
+/**
+ * `what` names the list in the schema refusal: "the server's {what} did not match its schema".
+ * `correctFetched` is asked as each refresh STARTS, and its answer applied to that refresh's rows:
+ * what the page heard while the request was out is newer than the rows it brings back (#911).
+ */
 export function createListingStore<Schema extends TSchema>(
   schema: Schema,
   what: string,
   fetchList: () => Promise<unknown>,
+  correctFetched: CorrectFetched<Static<Schema>> = () => (rows) => rows,
 ): ListingStore<Static<Schema>> {
   const store = createStore<ListingState<Static<Schema>>>({ rows: [], error: undefined })
   return {
     get: store.get,
     subscribe: store.subscribe,
     refresh: async () => {
+      const correct = correctFetched()
       try {
         const listed = await fetchList()
         if (!(Array.isArray(listed) && listed.every((row) => Check(schema, row)))) {
           throw new Error(`the server's ${what} did not match its schema`)
         }
-        store.set({ rows: listed, error: undefined })
+        store.set({ rows: correct(listed), error: undefined })
       } catch (error) {
         store.set({ rows: store.get().rows, error: error instanceof Error ? error.message : String(error) })
       }
+    },
+    update: (change) => {
+      const current = store.get()
+      const rows = change(current.rows)
+      if (rows.length === current.rows.length && rows.every((row, index) => row === current.rows[index])) return
+      store.set({ ...current, rows })
     },
   }
 }

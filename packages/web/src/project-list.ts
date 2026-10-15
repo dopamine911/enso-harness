@@ -99,6 +99,11 @@ export function threadsInNoProject(context: ProjectThreadsContext): ProjectThrea
   return heldThreads(context, (listedProjectId) => listedProjectId === undefined)
 }
 
+/** Every thread that holds something (`heldThreads`), in any project or none: what the header's split menu offers (#938). */
+export function everyHeldThread(context: ProjectThreadsContext): ProjectThread[] {
+  return heldThreads(context, () => true)
+}
+
 /**
  * The thread to show when the one on screen is deleted (#663): its project's most recently active
  * OTHER thread that holds something (`threadsOfProject`), or undefined when there is none, and the

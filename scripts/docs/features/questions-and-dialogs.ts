@@ -1,3 +1,4 @@
+import { THREAD_STATUS_WORDS } from '../../../packages/core/src/thread-status-words.ts'
 import type { FeatureSpec } from './spec.ts'
 
 /** Questions and dialogs (#114): the demo session's questionnaire, then the permission engine's prompt, each while pi waits. */
@@ -11,7 +12,7 @@ export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
       '- *A questionnaire*, when pi calls the `ask_user` tool. It holds one or more questions, each with options, and you answer all of them at once.',
       "- *pi's own prompts*: a choice, a yes or no, or a line of text. The permission engine asks this way before an edit, and so does `/login`.",
     ].join('\n'),
-    'While a question is waiting, pi waits too. The status bar says `{waiting}`.',
+    'While a question is waiting, pi waits too. The status bar says `{waiting}` with the question, over whatever else pi is doing; the question is a link to its card.',
   ],
   opens: [
     'There is nothing to open. The card appears at the end of the chat when pi asks. It also appears in any other tab that has the same thread open, and whichever answers first wins.',
@@ -36,7 +37,7 @@ export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
         },
       ],
       measure: {
-        waiting: (page) => page.getByLabel('thread status').getByText('question is waiting').first(),
+        waiting: (page) => page.getByLabel('thread status').getByText(THREAD_STATUS_WORDS.waiting).first(),
       },
     },
     {
@@ -55,7 +56,7 @@ export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
   ],
   lookFor: [
     'Read the detail before you answer. A permission prompt shows the file and the change, or the command, that pi wants to run. The options that end in "for this session" allow that tool or pattern for the rest of the thread without asking again; they do not change the mode. "No, provide reason" asks for a line pi reads with the refusal.',
-    'In the thread above, pi asks both before it edits anything, and each question is its own card with its own answer. While a card waits, the status bar reads `running ask_user` or `running edit` beside `{waiting}`: the tool call is open until you answer.',
+    "In the thread above, pi asks both before it edits anything, and each question is its own card with its own answer. While a card waits, the status bar says `{waiting}` and the question, not that pi is working: the tool call is open until you answer. The page header and the thread's row in the rail say it too, so a question in a thread you are not looking at is not missed.",
     'If you open a thread and find a card already waiting, that question was asked while you were away. It is still live, and answering it now lets pi continue.',
     "Declining an `ask_user` questionnaire ends pi's turn: it does not pick an answer for you or carry on without one. The next move is yours.",
   ],

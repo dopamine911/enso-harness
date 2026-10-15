@@ -182,6 +182,7 @@ export function treeOnFirstRun(first: HostedThread, move: TreeMove): HostedThrea
       return current.runtime.abort()
     },
     clearQueue: () => current.runtime.clearQueue(),
+    queued: () => current.runtime.queued(),
     dispose: () => {
       disposed = true
       unbind()

@@ -263,3 +263,34 @@ test('a branch with no turn says what it is waiting for instead of drawing zeros
   expect(rendered).toContain('no tool called on this branch yet')
   expect(rendered).toContain('not in the log')
 })
+
+// #913: one long model request — the turn in flight is shown, said as estimates, and never counted in.
+test('⚠ a turn in flight is shown apart, as estimates, and the totals are what completed', () => {
+  const AT = 1_700_000_000_000
+  const live = {
+    runSince: AT - 9 * 60_000,
+    request: { startedAt: AT - 432_000, thinking: 18_000, text: 0, tool: 0 },
+    now: AT,
+  }
+  const running = renderToStaticMarkup(
+    <ThreadStatsView outcome={{ kind: 'read', payload: STATS }} refused={NONE_REFUSED} live={live} />,
+  ).replace(/<[^>]*>/g, ' ')
+  expect(running).toContain('turn 3 in progress')
+  expect(running).toContain('7m 12s')
+  expect(running).toContain('≈4.5K tokens so far (~18K chars)')
+  expect(running).toContain('not in the totals until the turn completes')
+  // The completed turns' figures are what they were without the turn in flight.
+  const settled = text(STATS)
+  for (const figure of ['$0.5000', '3,943', '853']) {
+    expect(running.split(figure).length).toBe(settled.split(figure).length)
+  }
+  // A branch with no turn yet says the first response is running, not what it waits for.
+  const first = renderToStaticMarkup(
+    <ThreadStatsView
+      outcome={{ kind: 'read', payload: { ...STATS, turnStats: [], promptStats: [], callStats: [], branchCost: 0 } }}
+      live={live}
+    />,
+  ).replace(/<[^>]*>/g, ' ')
+  expect(first).toContain('the first response is still running · 7m 12s')
+  expect(first).not.toContain('appear after the first response')
+})

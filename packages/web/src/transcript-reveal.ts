@@ -5,17 +5,20 @@ import type { EnsoPromptStats, EnsoThreadStats, EnsoTurnStats } from '@enso/core
  * pi-livecraft's `onNavigate({ kind: 'turn' | 'message' | 'tool' })`, over our transcript.
  *
  * ⚠ THE TRANSCRIPT ON SCREEN IS NOT THE BRANCH, ROW FOR ROW. A resumed thread draws one bubble
- * per pi message (`transcript-to-messages.ts`); a LIVE run draws ONE assistant bubble for all its
- * turns (`follow-connection.ts` `openRun`), and a prompt another tab queued is no user bubble here
- * at all. So each target is found by what BOTH shapes carry:
+ * per pi message (`transcript-to-messages.ts`), and so does a LIVE run since #921
+ * (`follow-connection.ts` `observeMessageStart`) — but a message that drew nothing (live, an
+ * attempt refused before its first token) is no bubble once a later one follows
+ * (`transcript-selection.ts` `hidden`), and a prompt another tab queued is no user bubble here at
+ * all. So each target is found by what BOTH shapes carry:
  *   - a tool call by its `toolCallId`, which every step row carries (`data-tool-call-id`);
  *   - a prompt by its place among the user bubbles when their count is the branch's, and by its
  *     text otherwise (`promptBubbleIndex`);
- *   - a turn by its first tool call; a turn that made none by its prompt's assistant bubbles — the
- *     one at its place among the prompt's turns when there is a bubble per turn (a resumed thread),
- *     else the last (a live run's one bubble). NOT simply the last: a failed turn pi retries stays
- *     on the branch with no call (`_prepareRetry` keeps it in raw history), and the retry that
- *     follows under the same prompt is the last bubble.
+ *   - a turn by its first tool call; a turn that made none by its place among its prompt's
+ *     assistant bubbles — among all its prompt's turns when there is a bubble per turn, else
+ *     among those that did not end unfinished (`UNFINISHED`), the ones that may have drawn nothing.
+ *     NOT simply the last: a failed turn pi retries stays on the branch with no call
+ *     (`_prepareRetry` keeps it in raw history), and the retry that follows under the same prompt
+ *     is the last bubble.
  * What cannot be found is said by the drawer, never guessed at.
  */
 
@@ -114,15 +117,24 @@ function assistantBubblesOf(root: ParentNode, stats: EnsoThreadStats, prompt: nu
 }
 
 /**
- * A turn that made no call: its own bubble when the prompt has one per turn (resumed), else the
- * prompt's last (live: one bubble holds every turn of the run).
+ * How pi ends an attempt that may have drawn nothing: refused, or stopped, before its first token.
+ * Such a message is no bubble once a later one follows (`transcript-selection.ts` `hidden`).
+ */
+const UNFINISHED: Readonly<Record<string, true>> = { error: true, aborted: true }
+
+/**
+ * A turn that made no call: its own bubble when the prompt has one per turn. With fewer bubbles,
+ * the missing ones are the unfinished turns' when the others are exactly as many as the bubbles —
+ * then those are theirs in order, and an unfinished turn is no row. Any other count is undefined.
  */
 function turnBubbleOf(root: ParentNode, stats: EnsoThreadStats, turn: EnsoTurnStats): Element | undefined {
   const replies = assistantBubblesOf(root, stats, turn.prompt)
   if (replies === undefined) return undefined
   const modelCalls = stats.turnStats.filter((candidate) => candidate.prompt === turn.prompt)
   if (replies.length === modelCalls.length) return replies[modelCalls.indexOf(turn)]
-  return replies.at(-1)
+  const finished = modelCalls.filter((candidate) => UNFINISHED[candidate.stopReason] !== true)
+  const position = finished.indexOf(turn)
+  return replies.length === finished.length && position !== -1 ? replies[position] : undefined
 }
 
 /** The transcript element a target names, under `root` (one pane's conversation), or undefined. */
