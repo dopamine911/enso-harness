@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   EnsoPermissionCheckRequest,
-  type EnsoPermissionPolicyRead,
   type EnsoPermissionPolicyReset,
   EnsoPermissionPolicyWrite,
   ensoLogger,
@@ -10,12 +9,12 @@ import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } fr
 import {
   answerJson,
   answerOrFail,
-  endAndClose,
+  answerWithEtag,
+  conditionOrRefuse,
   MAX_DIALOG_BODY_BYTES,
   readClosedJsonBody,
   refuseWith,
   type ThreadRouteHandler,
-  writeConditionOf,
 } from './request-plumbing.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 
@@ -80,35 +79,24 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
     answerJson(response, verdict)
   }
 
-  /** A policy read answered with its `ETag` when there is a file to name one. */
-  function answerPolicy(response: ServerResponse, read: EnsoPermissionPolicyRead): void {
-    response.writeHead(200, {
-      'Content-Type': 'application/json',
-      ...(read.etag === undefined ? {} : { ETag: read.etag }),
-    })
-    response.end(JSON.stringify(read))
-  }
-
   /**
    * `PUT /api/permissions` (#474): the whole file a page sent, under its `If-Match`; normalised,
-   * validated against the engine's schema and written atomically (`host/permission-policy-file.ts`). 412 when
-   * the file changed since the page read it; 422 with each problem when the engine would not run it.
+   * validated against the engine's schema and written atomically (`host/permission-policy-file.ts`),
+   * with Enso's record beside it when the page sent one (#945) — both, or the record put back. 412 when either
+   * file changed since the page read them; 422 with each problem when the engine would not run it.
    */
   async function respondToPolicyWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const condition = writeConditionOf(request, 'write', 'permission policy')
-    if ('status' in condition) {
-      endAndClose(request, response, condition.status, condition.reason)
-      return
-    }
+    const condition = conditionOrRefuse(request, response, 'permission policy')
+    if (condition === undefined) return
     const body = await readClosedJsonBody(request, response, {
       maxBytes: MAX_POLICY_BODY_BYTES,
       capText: `a permission policy is at most ${MAX_POLICY_BODY_BYTES} bytes`,
       schema: EnsoPermissionPolicyWrite,
       name: 'permission policy',
-      requirement: 'a save carries `{ file }`, the whole file',
+      requirement: 'a save carries `{ file }`, the whole file, and `record`, Enso’s record beside it, when it changed',
     })
     if (body === undefined) return
-    const written = writePermissionPolicy(permissionRulesPath, agentDir, body.file, condition)
+    const written = writePermissionPolicy(permissionRulesPath, agentDir, body, condition)
     if (written.kind === 'conflict') {
       log.warn('permission policy not saved: {reason}', { reason: written.reason })
       refuseWith(response, { status: 412, reason: written.reason })
@@ -121,16 +109,13 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
       return
     }
     log.info('permission policy saved to {path}', { path: permissionRulesPath })
-    answerPolicy(response, written.read)
+    answerWithEtag(response, written.read, written.read.etag)
   }
 
   /** `POST /api/permissions/reset` (#474): Enso's default in force, the file it replaced kept beside it. */
   function respondToPolicyReset(request: IncomingMessage, response: ServerResponse): void {
-    const condition = writeConditionOf(request, 'write', 'permission policy')
-    if ('status' in condition) {
-      endAndClose(request, response, condition.status, condition.reason)
-      return
-    }
+    const condition = conditionOrRefuse(request, response, 'permission policy')
+    if (condition === undefined) return
     const reset = resetPermissionPolicy(permissionRulesPath, agentDir, condition)
     if (reset.kind === 'conflict') {
       refuseWith(response, { status: 412, reason: reset.reason })
@@ -141,11 +126,7 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
       ...(reset.backup === undefined ? {} : { backup: reset.backup }),
       policy: reset.read,
     }
-    response.writeHead(200, {
-      'Content-Type': 'application/json',
-      ...(reset.read.etag === undefined ? {} : { ETag: reset.read.etag }),
-    })
-    response.end(JSON.stringify(answer))
+    answerWithEtag(response, answer, reset.read.etag)
   }
 
   /** True when the request was a permission-policy route (#474). */
@@ -153,7 +134,10 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
     const url = request.url ?? ''
     if (request.method === 'GET' && url === '/api/permissions') {
       answerOrFail(
-        Promise.resolve().then(() => answerPolicy(response, readPermissionPolicy(permissionRulesPath, agentDir))),
+        Promise.resolve().then(() => {
+          const read = readPermissionPolicy(permissionRulesPath, agentDir)
+          answerWithEtag(response, read, read.etag)
+        }),
         response,
       )
       return true

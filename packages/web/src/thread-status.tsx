@@ -412,7 +412,7 @@ function IncidentWord({ incidents }: { readonly incidents: EnsoSessionIncidents 
   ) : (
     <span
       className="text-refuse"
-      title="an incident is open — halting is off (security.incidents.halt), so nothing is suspended; its card is in the Chat view"
+      title="an incident is open — halting is off (Settings › Security), so nothing is suspended; its card is in the Chat view"
     >
       incident open
     </span>

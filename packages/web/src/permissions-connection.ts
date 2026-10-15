@@ -61,7 +61,7 @@ function reasonOf(body: string, status: number): string {
   return trimmed
 }
 
-type Unavailable = { readonly kind: 'unavailable'; readonly detail: string }
+export type Unavailable = { readonly kind: 'unavailable'; readonly detail: string }
 
 const failed = (failure: unknown): Unavailable => ({
   kind: 'unavailable',
@@ -80,16 +80,34 @@ async function checkedBody<Schema extends TSchema>(
     : { kind: 'unavailable', detail: `the server's ${what} did not match its schema` }
 }
 
-/** The policy file as the server reads it, or why it cannot. */
-export async function fetchPermissionPolicy(fetchImpl: FetchLike = fetch): Promise<PolicyRead> {
+/**
+ * One request to a settings route (#474, #933): a 2xx body checked against `schema`, a non-2xx as
+ * its status and the server's words, a failure to reach it as `unavailable` — never a throw.
+ */
+export async function sendChecked<Schema extends TSchema>(
+  fetchImpl: FetchLike,
+  path: string,
+  init: RequestInit | undefined,
+  [schema, what]: readonly [Schema, string],
+): Promise<
+  | { readonly kind: 'ok'; readonly payload: Static<Schema> }
+  | { readonly kind: 'answered'; readonly status: number; readonly detail: string }
+  | Unavailable
+> {
   try {
-    const response = await fetchImpl(POLICY_PATH)
-    if (!response.ok) return { kind: 'unavailable', detail: reasonOf(await response.text(), response.status) }
-    const body = await checkedBody(response, EnsoPermissionPolicyRead, 'policy')
-    return body.kind === 'ok' ? { kind: 'loaded', policy: body.payload } : body
+    const response = await fetchImpl(path, init)
+    if (response.ok) return await checkedBody(response, schema, what)
+    return { kind: 'answered', status: response.status, detail: reasonOf(await response.text(), response.status) }
   } catch (failure: unknown) {
     return failed(failure)
   }
+}
+
+/** The policy file as the server reads it, or why it cannot. */
+export async function fetchPermissionPolicy(fetchImpl: FetchLike = fetch): Promise<PolicyRead> {
+  const sent = await sendChecked(fetchImpl, POLICY_PATH, undefined, [EnsoPermissionPolicyRead, 'policy'])
+  if (sent.kind === 'ok') return { kind: 'loaded', policy: sent.payload }
+  return { kind: 'unavailable', detail: sent.detail }
 }
 
 /** A 422's refusal, when its body is one; otherwise the words it carried. */
@@ -136,20 +154,15 @@ export async function resetPermissionPolicy(
   etag: string | undefined,
   fetchImpl: FetchLike = fetch,
 ): Promise<PolicyResetOutcome> {
-  try {
-    const response = await fetchImpl(`${POLICY_PATH}/reset`, {
-      method: 'POST',
-      headers: etag === undefined ? { 'If-None-Match': '*' } : { 'If-Match': etag },
-    })
-    if (response.ok) {
-      const body = await checkedBody(response, EnsoPermissionPolicyReset, 'reset')
-      return body.kind === 'ok' ? { kind: 'reset', reset: body.payload } : body
-    }
-    const detail = reasonOf(await response.text(), response.status)
-    return response.status === 412 ? { kind: 'conflict', detail } : { kind: 'unavailable', detail }
-  } catch (failure: unknown) {
-    return failed(failure)
-  }
+  const sent = await sendChecked(
+    fetchImpl,
+    `${POLICY_PATH}/reset`,
+    { method: 'POST', headers: etag === undefined ? { 'If-None-Match': '*' } : { 'If-Match': etag } },
+    [EnsoPermissionPolicyReset, 'reset'],
+  )
+  if (sent.kind === 'ok') return { kind: 'reset', reset: sent.payload }
+  if (sent.kind === 'answered' && sent.status === 412) return { kind: 'conflict', detail: sent.detail }
+  return { kind: 'unavailable', detail: sent.detail }
 }
 
 /** The verdict on `request` for `threadId` in that thread's current mode: its guards' answer, then its engine's. */
@@ -158,19 +171,13 @@ export async function checkPermission(
   request: EnsoPermissionCheckRequest,
   fetchImpl: FetchLike = fetch,
 ): Promise<PermissionCheck> {
-  try {
-    const response = await fetchImpl(`/api/threads/${encodeURIComponent(threadId)}/permissions/check`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    })
-    if (response.ok) {
-      const body = await checkedBody(response, EnsoPermissionVerdict, 'verdict')
-      return body.kind === 'ok' ? { kind: 'verdict', verdict: body.payload } : body
-    }
-    const detail = reasonOf(await response.text(), response.status)
-    return response.status === 409 ? { kind: 'not-live', detail } : { kind: 'unavailable', detail }
-  } catch (failure: unknown) {
-    return failed(failure)
-  }
+  const sent = await sendChecked(
+    fetchImpl,
+    `/api/threads/${encodeURIComponent(threadId)}/permissions/check`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) },
+    [EnsoPermissionVerdict, 'verdict'],
+  )
+  if (sent.kind === 'ok') return { kind: 'verdict', verdict: sent.payload }
+  if (sent.kind === 'answered' && sent.status === 409) return { kind: 'not-live', detail: sent.detail }
+  return { kind: 'unavailable', detail: sent.detail }
 }

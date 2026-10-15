@@ -235,7 +235,10 @@ export {
 export {
   decisionAction,
   ENSO_DRAFTED_RULE_GROUPS,
+  ENSO_EMPTY_RULE_RECORD,
+  EnsoDisabledRule,
   type EnsoDraftedRuleGroup,
+  EnsoGroupAddedRule,
   EnsoPermissionAction,
   EnsoPermissionCheckRequest,
   type EnsoPermissionDecision,
@@ -248,6 +251,7 @@ export {
   type EnsoPolicyKnobs,
   type EnsoPolicyRow,
   type EnsoPolicyRowOwner,
+  EnsoRuleRecord,
   type EnsoSurfaceValue,
   effectivePermission,
   effectiveRows,
@@ -256,6 +260,7 @@ export {
   policyKnobs,
   policyRows,
   runsAnyCode,
+  toPatternMap,
   withoutRule,
   withRule,
   withRuleMoved,
@@ -400,10 +405,17 @@ export {
   toolFamilyOf,
 } from './session-incident.ts'
 export {
+  EnsoJudgeKeyState,
+  EnsoJudgeKeyWrite,
+  EnsoSecuritySettingsRead,
+  EnsoSecuritySettingsWrite,
+} from './security-settings.ts'
+export {
   type CommandJudge,
   commandJudgementOf,
   ENSO_COMMAND_JUDGEMENT_ENTRY,
   ENSO_JUDGE_BACKENDS,
+  ENSO_JUDGE_KEY_NAME,
   ENSO_JUDGE_POLICY,
   ENSO_JUDGE_QUESTIONS,
   EnsoCommandJudgement,
@@ -414,6 +426,7 @@ export {
   type EnsoJudgeQuestion,
   type EnsoJudgeState,
   EnsoThreadJudgeCases,
+  localJudgeUrlProblem,
   readEnsoCommandJudgement,
   readEnsoThreadJudgeCases,
 } from './command-judge.ts'
@@ -540,6 +553,17 @@ export {
   type ThreadTreeRecord,
 } from './thread-tree-record.ts'
 export { summarizeToolInput } from './tool-input.ts'
+export {
+  ENSO_IMAGES_KIND,
+  ENSO_QUESTIONNAIRE_ANSWERS_KIND,
+  ENSO_WRITE_RECEIPT_KIND,
+  EnsoImagesProps,
+  EnsoQuestionnaireAnswersProps,
+  EnsoWriteReceiptProps,
+  isEnsoImagesProps,
+  isEnsoQuestionnaireAnswersProps,
+  isEnsoWriteReceiptProps,
+} from './tool-result-kinds.ts'
 export {
   ENSO_TOOL_RESULT_KEY,
   EnsoToolResultDescriptor,

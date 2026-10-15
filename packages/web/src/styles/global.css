@@ -200,6 +200,10 @@
 @utility grid-cols-check-form {
   grid-template-columns: calc(var(--spacing) * 35) minmax(0, 1fr) auto;
 }
+/* A settings row (Security, #933): the key's words, then its control, 200–280px. */
+@utility grid-cols-setting-row {
+  grid-template-columns: minmax(0, 1fr) minmax(calc(var(--spacing) * 50), calc(var(--spacing) * 70));
+}
 /* A check row and a reach-list item (Add project): a 20px column for the box or the icon, then its words. */
 @utility grid-cols-check-row {
   grid-template-columns: calc(var(--spacing) * 5) minmax(0, 1fr);

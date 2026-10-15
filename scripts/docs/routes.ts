@@ -19,6 +19,7 @@ const ROUTE_GROUP_PATHS: readonly string[] = [
   'packages/web/src/server/prompt-routes.ts',
   'packages/web/src/server/project-routes.ts',
   'packages/web/src/server/permission-routes.ts',
+  'packages/web/src/server/security-routes.ts',
   'packages/web/src/server/literal-routes.ts',
 ]
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
@@ -534,7 +535,7 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     errors: '403 untrusted origin; 404 a server started without a library; 500 handler failure',
   }),
   'GET /api/permissions': literalRead({
-    handler: 'answerPolicy → readPermissionPolicy',
+    handler: 'answerWithEtag → readPermissionPolicy',
     success:
       "200 `EnsoPermissionPolicyRead` JSON (#474) — `ok` with the whole file as written, or `unreadable` with why (missing, not JSON, not an object: the engine runs such a file as an EMPTY policy); both with its path, the engine's review-log directory and Enso's default policy, and an `ETag` header (the sha256 of the file's bytes) when there is a file",
     errors: '403 untrusted origin; 500 handler failure',
@@ -558,6 +559,35 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
       "200 `EnsoPermissionPolicyReset` JSON — Enso's default policy in force, and `backup`, the replaced file's copy at the first free `permissions.json.bak[.N]` (absent when there was no file)",
     errors:
       '400 both headers, a list, or a weak tag; 403 untrusted origin; 412 the file changed on disk since it was read; 428 no precondition; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  'GET /api/settings/security': literalRead({
+    handler: 'answerWithEtag → readSecuritySettings',
+    success:
+      "200 `EnsoSecuritySettingsRead` JSON (#933) — `ok` with the user's `config.json` `security` section as written, or `unreadable` with why (every consumer fails closed on such a file); both with the file's path, the secrets file's path and `judgeKeySet` — whether `TYPESAFE_API_KEY` is set, never its value — and an `ETag` header when there is a file",
+    errors: '403 untrusted origin; 404 a server started without `ENSO_HOME`; 500 handler failure',
+  }),
+  'PUT /api/settings/security': {
+    handler: 'respondToSettingsWrite → writeSecuritySettings',
+    input:
+      'headers: exactly one precondition — `If-Match: <ETag>`, `If-Match: *` or `If-None-Match: *` (no file); body: `EnsoSecuritySettingsWrite` — `{ security }`, the whole section',
+    success:
+      "200 `EnsoSecuritySettingsRead` JSON with its new `ETag` — every other key of `config.json` kept, empty objects dropped, the whole file validated with `parseEnsoConfig` and written to a temporary file renamed over; read by the guard at each new session's start",
+    errors:
+      '400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 404 no `ENSO_HOME`; 412 the file changed on disk since it was read; 413 body too large; 422 the file is unreadable now, or the result would be — nothing written; 428 no precondition; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  'PUT /api/settings/security/judge-key': {
+    handler: 'respondToJudgeKeyWrite → writeJudgeKey',
+    input: 'body: `EnsoJudgeKeyWrite` — `{ value }`, the key, or `null` to remove it',
+    success:
+      '200 `EnsoJudgeKeyState` JSON — only whether a key is set; `ENSO_HOME/secrets.env` rewritten `0600` with every other line kept, the key never logged or answered; read by the `jev` judge at its next call',
+    errors:
+      '400 malformed body; 403 untrusted origin; 404 no `ENSO_HOME`; 413 body too large; 422 not one token (spaces, quotes or `#`); 500 handler failure',
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',

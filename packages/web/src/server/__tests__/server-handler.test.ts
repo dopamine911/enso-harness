@@ -232,6 +232,7 @@ async function startWith(
     launch = tmpdir(),
     agentDir = mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     threadSettings,
+    ensoHome,
   }: {
     readonly projectRoots?: readonly string[]
     readonly promptsDir?: string
@@ -242,6 +243,8 @@ async function startWith(
     readonly agentDir?: string
     /** The user's config the project settings resolve against (#754); absent, the server has none. */
     readonly threadSettings?: ProjectThreadSettingsSource
+    /** `ENSO_HOME`, for the settings files' routes (#933); absent, they refuse. */
+    readonly ensoHome?: string
   } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
@@ -254,6 +257,7 @@ async function startWith(
     projectRoots,
     ...(promptsDir === undefined ? {} : { promptsDir }),
     ...(threadSettings === undefined ? {} : { threadSettings }),
+    ...(ensoHome === undefined ? {} : { ensoHome }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir,
     permissionRulesPath,
@@ -3042,6 +3046,46 @@ async function policyServer(text: string): Promise<{ url: string; policyPath: st
   return { url, policyPath }
 }
 
+test('⚠ Settings › Security over HTTP: saved only under the version read, other keys kept, a bad file never written over, the key never answered (#933)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-933-route-'))
+  writeFileSync(join(home, 'config.json'), '{"webFetch":{"allowedHosts":["a.example"]}}')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { ensoHome: home })
+  const read = await send(url, '/api/settings/security', 'GET')
+  const save = (security: unknown, headers: Record<string, string>): Promise<Sent> =>
+    request(url, '/api/settings/security', { method: 'PUT', body: { security }, headers })
+  expect((await save({ incidents: { halt: true } }, {})).status).toBe(428)
+  expect((await save({ incidents: { halt: true } }, { 'If-Match': `"${'0'.repeat(64)}"` })).status).toBe(412)
+  expect((await save({ incidents: { halt: true } }, { 'If-Match': read.etag ?? '' })).status).toBe(200)
+  expect(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))).toEqual({
+    webFetch: { allowedHosts: ['a.example'] },
+    security: { incidents: { halt: true } },
+  })
+  writeFileSync(join(home, 'config.json'), '{"nope":1}')
+  expect((await save({}, { 'If-Match': '*' })).status).toBe(422)
+  expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe('{"nope":1}')
+  const storeKey = (value: string | null): Promise<Sent> =>
+    request(url, '/api/settings/security/judge-key', { method: 'PUT', body: { value }, headers: {} })
+  const key = await storeKey('ts-k-1')
+  expect(JSON.parse(key.body)).toEqual({ judgeKeySet: true })
+  expect((await send(url, '/api/settings/security', 'GET')).body).not.toContain('ts-k-1')
+  // A value `secrets.env` could not read back as written is refused, and the stored key stays.
+  expect((await storeKey('two words')).status).toBe(422)
+  expect(readFileSync(join(home, 'secrets.env'), 'utf8')).toBe('TYPESAFE_API_KEY=ts-k-1\n')
+  expect(JSON.parse((await storeKey(null)).body)).toEqual({ judgeKeySet: false })
+  expect(readFileSync(join(home, 'secrets.env'), 'utf8')).toBe('')
+})
+
+test('Settings › Security answers 404 when the server has no ENSO_HOME (#933)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  expect((await send(url, '/api/settings/security', 'GET')).status).toBe(404)
+  const key = await request(url, '/api/settings/security/judge-key', {
+    method: 'PUT',
+    body: { value: null },
+    headers: {},
+  })
+  expect(key.status).toBe(404)
+})
+
 test('⚠ the permission policy over HTTP: read with its ETag, saved only under the version read, refused with each problem, normalised, and reset with a backup (#474)', async () => {
   const original = `${JSON.stringify({ permission: { bash: { '**': 'ask', 'git status': 'allow' } } }, null, 2)}\n`
   const { url, policyPath } = await policyServer(original)
@@ -3086,6 +3130,64 @@ test('⚠ the permission policy over HTTP: read with its ETag, saved only under 
   expect(JSON.parse((await send(url, '/api/permissions', 'GET')).body)).toMatchObject({
     kind: 'unreadable',
     reason: expect.any(String),
+  })
+})
+
+// #945: the rules switched off, and what each group added, live in Enso's record beside the policy
+// — the engine's schema refuses a key of ours in its file. One ETag names both files, and a save
+// writes both or neither.
+test('⚠ Enso’s record rides the policy’s save: one ETag for both files, a hand edit to either is a 412, a refusal writes neither, and a reset keeps the rules switched off (#945)', async () => {
+  const original = `${JSON.stringify({ permission: { bash: { '**': 'ask', 'git status': 'allow', 'git push *': 'deny' } } }, null, 2)}\n`
+  const { url, policyPath } = await policyServer(original)
+  const recordPath = join(dirname(policyPath), 'permissions.disabled.json')
+  const first = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  expect(first).toMatchObject({ kind: 'ok', record: { disabled: [], groups: {} }, recordPath })
+  expect(existsSync(recordPath)).toBe(false)
+
+  const save = (body: unknown, etag: string): Promise<Sent> =>
+    request(url, '/api/permissions', { method: 'PUT', body, headers: { 'If-Match': etag } })
+  const off = { permission: { bash: { '**': 'ask', 'git status': 'allow' } } }
+  const record = {
+    disabled: [{ surface: 'bash', pattern: 'git push *', decision: 'deny', after: 'git status' }],
+    groups: { publishing: { added: [{ surface: 'bash', pattern: 'npm publish*', decision: 'deny' }] } },
+  }
+  // A schema refusal writes neither file.
+  expect((await save({ file: { permission: { bash: { x: 'dney' } } }, record }, first.etag)).status).toBe(422)
+  expect(existsSync(recordPath)).toBe(false)
+  expect(readFileSync(policyPath, 'utf8')).toBe(original)
+
+  const saved = await save({ file: off, record }, first.etag)
+  expect(saved.status).toBe(200)
+  expect(JSON.parse(readFileSync(recordPath, 'utf8'))).toEqual(record)
+  expect(JSON.parse(readFileSync(policyPath, 'utf8')).permission.bash).toEqual(off.permission.bash)
+  const read = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  expect(read).toMatchObject({ record, etag: saved.etag })
+
+  // A hand edit to the record alone is a new version: a save under the old one writes nothing.
+  writeFileSync(recordPath, `${JSON.stringify({ disabled: [], groups: {} })}\n`)
+  const stale = await save({ file: off }, read.etag)
+  expect(stale.status).toBe(412)
+  expect(stale.body).toContain('permissions.disabled.json')
+  // A save without a record leaves the one on disk as it is.
+  const handEdited = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  writeFileSync(recordPath, `${JSON.stringify(record, null, 2)}\n`)
+  const current = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  expect(current.etag).not.toBe(handEdited.etag)
+  expect((await save({ file: off }, current.etag)).status).toBe(200)
+  expect(JSON.parse(readFileSync(recordPath, 'utf8'))).toEqual(record)
+
+  // A reset: the groups' record goes with the file it described; the rules switched off stay off.
+  const now = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  const reset = await request(url, '/api/permissions/reset', { method: 'POST', headers: { 'If-Match': now.etag } })
+  expect(reset.status).toBe(200)
+  expect(JSON.parse(readFileSync(recordPath, 'utf8'))).toEqual({ disabled: record.disabled, groups: {} })
+
+  // A record that cannot be read is said so; the policy reads as before.
+  writeFileSync(recordPath, '{ "disabled": ')
+  expect(JSON.parse((await send(url, '/api/permissions', 'GET')).body)).toMatchObject({
+    kind: 'ok',
+    record: { disabled: [], groups: {} },
+    recordProblem: expect.any(String),
   })
 })
 

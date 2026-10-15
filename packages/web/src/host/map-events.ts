@@ -1,5 +1,6 @@
 import type { TruncationResult } from '@earendil-works/pi-coding-agent'
 import {
+  ENSO_IMAGES_KIND,
   ENSO_TOOL_RESULT_KEY,
   EnsoDialogOutcome,
   type EnsoDialogSpec,
@@ -16,6 +17,7 @@ import {
   type EnsoUsage,
   contentToText,
   isEnsoDialogSpec,
+  readEnsoToolResultDescriptor,
 } from '@enso/core'
 import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
@@ -59,11 +61,14 @@ function readUsage(raw: unknown): EnsoUsage | undefined {
 }
 
 /**
- * Build our descriptor from pi's `details`.
+ * Build our descriptor from pi's `details` and `content`.
  *
- * ⚠ Only truncation is mapped today, and deliberately: `details` is tool-specific and
- * inventing a `kind` per tool here would put rendering decisions in the transport. A tool
- * that wants a richer descriptor should emit one; this is the floor, not the ceiling.
+ * ⚠ No `kind` is invented per tool here: that would put rendering decisions in the transport. A
+ * tool that wants a richer descriptor emits one in its `details`, under {@link ENSO_TOOL_RESULT_KEY}
+ * (`ask_user`'s answers, the `write` receipt — #920), and it is taken as it stands. Truncation is
+ * mapped for every tool; an image the tool returned in its `content` (`read` of a PNG — #920), which
+ * the text this seam keeps names only as `[image content]`, is mapped unless the tool emits its own
+ * descriptor — then the tool's descriptor stands and the image is not drawn (no tool does both).
  *
  * `truncation` is pi's `TruncationResult` — the one shape every built-in tool (read, bash, grep,
  * find, ls) puts there (#411: this once read `shown`/`total`/`unit`, which pi never sends, so no
@@ -71,17 +76,41 @@ function readUsage(raw: unknown): EnsoUsage | undefined {
  * the byte limit is what cut them — the reader counts lines, and pi's own notice does
  * (`Showing lines 1-1841 of 3000 (50.0KB limit)`). Only a cut inside one line is said in bytes.
  */
-export function descriptorFrom(toolName: string, details: unknown): EnsoToolResultDescriptor | undefined {
-  if (typeof details !== 'object' || details === null) return undefined
-  const truncation = (details as { truncation?: Partial<TruncationResult> | null }).truncation
+export function descriptorFrom(
+  toolName: string,
+  details: unknown,
+  content: unknown,
+): EnsoToolResultDescriptor | undefined {
+  const record = typeof details === 'object' && details !== null ? (details as Record<string, unknown>) : undefined
+  const emitted = readEnsoToolResultDescriptor(record)
+  const images = imagesOf(content)
+  const truncated = truncationOf(record)
+  if (emitted === undefined && images.length === 0 && truncated === undefined) return undefined
+  const base =
+    emitted ??
+    (images.length > 0 ? { kind: ENSO_IMAGES_KIND, props: { images } } : { kind: `pi.tool.${toolName}`, props: {} })
+  return truncated === undefined ? base : { ...base, truncated }
+}
+
+/** The images a tool returned in its `content`, as bytes — never a URL. */
+function imagesOf(content: unknown): { mimeType: string; data: string }[] {
+  if (!Array.isArray(content)) return []
+  return content.flatMap((part: { type?: unknown; mimeType?: unknown; data?: unknown } | null) =>
+    part?.type === 'image' && typeof part.mimeType === 'string' && typeof part.data === 'string'
+      ? [{ mimeType: part.mimeType, data: part.data }]
+      : [],
+  )
+}
+
+function truncationOf(details: Record<string, unknown> | undefined): EnsoToolResultDescriptor['truncated'] {
+  const truncation = details?.['truncation'] as Partial<TruncationResult> | null | undefined
   if (truncation?.truncated !== true) return undefined
   const { outputLines, totalLines, outputBytes, totalBytes } = truncation
-  const kind = `pi.tool.${toolName}`
   if (typeof outputLines === 'number' && typeof totalLines === 'number' && outputLines < totalLines) {
-    return { kind, props: {}, truncated: { shown: outputLines, total: totalLines, unit: 'lines' } }
+    return { shown: outputLines, total: totalLines, unit: 'lines' }
   }
   if (typeof outputBytes !== 'number' || typeof totalBytes !== 'number') return undefined
-  return { kind, props: {}, truncated: { shown: outputBytes, total: totalBytes, unit: 'bytes' } }
+  return { shown: outputBytes, total: totalBytes, unit: 'bytes' }
 }
 
 /** The metadata bag to attach to a TanStack `ToolResultPart`, or undefined if there is none. */
@@ -273,27 +302,31 @@ function mapCompactionEnd(event: RuntimeEvent): EnsoObservation {
   return { kind: 'unmapped', event }
 }
 
-/** One streamed delta of the in-flight message: its text or its thinking, with the usage pi attaches. */
+/**
+ * One streamed delta of the in-flight message: its text or its thinking.
+ *
+ * ⚠ pi's `usage` stays here (#915): it rides on every `message_update`, cumulative, ~350 bytes a
+ * delta, and a 68 KB `write` composed as thousands of `toolcall_delta`s was megabytes of it on the
+ * follow. Nothing downstream reads it — a message's accounting is its `message_end`. So a mapped
+ * delta carries none, and an event carried as `unmapped` (start/end markers, tool-call arguments)
+ * crosses without it.
+ */
 function mapMessageUpdate(event: RuntimeEvent): EnsoObservation {
   const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined
-  const usage = readUsage(event.usage)
   const contentIndex = typeof delta?.contentIndex === 'number' ? delta.contentIndex : 0
   const text = typeof delta?.delta === 'string' ? delta.delta : ''
-  if (delta?.type === 'text_delta') {
-    return { kind: 'text-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
-  }
-  if (delta?.type === 'thinking_delta') {
-    return { kind: 'thinking-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
-  }
+  if (delta?.type === 'text_delta') return { kind: 'text-delta', contentIndex, delta: text }
+  if (delta?.type === 'thinking_delta') return { kind: 'thinking-delta', contentIndex, delta: text }
   // start/end markers and any future delta type: carried, not dropped.
-  return { kind: 'unmapped', event }
+  const { usage: _usage, ...carried } = event
+  return { kind: 'unmapped', event: carried }
 }
 
 /** A running tool's partial result: never complete, never an error. */
 function mapToolExecutionUpdate(event: RuntimeEvent): EnsoObservation {
   const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined
   const toolName = String(event.toolName)
-  const descriptor = descriptorFrom(toolName, partial?.details)
+  const descriptor = descriptorFrom(toolName, partial?.details, partial?.content)
   return {
     kind: 'tool-result',
     toolCallId: String(event.toolCallId),
@@ -309,7 +342,7 @@ function mapToolExecutionUpdate(event: RuntimeEvent): EnsoObservation {
 function mapToolExecutionEnd(event: RuntimeEvent): EnsoObservation {
   const result = event.result as { content?: unknown; details?: unknown } | undefined
   const toolName = String(event.toolName)
-  const descriptor = descriptorFrom(toolName, result?.details)
+  const descriptor = descriptorFrom(toolName, result?.details, result?.content)
   return {
     kind: 'tool-result',
     toolCallId: String(event.toolCallId),
