@@ -114,6 +114,7 @@ export const SETTINGS_SECTIONS = [
   'roles',
   'permissions',
   'security',
+  'web-tools',
   'projects',
   'storage',
 ] as const
@@ -122,8 +123,8 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 const isSettingsSection = (value: string): value is SettingsSection =>
   (SETTINGS_SECTIONS as readonly string[]).includes(value)
 
-/** A project page's tabs (#871), in the order the page lists them; the first is where it opens. */
-export const PROJECT_TABS = ['threads', 'worktrees', 'storage'] as const
+/** A project page's tabs (#871, Web tools #937), in the order the page lists them; the first is where it opens. */
+export const PROJECT_TABS = ['threads', 'worktrees', 'web-tools', 'storage'] as const
 export type ProjectTab = (typeof PROJECT_TABS)[number]
 
 const isProjectTab = (value: string): value is ProjectTab => (PROJECT_TABS as readonly string[]).includes(value)

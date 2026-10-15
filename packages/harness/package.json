@@ -52,6 +52,7 @@
     "@logtape/redaction": "2.3.7",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
     "cc-safety-net": "2.4.6",
+    "jsonc-parser": "3.3.1",
     "pi-multi-account": "1.24.0"
   },
   "bundledDependencies": [

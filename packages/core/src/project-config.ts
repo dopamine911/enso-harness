@@ -8,14 +8,13 @@ import {
   openSync,
   readSync,
   realpathSync,
-  renameSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname } from 'node:path'
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import { type EnsoConfig, parseEnsoConfig } from './config.ts'
-import { projectConfigPath, projectLocalConfigPath, readTextIfPresent } from './paths.ts'
+import { projectConfigPath, projectLocalConfigPath, readTextIfPresent, replaceFileText } from './paths.ts'
 import type {
   EnsoConfigTier,
   EnsoProjectConfigApproval,
@@ -28,6 +27,10 @@ import type {
   EnsoProjectTierReview,
 } from './project-settings.ts'
 import { unifiedPatch } from './text-patch.ts'
+import { editConfigText } from './user-config-write.ts'
+import { allowedHostsEdit } from './web-fetch-allowlist.ts'
+import { webSearchEdit } from './web-search-settings.ts'
+import type { ProjectWebToolsChange } from './web-search.ts'
 
 /**
  * A project's own config tiers (#754) — its `threads` settings read by tier, written by the project
@@ -260,22 +263,74 @@ function recordApproval(path: string, tier: EnsoProjectTier, text: string | unde
   if (text === undefined) delete approvals[tier]
   else approvals[tier] = { sha256: sha256Of(text), text }
   mkdirSync(dirname(path), { recursive: true })
-  const written = `${path}.${process.pid}.tmp`
-  writeFileSync(written, `${JSON.stringify(approvals, null, 2)}\n`)
-  renameSync(written, path)
+  replaceFileText(path, `${JSON.stringify(approvals, null, 2)}\n`)
 }
 
 /**
- * Set or clear `threads` keys in one of the project's own files (#754), the project page's write:
- * a key given is set, `null` removes it, a key absent is left; every other key in the file is kept,
- * and a `threads` left empty goes. Written as 2-space JSON with a final newline, `<project>/.enso/`
- * made if needed, and APPROVED as written (#753): the operator wrote it. Writing needs no trust: it
- * is the operator's own action, and reading it back into a resolution does.
+ * A write to one of the project's own files from its page: written (and approved as written), nothing
+ * to write, or why not — the file is not the version approved (`pending`), it cannot be read
+ * (`unreadable`), or the change is refused.
+ *
+ * @group Project settings
+ */
+export type ProjectTierWrite =
+  | { readonly kind: 'written' | 'unchanged' }
+  | { readonly kind: 'unreadable'; readonly path: string; readonly reason: string }
+  | { readonly kind: 'pending'; readonly path: string; readonly state: EnsoProjectTierPending['state'] }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/** What a page's change makes of a tier file's text: the new text, nothing to write, or why not. */
+type TierEdit =
+  | { readonly kind: 'edited'; readonly text: string }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * The project page's one writer of its own tier files — its Worktrees settings (#754) and its Web
+ * tools (#937): `edit` makes the new text of the file as it is (`undefined`: none yet), which is
+ * written, `<project>/.enso/` made if needed, and APPROVED as written (#753): the operator wrote it.
+ * Writing needs no trust: it is the operator's own action, and reading it back into a resolution does.
  *
  * ⚠ NEVER OVER WHAT IS NOT APPROVED: a file that changed since its approval, or was never approved,
  * is refused (`pending`) — written over, its change would be approved unseen. ⚠ Nor over a file that
  * is unreadable — a link (the file, or `.enso/` itself, whether or not a file is behind it), not JSON,
  * not a config this version reads: the reason comes back, and the operator fixes the file.
+ */
+function writeProjectTier(
+  project: string,
+  tier: EnsoProjectTier,
+  approvals: string,
+  edit: (text: string | undefined, config: EnsoConfig) => TierEdit,
+): ProjectTierWrite {
+  const path = projectTierPath(project, tier)
+  const current = readTierText(project, path)
+  if (current.kind === 'unreadable') return { kind: 'unreadable', path, reason: current.reason }
+  const text = current.kind === 'present' ? current.text : undefined
+  const read = parseEnsoConfig(text)
+  if (read.kind === 'unreadable') return { kind: 'unreadable', path, reason: read.reason }
+  const { state } = tierStanding(current, readConfigApprovals(approvals)[tier])
+  if (state !== undefined && state !== 'approved') return { kind: 'pending', path, state }
+  const edited = edit(text, read.config)
+  if (edited.kind !== 'edited') return edited
+  mkdirSync(dirname(path), { recursive: true })
+  // ⚠ Checked again once `.enso/` exists, and the file opened without following a link: the write
+  // must land in the project's own `.enso/`, never where a link planted since the read points.
+  if (reachedThroughLink(project, path)) return { kind: 'unreadable', path, reason: LINKED }
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW)
+  try {
+    writeFileSync(descriptor, edited.text)
+  } finally {
+    closeSync(descriptor)
+  }
+  recordApproval(approvals, tier, edited.text)
+  return { kind: 'written' }
+}
+
+/**
+ * Set or clear `threads` keys in one of the project's own files (#754), the project page's write
+ * (`writeProjectTier`): a key given is set, `null` removes it, a key absent is left; every other
+ * key in the file is kept, and a `threads` left empty goes. Written as 2-space JSON with a final
+ * newline.
  *
  * @group Project settings
  */
@@ -283,37 +338,41 @@ export function writeProjectThreadSettings(
   project: string,
   update: EnsoProjectSettingsUpdate,
   approvals: string,
-):
-  | { kind: 'written' }
-  | { kind: 'unreadable'; path: string; reason: string }
-  | { kind: 'pending'; path: string; state: EnsoProjectTierPending['state'] } {
-  const path = projectTierPath(project, update.tier)
-  const current = readTierText(project, path)
-  if (current.kind === 'unreadable') return { kind: 'unreadable', path, reason: current.reason }
-  const read = parseEnsoConfig(current.kind === 'present' ? current.text : undefined)
-  if (read.kind === 'unreadable') return { kind: 'unreadable', path, reason: read.reason }
-  const { state } = tierStanding(current, readConfigApprovals(approvals)[update.tier])
-  if (state !== undefined && state !== 'approved') return { kind: 'pending', path, state }
-  const threads = Object.fromEntries(
-    Object.entries({ ...read.config.threads, ...update.threads }).filter(
-      ([, value]) => value !== null && value !== undefined,
+): ProjectTierWrite {
+  return writeProjectTier(project, update.tier, approvals, (_text, config) => {
+    const threads = Object.fromEntries(
+      Object.entries({ ...config.threads, ...update.threads }).filter(
+        ([, value]) => value !== null && value !== undefined,
+      ),
+    )
+    const others = Object.entries(config).filter(([key]) => key !== 'threads')
+    const next = Object.keys(threads).length === 0 ? Object.fromEntries(others) : { ...config, threads }
+    return { kind: 'edited', text: `${JSON.stringify(next, null, 2)}\n` }
+  })
+}
+
+/**
+ * One change to a project's own web tools from its page (#937): a `web_fetch` host or a Searching
+ * key, in its shared `.enso/config.json` — the one project tier a session merges, so the only one
+ * written for web tools. Only the touched key changes, as in the user's file (`editConfigText`), and
+ * it is written as every page write to the project's files is (`writeProjectTier`): approved as
+ * written, never over a file not the version approved, nor one that cannot be read.
+ * ⚠ The caller decides trust first: an untrusted project's file is never read, so never written here.
+ *
+ * @group Project settings
+ */
+export function changeProjectWebTools(
+  project: string,
+  change: ProjectWebToolsChange,
+  approvals: string,
+): ProjectTierWrite {
+  return writeProjectTier(project, 'shared', approvals, (text, config) =>
+    editConfigText(
+      text,
+      config,
+      'list' in change || 'backend' in change ? webSearchEdit(config, change) : allowedHostsEdit(config, change),
     ),
   )
-  const others = Object.entries(read.config).filter(([key]) => key !== 'threads')
-  const next = Object.keys(threads).length === 0 ? Object.fromEntries(others) : { ...read.config, threads }
-  const text = `${JSON.stringify(next, null, 2)}\n`
-  mkdirSync(dirname(path), { recursive: true })
-  // ⚠ Checked again once `.enso/` exists, and the file opened without following a link: the write
-  // must land in the project's own `.enso/`, never where a link planted since the read points.
-  if (reachedThroughLink(project, path)) return { kind: 'unreadable', path, reason: LINKED }
-  const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW)
-  try {
-    writeFileSync(descriptor, text)
-  } finally {
-    closeSync(descriptor)
-  }
-  recordApproval(approvals, update.tier, text)
-  return { kind: 'written' }
 }
 
 /**

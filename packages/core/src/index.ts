@@ -638,11 +638,35 @@ export {
 export { contentToText, customEntriesOf, shellExitCodeOf, transcriptEntryOf, transcriptOf } from './runtime-entries.ts'
 export {
   EXTERNAL_WEB_CONTENT_NOTICE,
+  isPublicIpAddress,
+  readWebFetchHostInput,
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_MAX_URL_LENGTH,
   WEB_FETCH_TIMEOUT_MS,
   WEB_FETCH_TOOL_NAME,
+  WEB_FETCH_USER_AGENT,
+  WebFetchAllowlist,
+  WebFetchAllowlistChange,
   WebFetchConfig,
+  WebFetchHostCheck,
+  WebFetchHostCheckRequest,
+  type WebFetchHostInput,
+  WebFetchProjectHosts,
   WebFetchToolParameters,
+  WebToolsProject,
 } from './web-fetch.ts'
-export { WEB_SEARCH_TIMEOUT_MS, WEB_SEARCH_TOOL_NAME, WebSearchConfig, WebSearchToolParameters } from './web-search.ts'
+export {
+  ProjectWebTools,
+  ProjectWebToolsChange,
+  TAVILY_API_KEY_VARIABLE,
+  TavilyKeyChange,
+  WEB_SEARCH_TIMEOUT_MS,
+  WEB_SEARCH_TOOL_NAME,
+  WebSearchBackendChoice,
+  WebSearchConfig,
+  WebSearchDomainList,
+  WebSearchProjectSettings,
+  WebSearchSettings,
+  WebSearchSettingsChange,
+  WebSearchToolParameters,
+} from './web-search.ts'

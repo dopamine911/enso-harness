@@ -1,5 +1,4 @@
 import { lookup } from 'node:dns/promises'
-import { isIP } from 'node:net'
 import {
   type AgentToolResult,
   type ExtensionAPI,
@@ -16,14 +15,15 @@ import {
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_TIMEOUT_MS,
   WEB_FETCH_TOOL_NAME,
+  WEB_FETCH_USER_AGENT,
   WebFetchToolParameters,
 } from '@enso/core'
 import { ensoConfigPath, ensoHome, readTextIfPresent } from '@enso/core/paths'
+import { nonPublicAddressReason } from '@enso/core/web-fetch-allowlist'
 import {
   isFetchableContentType,
   isHostAllowed,
   isHtmlContentType,
-  isPublicIpAddress,
   parseWebFetchUrl,
   readableTextOfHtml,
   runUnderDeadline,
@@ -98,8 +98,6 @@ export interface WebFetchDependencies {
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
 }
-
-const USER_AGENT = 'enso-web-fetch'
 
 /** What the tool enforces: the allowlist, or why there is none, and the file a human changes. */
 interface WebFetchPolicy {
@@ -234,8 +232,14 @@ function registerWebFetch(
 
       // --- the ADVISORY address gate (see web-fetch-policy.ts's stated non-coverage:
       // resolve-here vs resolve-in-fetch is a TOCTOU window, accepted for MVP).
-      const addressProblem = await addressGateReason(url.hostname, dependencies.resolveHostAddresses)
-      if (addressProblem !== undefined) return refusal(rawUrl, addressProblem)
+      const refused = await nonPublicAddressReason(url.hostname, dependencies.resolveHostAddresses)
+      if (refused !== undefined)
+        return refusal(
+          rawUrl,
+          refused.kind === 'non-public'
+            ? `${refused.reason} — ${WEB_FETCH_TOOL_NAME} reaches the public web only.`
+            : `${refused.reason}.`,
+        )
 
       return await fetchUnderDeadline(url, rawUrl, dependencies, signal)
     },
@@ -245,37 +249,6 @@ function registerWebFetch(
 function refusal(rawUrl: string, reason: string): AgentToolResult<undefined> {
   auditLine('refused', rawUrl, reason)
   return { content: [{ type: 'text', text: `Not fetched: ${reason}` }], details: undefined }
-}
-
-/**
- * The advisory address gate: refuse a host whose addresses are not all provably public.
- * Returns the refusal reason, or undefined when the fetch may proceed. An IP-literal
- * hostname classifies directly (URL brackets IPv6 literals; strip them).
- */
-async function addressGateReason(
-  hostname: string,
-  resolveHostAddresses: WebFetchDependencies['resolveHostAddresses'],
-): Promise<string | undefined> {
-  const bareHost = hostname.replace(/^\[/, '').replace(/\]$/, '')
-  let addresses: readonly string[]
-  if (isIP(bareHost) !== 0) {
-    addresses = [bareHost]
-  } else {
-    try {
-      addresses = await resolveHostAddresses(bareHost)
-    } catch (error) {
-      return `"${bareHost}" did not resolve (${String(error)})`
-    }
-  }
-  const nonPublicAddress = addresses.find((address) => !isPublicIpAddress(address))
-  if (addresses.length === 0 || nonPublicAddress !== undefined) {
-    return (
-      `"${bareHost}" resolves to a non-public address` +
-      (nonPublicAddress !== undefined ? ` (${nonPublicAddress})` : '') +
-      ` — ${WEB_FETCH_TOOL_NAME} reaches the public web only.`
-    )
-  }
-  return undefined
 }
 
 /** The fetch itself, under the whole-call deadline AND the caller's abort signal. */
@@ -297,7 +270,7 @@ function fetchUnderDeadline(
         response = await dependencies.fetchUrl(url.href, {
           redirect: 'manual',
           signal: deadlineSignal,
-          headers: { 'user-agent': USER_AGENT },
+          headers: { 'user-agent': WEB_FETCH_USER_AGENT },
         })
       } catch (error) {
         return refusal(rawUrl, `the request failed: ${String(error)}`)

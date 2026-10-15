@@ -6,7 +6,12 @@ import {
   ensoLogger,
 } from '@enso/core'
 import { projectConfigPath, projectLocalConfigPath } from '@enso/core/paths'
-import { approveProjectTier, reviewProjectConfig, writeProjectThreadSettings } from '@enso/core/project-config'
+import {
+  approveProjectTier,
+  type ProjectTierWrite,
+  reviewProjectConfig,
+  writeProjectThreadSettings,
+} from '@enso/core/project-config'
 import { approvalsPathOf, type ProjectThreadSettingsSource, resolveProjectThreadSettings } from '../host/tree-setup.ts'
 import type { ProjectRegistry } from './projects.ts'
 
@@ -135,23 +140,35 @@ const PENDING_REASON = {
   unapproved: 'has not been approved',
 } as const
 
-/** The tier file written, or why not. */
-function writeTier(place: SettingsPlace, update: EnsoProjectSettingsUpdate): Refusal | undefined {
-  try {
-    const written = writeProjectThreadSettings(place.path, update, approvalsPathOf(place.source, place.path))
-    if (written.kind === 'written') return undefined
-    if (written.kind === 'pending') {
-      return {
-        kind: 'refused',
-        status: 409,
-        reason: `${written.path} ${PENDING_REASON[written.state]}; review and approve it before saving, so nothing is approved unseen`,
-      }
+/**
+ * Why a page write to one of the project's own files was not made, with its status — 409 for a file
+ * not the version approved, 422 for one that cannot be read or a change refused — or `undefined`
+ * when it was (or there was nothing to write). The project's Worktrees settings (#754) and its Web
+ * tools (#937) answer alike.
+ */
+export function tierWriteRefusal(written: ProjectTierWrite): Refusal | undefined {
+  if (written.kind === 'pending') {
+    return {
+      kind: 'refused',
+      status: 409,
+      reason: `${written.path} ${PENDING_REASON[written.state]}; review and approve it before saving, so nothing is approved unseen`,
     }
+  }
+  if (written.kind === 'refused') return { kind: 'refused', status: 422, reason: written.reason }
+  if (written.kind === 'unreadable') {
     return {
       kind: 'refused',
       status: 422,
       reason: `${written.path} is unreadable (${written.reason}); fix or remove it — it is never overwritten`,
     }
+  }
+  return undefined
+}
+
+/** The tier file written, or why not. */
+function writeTier(place: SettingsPlace, update: EnsoProjectSettingsUpdate): Refusal | undefined {
+  try {
+    return tierWriteRefusal(writeProjectThreadSettings(place.path, update, approvalsPathOf(place.source, place.path)))
   } catch (error: unknown) {
     return {
       kind: 'refused',

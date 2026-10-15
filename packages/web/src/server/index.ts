@@ -21,6 +21,7 @@ import { createThreadReadRoutes } from './thread-read-routes.ts'
 import type { ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry } from './thread-registry.ts'
 import { createThreadRoutes } from './thread-routes.ts'
+import { createWebToolsRoutes, type HostCheckNetwork } from './web-tools-routes.ts'
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -80,6 +81,12 @@ export interface EnsoServerOptions {
    * checkout and the project settings routes refuse.
    */
   threadSettings?: ProjectThreadSettingsSource
+  /** The user's config file (`ENSO_HOME/config.json`), which Settings › Web tools edits (#924); absent, those routes refuse. */
+  userConfigPath?: string
+  /** The user's secrets file (`ENSO_HOME/secrets.env`), where Settings › Web tools sets the Tavily key (#932); absent, that route refuses. */
+  userSecretsPath?: string
+  /** The Web tools host check's lookup and request (#924). ⓘ Injectable for `server-handler.test.ts`; absent, DNS and `fetch`. */
+  hostCheck?: HostCheckNetwork
   /**
    * The risk fold's thresholds, from the user's config (`security.incidents`, #466) — user-only, like
    * `projectRoots`. Absent, the defaults: what the guard measures with when the config sets none.
@@ -259,6 +266,15 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     threadSettings: options.threadSettings,
     agentDir: options.agentDir,
   })
+  const { dispatchWebToolsRoute } = createWebToolsRoutes({
+    userConfigPath: options.userConfigPath,
+    userSecretsPath: options.userSecretsPath,
+    projects,
+    threads,
+    agentDir: options.agentDir,
+    projectsDir: options.projectsDir,
+    ...options.hostCheck,
+  })
   const { dispatchThreadRoute } = createThreadRoutes({
     reads,
     controls,
@@ -350,6 +366,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (dispatchProjectRoute(request, response)) return
     if (dispatchPromptRoute(request, response)) return
     if (dispatchPermissionRoute(request, response)) return
+    if (dispatchWebToolsRoute(request, response)) return
     if (dispatchModelsRoute(request, response)) return
     if (dispatchSettingsRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return

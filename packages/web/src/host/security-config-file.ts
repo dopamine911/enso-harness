@@ -5,8 +5,8 @@ import {
   localJudgeUrlProblem,
 } from '@enso/core'
 import { ensoSecretsPath } from '@enso/core/paths'
-import { parseDotenv, readSecret } from '@enso/core/secrets'
-import { bytesOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
+import { readSecret, writeSecret } from '@enso/core/secrets'
+import type { WriteCondition } from './atomic-file.ts'
 import { type ConfigSectionWrite, readConfigFile, writeConfigSections } from './config-file.ts'
 
 /**
@@ -75,30 +75,18 @@ export function writeSecuritySettings(
   )
 }
 
-/** A value `parseDotenv` reads back exactly, unquoted: no whitespace, quote or `#`. */
-const PLAIN_SECRET = /^[^\s'"#]+$/
-
-/** `secrets.env`'s permission bits: read and written by its owner only. */
-const OWNER_ONLY_FILE_MODE = 0o600
-
 /** @group Security settings */
 export type JudgeKeyWrite =
   | { readonly kind: 'written'; readonly judgeKeySet: boolean }
   | { readonly kind: 'refused'; readonly reason: string }
 
 /**
- * Store the judge's key in `secrets.env` (`null` removes it), every other line kept as written; the
- * file is replaced atomically and stays `0600`. The value is never logged or answered.
+ * Store the judge's key in `secrets.env` (`null` removes it) through the one secrets writer
+ * (`writeSecret`, shared with Web tools' Tavily key, #932): every other line kept as written, the
+ * file replaced atomically and `0600`. The value is never logged or answered.
  */
 export function writeJudgeKey(home: string, value: string | null): JudgeKeyWrite {
-  const secretsPath = ensoSecretsPath(home)
-  if (value !== null && !PLAIN_SECRET.test(value)) {
-    return { kind: 'refused', reason: 'a key is one token: no spaces, quotes or `#`' }
-  }
-  const text = bytesOf(secretsPath)?.toString('utf8') ?? ''
-  const lines = text.split(/\r?\n/).filter((line) => !parseDotenv(line).has(ENSO_JUDGE_KEY_NAME))
-  while (lines.length > 0 && lines.at(-1) === '') lines.pop()
-  if (value !== null) lines.push(`${ENSO_JUDGE_KEY_NAME}=${value}`)
-  writeAtomically(secretsPath, lines.length === 0 ? '' : `${lines.join('\n')}\n`, OWNER_ONLY_FILE_MODE)
+  const written = writeSecret(ensoSecretsPath(home), ENSO_JUDGE_KEY_NAME, value ?? undefined)
+  if (written.kind === 'refused') return written
   return { kind: 'written', judgeKeySet: (readSecret(home, ENSO_JUDGE_KEY_NAME) ?? '').length > 0 }
 }

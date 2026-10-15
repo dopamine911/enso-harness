@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   FolderIcon,
   FolderTreeIcon,
+  GlobeIcon,
   KeyRoundIcon,
   LayersIcon,
   LockIcon,
@@ -33,8 +34,9 @@ import { ProvidersSection } from './providers-settings.tsx'
 import { RolesSection } from './roles-settings.tsx'
 import { SecuritySection } from './security-settings.tsx'
 import { applyTheme, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
-import { SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
+import { type ProjectTab, SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
 import { TreesSection } from './trees-settings.tsx'
+import { WebToolsSection } from './web-tools-settings.tsx'
 
 /**
  * Settings, a page (#869; the header's dialog before it), in sections, each its own route.
@@ -45,9 +47,12 @@ import { TreesSection } from './trees-settings.tsx'
  * under, saved on the server (`permissions-settings.tsx`); its draft is held beneath the page
  * (`routed-page.tsx`), so leaving Settings keeps it. Providers and Roles (#904): logging in to
  * providers, favorite models and hidden providers (`providers-settings.tsx`); named model + effort
- * roles and their presets (`roles-settings.tsx`), all kept in the server's `models` section. Storage
- * (#578): what each thread tree and snapshot store costs on disk, measured when the section opens,
- * with each tree's Delete (`trees-settings.tsx`).
+ * roles and their presets (`roles-settings.tsx`), all kept in the server's `models` section. Security
+ * (#933): `config.json`'s `security` section and the judge's key (`security-settings.tsx`). Web tools
+ * (#924, #932): the hosts `web_fetch` may read, and `web_search`'s backend, Tavily domains and key,
+ * saved on the server in `ENSO_HOME/config.json` and `secrets.env` (`web-tools-settings.tsx`).
+ * Projects & threads (#934): your defaults for every project (`projects-settings.tsx`). Storage (#578): what each thread tree and snapshot store costs on disk,
+ * measured when the section opens, with each tree's Delete (`trees-settings.tsx`).
  */
 
 /**
@@ -237,6 +242,7 @@ const SECTION_LINKS: Readonly<Record<SettingsSection, { readonly label: string; 
   roles: { label: 'Roles', icon: <TagsIcon /> },
   permissions: { label: 'Permissions', icon: <LockIcon /> },
   security: { label: 'Security', icon: <ShieldAlertIcon /> },
+  'web-tools': { label: 'Web tools', icon: <GlobeIcon /> },
   projects: { label: 'Projects & threads', icon: <FolderTreeIcon /> },
   storage: { label: 'Storage', icon: <FolderIcon /> },
 }
@@ -307,8 +313,8 @@ export interface SettingsPageProps {
   readonly stored: readonly EnsoStoredThread[]
   /** A thread deleted from Storage: the page leaves it, as the header's Delete does. */
   readonly onDeleted: (threadId: string) => void
-  /** Open a project's page at its Storage tab (#871), from Storage's group of that project. */
-  readonly onOpenProject: (projectId: string) => void
+  /** Open a project's page at `tab` (#871): Storage from Storage's group of it, Web tools from its own web tools (#937). */
+  readonly onOpenProject: (projectId: string, tab: ProjectTab) => void
   /** Open the Projects page, from the nav's last link. */
   readonly onOpenProjects: () => void
 }
@@ -329,6 +335,14 @@ function SectionBody({
   if (section === 'providers') return <ProvidersSection fetch={fetch} />
   if (section === 'roles') return <RolesSection fetch={fetch} />
   if (section === 'security') return <SecuritySection fetch={fetch} />
+  if (section === 'web-tools')
+    return (
+      <WebToolsSection
+        fetch={fetch}
+        stored={stored}
+        onOpenProject={(projectId) => onOpenProject(projectId, 'web-tools')}
+      />
+    )
   if (section === 'projects') return <ProjectsSection fetch={fetch} projects={projects} />
   return (
     <TreesSection
@@ -336,7 +350,7 @@ function SectionBody({
       projects={projects}
       stored={stored}
       onDeleted={onDeleted}
-      onOpenProject={onOpenProject}
+      onOpenProject={(projectId) => onOpenProject(projectId, 'storage')}
     />
   )
 }
@@ -344,12 +358,13 @@ function SectionBody({
 /**
  * Where a section is kept, beside its title (the prototype's pill): this browser for Appearance, the
  * server's file for Permissions and for Providers' and Roles' `models` section — its real path once
- * read — and for Security and Projects & threads (`config.json`, by name: each section reads its
- * file itself, so its real path is beside each field), and Storage measured on the server.
+ * read — for Security and Projects & threads (`config.json`, by name: each section reads its file
+ * itself, so its real path is beside each field) and for Web tools, and Storage measured on the server.
  */
 function savedWhere(section: SettingsSection, permissions: PolicyEditor, models: ModelsSettingsState): string {
   if (section === 'appearance') return 'Saved in this browser'
   if (section === 'storage') return 'Measured on the server when you open this'
+  if (section === 'web-tools') return 'Saved on the server · ENSO_HOME/config.json'
   if (section === 'providers' || section === 'roles')
     return models.kind === 'loaded' ? `Saved on the server · ${models.settings.path}` : 'Saved on the server'
   if (section === 'security' || section === 'projects') return 'Saved on the server · config.json'

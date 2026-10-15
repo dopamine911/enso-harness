@@ -78,7 +78,8 @@ function headingOf(page: PageUrl, projects: readonly EnsoProject[]): PageHeading
   if (page.kind === 'settings') {
     return {
       title: 'Settings',
-      subtitle: 'Appearance stays in this browser. Permissions, security, projects and storage live on the server.',
+      subtitle:
+        'Appearance stays in this browser. Permissions, security, web tools, projects and storage live on the server.',
       status: 'Settings',
     }
   }
@@ -417,7 +418,7 @@ function PageBody({
         projects={projects.rows}
         stored={stored.rows}
         onDeleted={onDeleted}
-        onOpenProject={(projectId) => onOpen(projectRoute(projectId, 'storage'))}
+        onOpenProject={(projectId, tab) => onOpen(projectRoute(projectId, tab))}
         onOpenProjects={() => onOpen(PROJECTS_ROUTE)}
       />
     )

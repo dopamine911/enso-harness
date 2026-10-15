@@ -1,0 +1,206 @@
+import { applyEdits, type Edit, modify } from 'jsonc-parser'
+import { type EnsoConfig, type EnsoConfigParseResult, parseEnsoConfig } from './config.ts'
+import { readTextIfPresent, replaceFileText } from './paths.ts'
+import { readWebFetchHostInput } from './web-fetch.ts'
+
+/**
+ * One key of the user's `ENSO_HOME/config.json`, changed from Settings (#924, #932) instead of by hand.
+ *
+ * ⚠ ONLY THAT KEY CHANGES. The edit is made on the file's text (`jsonc-parser`'s `modify`), so every
+ * other key keeps its place and its formatting; the result must pass `parseEnsoConfig` before it
+ * replaces the file (`replaceFileText`: a symlinked file stays a link, the file keeps its mode), and a result that does not changes
+ * nothing. A file that is there and unreadable is NEVER overwritten: the reason comes back.
+ */
+
+/**
+ * What a change to the user's config comes to: the key at `at` set to `value` (`undefined` removes
+ * it), or no write at all — already so, or refused with the reason.
+ *
+ * @group Configuration
+ */
+export type UserConfigEdit =
+  | { readonly at: readonly [string, ...string[]]; readonly value: unknown }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * What a change did: the config as the file now holds it, or why the file was left as it was.
+ *
+ * @group Configuration
+ */
+export type UserConfigWrite =
+  | { readonly kind: 'written' | 'unchanged'; readonly config: EnsoConfig }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * A config file read — the user's, or a trusted project's — or why it can't be (fails closed, as every reader does).
+ *
+ * @group Configuration
+ */
+export function readEnsoConfigFile(path: string): EnsoConfigParseResult {
+  try {
+    return parseEnsoConfig(readTextIfPresent(path))
+  } catch (error: unknown) {
+    return { kind: 'unreadable', reason: `could not be read: ${String(error)}` }
+  }
+}
+
+/**
+ * One host name added to or removed from `hosts`, the list kept at `at` — the allowlist's hosts
+ * (#924), a Tavily domain list (#932). A name to add must already be in the form
+ * `readWebFetchHostInput` gives back for a bare host, or it is refused; one already there, by any
+ * case, is already so.
+ *
+ * @group Configuration
+ */
+export function hostListEdit(
+  at: readonly [string, ...string[]],
+  hosts: readonly string[],
+  change: { readonly add: string } | { readonly remove: string },
+  noun: 'host' | 'domain',
+): UserConfigEdit {
+  if ('remove' in change) {
+    const kept = hosts.filter((host) => host !== change.remove)
+    return kept.length === hosts.length ? { kind: 'unchanged' } : { at, value: kept }
+  }
+  const typed = readWebFetchHostInput(change.add)
+  if (typed.kind === 'refused') return { kind: 'refused', reason: typed.reason }
+  if (typed.kind !== 'host' || typed.host !== change.add)
+    return { kind: 'refused', reason: `add the ${noun} itself, ${typed.host}, not ${change.add}` }
+  if (hosts.some((host) => host.toLowerCase() === typed.host)) return { kind: 'unchanged' }
+  return { at, value: [...hosts, typed.host] }
+}
+
+/** `value` under the keys of `path`, as a new object. */
+function nested(path: readonly string[], value: unknown): unknown {
+  return path.reduceRight<unknown>((inner, key) => ({ [key]: inner }), value)
+}
+
+/** What a save makes of a config file's text: the new text, nothing to write, or why not. */
+export type ConfigTextChange =
+  | { readonly kind: 'edited'; readonly text: string }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * What a save of a config file did: written or left as it was (`config`, as the file now holds it),
+ * or why not — the file is `unreadable` now, the change was `refused`, or its result is `invalid`
+ * (not a config Enso reads). Each caller words the reason for its page.
+ *
+ * @group Configuration
+ */
+export type ConfigFileEdit =
+  | { readonly kind: 'written'; readonly config: EnsoConfig }
+  | { readonly kind: 'unchanged'; readonly config: EnsoConfig }
+  | { readonly kind: 'unreadable'; readonly reason: string }
+  | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'invalid'; readonly reason: string }
+
+/**
+ * The ONE writer of the user's `config.json` from Settings — Web tools (#924, #932), and every
+ * section `writeConfigSections` saves (Security #933, Projects & threads #934, Providers and Roles
+ * #904): `edit` makes the new text of the file as it is (`undefined`: none yet).
+ *
+ * ⚠ IT IS A POLICY FILE THAT FAILS CLOSED: one that is unreadable now is NEVER written over (its
+ * owner fixes it by hand), and a result `parseEnsoConfig` refuses writes nothing. The file is
+ * replaced in one step (`replaceFileText`: a symlinked file stays a link) in the mode it had, and a
+ * new one is made owner-only (0600) — never the umask's default, which would open the user's config.
+ *
+ * @group Configuration
+ */
+export function editConfigFile(
+  path: string,
+  edit: (text: string | undefined, config: EnsoConfig) => ConfigTextChange,
+): ConfigFileEdit {
+  let text: string | undefined
+  try {
+    text = readTextIfPresent(path)
+  } catch (error: unknown) {
+    return { kind: 'unreadable', reason: `could not be read: ${String(error)}` }
+  }
+  const read = parseEnsoConfig(text)
+  if (read.kind === 'unreadable') return { kind: 'unreadable', reason: read.reason }
+  const changed = edit(text, read.config)
+  if (changed.kind === 'unchanged') return { kind: 'unchanged', config: read.config }
+  if (changed.kind === 'refused') return changed
+  const checked = parseEnsoConfig(changed.text)
+  if (checked.kind === 'unreadable') return { kind: 'invalid', reason: checked.reason }
+  replaceFileText(path, changed.text, text === undefined ? { mode: 0o600 } : {})
+  return { kind: 'written', config: checked.config }
+}
+
+/**
+ * Change one key of the user's file at `path` (`editConfigFile`): `plan` reads the config as the
+ * file holds it and names the edit. A missing file is written whole; an unreadable one is refused.
+ *
+ * @group Configuration
+ */
+export function editUserConfig(path: string, plan: (config: EnsoConfig) => UserConfigEdit): UserConfigWrite {
+  const written = editConfigFile(path, (text, config) => editConfigText(text, config, plan(config)))
+  if (written.kind === 'written' || written.kind === 'unchanged') return written
+  if (written.kind === 'refused') return written
+  if (written.kind === 'invalid')
+    return {
+      kind: 'refused',
+      reason: `the change would not be a config Enso reads (${written.reason}); nothing was changed`,
+    }
+  return {
+    kind: 'refused',
+    reason: `${path} is unreadable (${written.reason}); fix it by hand — it is never overwritten`,
+  }
+}
+
+/**
+ * What one key's edit makes of a config file's text: the new text, which `parseEnsoConfig` reads,
+ * and the config it holds — or nothing to write (already so), or why not.
+ *
+ * @group Configuration
+ */
+export type ConfigTextEdit =
+  | { readonly kind: 'edited'; readonly text: string; readonly config: EnsoConfig }
+  | { readonly kind: 'unchanged'; readonly config: EnsoConfig }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * `edit` made on `text` (`undefined`: no file yet), whose config is `config`, touching nothing else
+ * (the module header). Writes nothing: the user's file (`editConfigFile`, through `editUserConfig`) and a
+ * project's own (`changeProjectWebTools`, #937) each write it as that file is written.
+ *
+ * @group Configuration
+ */
+export function editConfigText(text: string | undefined, config: EnsoConfig, edit: UserConfigEdit): ConfigTextEdit {
+  if (!('at' in edit)) return edit.kind === 'refused' ? edit : { kind: 'unchanged', config }
+  const [section, ...rest] = edit.at
+  const sectionMissing = (config as Record<string, unknown>)[section] === undefined
+  if (sectionMissing && edit.value === undefined) return { kind: 'unchanged', config }
+  // ⚠ No formatting options: jsonc-parser's formatter reflows the edit's neighbours too, and they
+  // must keep their text. Unformatted, the edit is the value alone; a new file is written whole.
+  const after =
+    text === undefined
+      ? `${JSON.stringify(nested(edit.at, edit.value), null, 2)}\n`
+      : applyEdits(
+          text,
+          sectionMissing
+            ? newSectionEdits(text, section, nested(rest, edit.value))
+            : modify(text, [...edit.at], edit.value, {}),
+        )
+  const checked = parseEnsoConfig(after)
+  if (checked.kind === 'unreadable')
+    return {
+      kind: 'refused',
+      reason: `the change would not be a config Enso reads (${checked.reason}); nothing was changed`,
+    }
+  return { kind: 'edited', text: after, config: checked.config }
+}
+
+/**
+ * A file without `section` yet: the section added as a top-level key on a line of its own, at the
+ * file's own indent, the keys before it untouched.
+ */
+function newSectionEdits(text: string, section: string, value: unknown): Edit[] {
+  const indent = /\n([ \t]+)"/.exec(text)?.[1] ?? '  '
+  return modify(text, [section], value, {}).map((edit) => ({
+    ...edit,
+    content: edit.content.startsWith(',') ? `,\n${indent}${edit.content.slice(1)}` : `\n${indent}${edit.content}\n`,
+  }))
+}

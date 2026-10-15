@@ -20,8 +20,9 @@
  * @module
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
+  chmodSync,
   closeSync,
   constants,
   copyFileSync,
@@ -37,8 +38,11 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
+  writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -73,6 +77,78 @@ export function realpathOrSelf(path: string): string {
   } catch {
     return path
   }
+}
+
+/** As many links as one path may pass through before it is a loop (Linux's own `MAXSYMLINKS`). */
+const MAX_LINK_HOPS = 40
+
+/**
+ * The file `path` names, through every link — also a link whose file is not there yet (a dotfiles
+ * repo not checked out), which `realpathSync` refuses. A path with nothing at it names itself.
+ * A link's target is read against its directory's REAL path, as the kernel reads a `..` in it.
+ * ⚠ A link loop (more than `MAX_LINK_HOPS` links) throws ELOOP: the link is never replaced.
+ */
+function fileBehindLinks(path: string): string {
+  let current = path
+  for (let hop = 0; hop < MAX_LINK_HOPS; hop++) {
+    try {
+      return realpathSync(current)
+    } catch {
+      // realpath refused (nothing there, a dangling link, a loop, no access): walk the link by hand.
+    }
+    let isLink: boolean
+    try {
+      isLink = lstatSync(current).isSymbolicLink()
+    } catch {
+      return current
+    }
+    if (!isLink) return current
+    current = resolve(realpathOrSelf(dirname(current)), readlinkSync(current))
+  }
+  throw Object.assign(new Error(`ELOOP: too many symbolic links behind "${path}"`), { code: 'ELOOP' })
+}
+
+/**
+ * Replace the file at `path` with `text` (or bytes — a file put back as it was, #945) in one step:
+ * written beside the file it names, then renamed over it — a reader sees the old file or the new
+ * one, never half of one. Settings' writes go through here: the permission policy and Enso's rule
+ * record beside it (#474, #945), `config.json` (#924, #932, #933, #934), `secrets.env` (#932, #933)
+ * and the project config approvals (#753).
+ *
+ * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config or secrets file kept as a symlink (into a
+ * dotfiles repo, say) stays a link, and the file behind it changes — or is made, when the link points
+ * at a file not there yet; a link into a directory not there is an error, never replaced. The file
+ * keeps its own mode, or takes `mode` whatever it was before (`secrets.env` is owner-only, #932,
+ * #933); a new file without one gets the umask's. The staged file is always newly made, so it is never
+ * readable wider for a moment. Nothing staged is left behind when the write or the rename throws: the
+ * error is rethrown.
+ *
+ * ⚠ THE MODIFICATION TIME MUST MOVE. The permission engine reloads a policy only when the file's
+ * `mtimeMs` differs from the one it last read (`config/policy-loader.ts`), and Linux stamps it from
+ * a coarse clock — one tick is milliseconds. A write landing in the same tick as the last one (a
+ * reset just after a hand edit) kept the OLD policy in force, silently. Found by
+ * `agent-host.test.ts`'s reset test.
+ *
+ * @group Workspace paths
+ */
+export function replaceFileText(path: string, text: string | Uint8Array, options: { mode?: number } = {}): void {
+  const target = fileBehindLinks(path)
+  const previous = existsSync(target) ? statSync(target) : undefined
+  const mode = options.mode ?? (previous === undefined ? undefined : previous.mode & 0o7777)
+  const staged = `${target}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(staged, text, mode === undefined ? { flag: 'wx' } : { flag: 'wx', mode })
+    // writeFileSync's mode is masked by the umask; the mode chosen above is set exactly.
+    if (mode !== undefined) chmodSync(staged, mode)
+    renameSync(staged, target)
+  } catch (error: unknown) {
+    rmSync(staged, { force: true })
+    throw error
+  }
+  if (previous === undefined) return
+  const written = statSync(target)
+  if (written.mtimeMs > previous.mtimeMs) return
+  utimesSync(target, written.atime, (previous.mtimeMs + 1) / 1000)
 }
 
 /**

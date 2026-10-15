@@ -25,6 +25,7 @@ import {
   threadsOfProject,
 } from './project-list.ts'
 import { OWN_FILES, RevokeDialog, TrustDialog, useProjectTrust } from './project-trust-dialog.tsx'
+import { ProjectWebToolsTab } from './project-web-tools.tsx'
 import { ProjectWorktrees } from './project-worktrees.tsx'
 import type { ThreadSummary } from './thread-stores.ts'
 import { PROJECT_TABS, type PageRoute, PROJECTS_ROUTE, type ProjectTab } from './thread-url.ts'
@@ -32,10 +33,10 @@ import { Age, LiveDot, UNTITLED_THREAD } from './threads-rail.tsx'
 import { ProjectStorage } from './trees-settings.tsx'
 
 /**
- * A project's page (#871): `?page=project&project=<id>&tab=threads|worktrees|storage`, opened from
+ * A project's page (#871): `?page=project&project=<id>&tab=threads|worktrees|web-tools|storage`, opened from
  * a Projects card, the rail's `⋯` and Settings › Storage. Its tabs gather what two dialogs held — the
  * tree settings (`ProjectSettingsDialog`, now the Worktrees tab) and its group of Settings' trees
- * (now the Storage tab) — beside its threads. Over the tabs, what is wrong with the project — its
+ * (now the Storage tab) — beside its threads, and its own web tools (#937, the Web tools tab). Over the tabs, what is wrong with the project — its
  * folder is gone (Check again reads the projects again — the server recomputes the status on every
  * list, `projects.ts` `viewOf`) — and its trust (#873): not trusted, with **Trust this project…**,
  * or trusted, with **Revoke trust…**, each behind a confirmation. Under the trust, its own config
@@ -49,6 +50,7 @@ import { ProjectStorage } from './trees-settings.tsx'
 const TAB_LABELS: Readonly<Record<ProjectTab, string>> = {
   threads: 'Threads',
   worktrees: 'Worktree settings',
+  'web-tools': 'Web tools',
   storage: 'Storage',
 }
 
@@ -483,9 +485,9 @@ function ProjectBanners({
 
 /**
  * The tabs, at the route's: each a navigation of its own, so back returns to the tab before.
- * `settingsRevision` moves when the trust or an approval changes: the Worktrees tab reads its
- * settings again, since what they resolve to depends on both. `onSaved` says a save went through,
- * which writes and approves a file.
+ * `settingsRevision` moves when the trust or an approval changes: the Worktrees and Web tools tabs
+ * read their settings again, since what they resolve to depends on both. `onSaved` says a save went
+ * through, which writes and approves a file.
  */
 function ProjectTabs({
   project,
@@ -534,6 +536,17 @@ function ProjectTabs({
           revision={settingsRevision}
           onSaved={onSaved}
           onOpenSettings={() => onOpen({ kind: 'settings', section: 'projects' })}
+        />
+      </TabsContent>
+      <TabsContent value="web-tools">
+        {/* Keyed by the trust and the approvals: a change reads the tab again, since what applies depends on both. */}
+        <ProjectWebToolsTab
+          key={settingsRevision}
+          projectId={project.projectId}
+          fetch={fetchImpl}
+          stored={stored}
+          onSaved={onSaved}
+          onOpenSettings={() => onOpen({ kind: 'settings', section: 'web-tools' })}
         />
       </TabsContent>
       <TabsContent value="storage">

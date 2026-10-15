@@ -7,14 +7,14 @@ import {
   type EnsoPermissionPolicyWrite,
   EnsoRuleRecord,
 } from '@enso/core'
-import { realpathOrSelf } from '@enso/core/paths'
+import { realpathOrSelf, replaceFileText } from '@enso/core/paths'
 import {
   ENSO_DEFAULT_PERMISSION_POLICY,
   permissionEngineConfigPath,
   withCatchAllFirst,
 } from '@enso/core/permission-rules'
 import { Check } from 'typebox/value'
-import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
+import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition } from './atomic-file.ts'
 import { policyProblems } from './permission-policy.ts'
 
 /**
@@ -33,7 +33,7 @@ import { policyProblems } from './permission-policy.ts'
  * and an edit made there is never overwritten unseen.
  *
  * In the host, beside the engine's schema, because the write is shaped by what the engine does:
- * it reloads on the modification time alone (`writeAtomically`), and its real-engine tests must
+ * it reloads on the modification time alone (`replaceFileText`), and its real-engine tests must
  * share `agent-host.test.ts`'s process-wide agent dir.
  *
  * ⚠ ENSO'S RECORD RIDES THE SAME SAVE (#945). The rules switched off, and what each rule group
@@ -131,7 +131,7 @@ const isEmptyRecord = (record: EnsoRuleRecord): boolean =>
  * Write the policy and, when given, Enso's record (#945): both, or the record put back. The record
  * goes first — a rule switched off leaves the policy only once the record holds it — and when the
  * policy's write then fails, the record that was on disk is put back (or, none there, removed). Each
- * write is atomic (`writeAtomically`; the engine never reads the record, so moving its time is
+ * write is atomic (`replaceFileText`; the engine never reads the record, so moving its time is
  * harmless), the pair is not: a crash between them leaves the new record over the old policy.
  * What is in force does not change; a rule being switched off reads as still in force (`liveRecord`
  * on the page), one being switched back on is in neither file, and a group being turned off leaves
@@ -144,13 +144,13 @@ function writeBoth(policyPath: string, policyText: string, record: EnsoRuleRecor
   const recordText = record === undefined ? undefined : `${JSON.stringify(record, null, 2)}\n`
   const changed =
     record !== undefined && (previous === undefined ? !isEmptyRecord(record) : previous.toString('utf8') !== recordText)
-  if (changed && recordText !== undefined) writeAtomically(recordPath, recordText)
+  if (changed && recordText !== undefined) replaceFileText(recordPath, recordText)
   try {
-    writeAtomically(policyPath, policyText)
+    replaceFileText(policyPath, policyText)
   } catch (error: unknown) {
     if (changed) {
       if (previous === undefined) rmSync(recordPath, { force: true })
-      else writeAtomically(recordPath, previous)
+      else replaceFileText(recordPath, previous)
     }
     throw error
   }

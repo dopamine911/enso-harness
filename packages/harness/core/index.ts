@@ -38,13 +38,7 @@ export {
   userJudgeConfig,
 } from './session-config.ts'
 export { readableTextOfHtml } from './html-text.ts'
-export {
-  isFetchableContentType,
-  isHostAllowed,
-  isHtmlContentType,
-  isPublicIpAddress,
-  parseWebFetchUrl,
-} from './web-fetch-policy.ts'
+export { isFetchableContentType, isHostAllowed, isHtmlContentType, parseWebFetchUrl } from './web-fetch-policy.ts'
 export { resolveModelAuth } from './web-search/auth.ts'
 export { runAnthropicProviderSearch } from './web-search/providers/anthropic.ts'
 export {
@@ -54,11 +48,7 @@ export {
 } from './web-search/providers/deepseek.ts'
 export { runGoogleProviderSearch } from './web-search/providers/google.ts'
 export { runOpenAiProviderSearch } from './web-search/providers/openai.ts'
-export {
-  runTavilyProviderSearch,
-  TAVILY_API_KEY_VARIABLE,
-  type TavilySearchRequest,
-} from './web-search/providers/tavily.ts'
+export { runTavilyProviderSearch, type TavilySearchRequest } from './web-search/providers/tavily.ts'
 export {
   type FetchUrlInit,
   type ModelSearchRequest,

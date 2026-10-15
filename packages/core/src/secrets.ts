@@ -39,7 +39,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { ensoSecretsPath, rootDotenvPath } from './paths.ts'
+import { ensoSecretsPath, replaceFileText, rootDotenvPath } from './paths.ts'
 
 /**
  * The words a secret-shaped name carries (whole, underscore-delimited, singular or plural), named
@@ -128,6 +128,74 @@ export function readDotenvFile(path: string): Map<string, string> {
  */
 export function readSecret(home: string, name: string): string | undefined {
   return readDotenvFile(ensoSecretsPath(home)).get(name)
+}
+
+/**
+ * What a secret write did — never echoing the value: written, already so, or refused with a reason
+ * that names no part of it.
+ *
+ * @group Secrets
+ */
+export type SecretWrite =
+  | { readonly kind: 'written' | 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * Set (`value`) or remove (`undefined`) one secret in the dotenv file at `path` — Settings' write
+ * path (Web tools' Tavily key, #932; Security's judge key, #933). Every other line keeps its text
+ * and its own line ending; the name's line is replaced where it stood, keeping its ending and an
+ * `export ` it had (a file `source`d into a shell still exports the key), or appended, ending CRLF
+ * when the file has any CRLF line. The file is written
+ * owner-only, and only once `parseDotenv` reads the value back exactly, through `replaceFileText`:
+ * a `secrets.env` kept as a symlink (a dotfiles or password-store setup) stays a link, and the
+ * file behind it changes.
+ *
+ * ⚠ The value is never in a reason: a refusal says what is wrong with its shape, not what it was.
+ *
+ * @group Secrets
+ */
+export function writeSecret(path: string, name: string, value: string | undefined): SecretWrite {
+  if (value !== undefined && !/^[\x21-\x7e]+$/.test(value))
+    return { kind: 'refused', reason: 'a key is one line of printable characters, with no spaces' }
+  if (value !== undefined && /^["']/.test(value))
+    return { kind: 'refused', reason: 'a key that starts with a quote would be read without it' }
+  let text: string
+  try {
+    text = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  } catch (error: unknown) {
+    return { kind: 'refused', reason: `${path} could not be read (${String(error)}); nothing was changed` }
+  }
+  if (parseDotenv(text).get(name) === value) return { kind: 'unchanged' }
+  const after = textWithSecret(text, name, value)
+  if (parseDotenv(after).get(name) !== value)
+    return { kind: 'refused', reason: `the file would not read the ${name} it was given back; nothing was changed` }
+  replaceFileText(path, after, { mode: 0o600 })
+  return { kind: 'written' }
+}
+
+/**
+ * `text` with `name`'s lines dropped and, given a `value`, its line where the first stood (its
+ * `export ` and ending kept) or appended (CRLF when the file has any). Every other line keeps its
+ * text and its own ending.
+ */
+function textWithSecret(text: string, name: string, value: string | undefined): string {
+  // Each line with its own ending; the last may have none.
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? []
+  const named = lines.map((line) => parseDotenv(line).has(name))
+  const at = named.indexOf(true)
+  const kept = lines.filter((_line, index) => !named[index])
+  if (value === undefined) return kept.join('')
+  if (at !== -1) {
+    const replaced = lines[at] ?? ''
+    const exported = /^\s*export\s+/.exec(replaced)?.[0] ?? ''
+    kept.splice(at, 0, `${exported}${name}=${value}${/\r?\n$/.exec(replaced)?.[0] ?? ''}`)
+    return kept.join('')
+  }
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const last = kept.length - 1
+  if (last >= 0 && !kept[last]?.endsWith('\n')) kept[last] = `${kept[last]}${eol}`
+  kept.push(`${name}=${value}${eol}`)
+  return kept.join('')
 }
 
 /**

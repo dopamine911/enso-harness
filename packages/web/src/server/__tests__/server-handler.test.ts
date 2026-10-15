@@ -3,12 +3,14 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -45,8 +47,11 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type ThreadRuntime,
+  ProjectWebTools,
   readEnsoThreadIncidents,
   readEnsoThreadJudgeCases,
+  WebFetchAllowlist,
+  WebSearchSettings,
 } from '@enso/core'
 import { projectConfigApprovalsPath, projectIdOf } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
@@ -64,6 +69,7 @@ import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'
 import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
 import { HISTORY_PAGE_MESSAGES } from '../thread-read.ts'
+import type { HostCheckFetch, HostCheckNetwork } from '../web-tools-routes.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -235,8 +241,18 @@ async function startWith(
     launch = tmpdir(),
     agentDir = mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     threadSettings,
+    userConfigPath,
+    userSecretsPath,
+    hostCheck,
     ensoHome,
+    projectsDir,
   }: {
+    /** The user's secrets file Settings › Web tools sets the Tavily key in (#932). */
+    readonly userSecretsPath?: string
+    /** The user's config Settings › Web tools edits (#924); absent, those routes refuse. */
+    readonly userConfigPath?: string
+    /** The Web tools host check's lookup and request (#924); absent, real DNS and `fetch`. */
+    readonly hostCheck?: HostCheckNetwork
     readonly projectRoots?: readonly string[]
     readonly promptsDir?: string
     readonly permissionRulesPath?: string
@@ -248,6 +264,8 @@ async function startWith(
     readonly threadSettings?: ProjectThreadSettingsSource
     /** `ENSO_HOME`, for the settings files' routes (#933); absent, they refuse. */
     readonly ensoHome?: string
+    /** The project folders (#552), where each project's approved config tiers are kept (#753); absent, none. */
+    readonly projectsDir?: string
   } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
@@ -260,7 +278,11 @@ async function startWith(
     projectRoots,
     ...(promptsDir === undefined ? {} : { promptsDir }),
     ...(threadSettings === undefined ? {} : { threadSettings }),
+    ...(userConfigPath === undefined ? {} : { userConfigPath }),
+    ...(userSecretsPath === undefined ? {} : { userSecretsPath }),
+    ...(hostCheck === undefined ? {} : { hostCheck }),
     ...(ensoHome === undefined ? {} : { ensoHome }),
+    ...(projectsDir === undefined ? {} : { projectsDir }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir,
     permissionRulesPath,
@@ -1168,6 +1190,530 @@ test('⚠ a foreign page cannot trust a project or read its trust; Enso’s own 
   expect(trustFile(agentDir)).toEqual({ [project]: false })
   const ownPage = { Origin: 'http://127.0.0.1:5178', 'Sec-Fetch-Site': 'same-origin' }
   expect((await trustOf(await putTrust(url, projectId, { trusted: true }, ownPage))).trusted).toBe(true)
+})
+
+// ── Settings › Web tools (#924): the web_fetch allowlist, edited from the page ─────────────────
+
+function postAllowlist(
+  url: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/settings/web-fetch${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  })
+}
+
+async function allowlistOf(response: Response): Promise<WebFetchAllowlist> {
+  const answered: unknown = await response.json()
+  if (!Check(WebFetchAllowlist, answered)) throw new Error('the answer is not WebFetchAllowlist')
+  return answered
+}
+
+/** Project folders where `project`'s own files are approved as they are now (#753): only an approved version applies. */
+function approvedProjectsDir(project: string): { readonly projectsDir: string; readonly approvals: string } {
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-approved-projects-'))
+  const approvals = projectConfigApprovalsPath(projectsDir, projectIdOf(project))
+  for (const reviewed of reviewProjectConfig(project, approvals)) {
+    approveProjectTier(project, approvals, { tier: reviewed.tier, sha256: reviewed.current })
+  }
+  return { projectsDir, approvals }
+}
+
+async function allowlistServer(
+  userText: string,
+): Promise<{ url: string; userPath: string; project: string; approvals: string }> {
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  writeFileSync(userPath, userText)
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-allowlist-project-')))
+  mkdirSync(join(project, '.enso'))
+  writeFileSync(
+    join(project, '.enso', 'config.json'),
+    JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example'] } }),
+  )
+  const { projectsDir, approvals } = approvedProjectsDir(project)
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-allowlist-agent-'))
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: true }))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    launch: project,
+    agentDir,
+    userConfigPath: userPath,
+    projectsDir,
+  })
+  return { url, userPath, project, approvals }
+}
+
+test('the allowlist round trip: added and removed from the page, the file holding exactly that change (#924)', async () => {
+  const userText = '{\n  "projects": { "roots": ["/srv"] },\n  "webFetch": { "allowedHosts": ["a.example"] }\n}\n'
+  const { url, userPath } = await allowlistServer(userText)
+  // A thread live before the change reads the old list until its session is built again.
+  expect(await prompt(url, 'before-change', 'hi')).toBe(202)
+  const added = await allowlistOf(await postAllowlist(url, '', { add: 'www.enso.engineer' }))
+  expect(added.hosts).toEqual(['a.example', 'www.enso.engineer'])
+  expect(added.staleThreads).toEqual(['before-change'])
+  expect(readFileSync(userPath, 'utf8')).toStartWith('{\n  "projects": { "roots": ["/srv"] },\n')
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual({
+    projects: { roots: ['/srv'] },
+    webFetch: { allowedHosts: ['a.example', 'www.enso.engineer'] },
+  })
+  const removed = await allowlistOf(await postAllowlist(url, '', { remove: 'www.enso.engineer' }))
+  expect(removed.hosts).toEqual(['a.example'])
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual(JSON.parse(userText))
+  // A form the list cannot hold is refused with its reason, the file untouched.
+  const refused = await postAllowlist(url, '', { add: 'https://www.enso.engineer/' })
+  expect(refused.status).toBe(422)
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual(JSON.parse(userText))
+})
+
+test('a trusted project’s own hosts are listed under it, apart from the user’s, as approved (#924, #753)', async () => {
+  const { url, userPath, project, approvals } = await allowlistServer('{}')
+  const sharedPath = join(project, '.enso', 'config.json')
+  const read = await allowlistOf(await fetch(`${url}/api/settings/web-fetch`))
+  expect(read).toMatchObject({ path: userPath, hosts: [] })
+  expect(read.projects).toEqual([expect.objectContaining({ path: sharedPath, hosts: ['docs.project.example'] })])
+  // A host added to the file and not approved does not apply: the approved version is still listed.
+  writeFileSync(sharedPath, JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example', 'evil.example'] } }))
+  const changed = await allowlistOf(await fetch(`${url}/api/settings/web-fetch`))
+  expect(changed.projects).toEqual([expect.objectContaining({ hosts: ['docs.project.example'] })])
+  // With no approval at all, nothing of the project's applies.
+  rmSync(approvals)
+  expect((await allowlistOf(await fetch(`${url}/api/settings/web-fetch`))).projects).toEqual([])
+})
+
+/** A lookup that answers every host with one public address — the check's DNS, without the network. */
+const resolvesPublic = async (): Promise<string[]> => ['93.184.216.34']
+
+test('the host check: one request as web_fetch makes it, redirects reported, the target’s host offered (#924)', async () => {
+  const asked: { url: string; redirect: string; userAgent: string }[] = []
+  const checkFetch: HostCheckFetch = async (asking, init) => {
+    asked.push({ url: asking, redirect: init.redirect, userAgent: init.headers['user-agent'] })
+    return new Response(null, { status: 301, headers: { location: 'https://www.enso.engineer/' } })
+  }
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    hostCheck: { checkFetch, checkResolve: resolvesPublic },
+  })
+  const checked: unknown = await (await postAllowlist(url, '/check', { host: 'enso.engineer' })).json()
+  expect(checked).toEqual({
+    kind: 'redirect',
+    status: 301,
+    target: 'https://www.enso.engineer/',
+    suggestedHost: 'www.enso.engineer',
+  })
+  // web_fetch's own User-Agent, so a host that answers by it answers the check as it answers the tool.
+  expect(asked).toEqual([{ url: 'https://enso.engineer/', redirect: 'manual', userAgent: 'enso-web-fetch' }])
+  // Only a host is asked about: never a URL a page chose.
+  expect((await postAllowlist(url, '/check', { host: 'https://evil.example/x' })).status).toBe(422)
+  expect(asked).toHaveLength(1)
+})
+
+test('⚠ the host check never asks a host web_fetch would refuse by its address, and says why (#924 review)', async () => {
+  const asked: string[] = []
+  const checkFetch: HostCheckFetch = async (asking) => {
+    asked.push(asking)
+    return new Response(null, { status: 200 })
+  }
+  const addresses: Record<string, string[]> = { localhost: ['127.0.0.1', '::1'], 'intranet.example': ['10.1.2.3'] }
+  const checkResolve = async (host: string): Promise<string[]> => {
+    const found = addresses[host]
+    if (found === undefined) throw new Error(`queryA ENOTFOUND ${host}`)
+    return found
+  }
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    hostCheck: { checkFetch, checkResolve },
+  })
+  const checked = async (host: string): Promise<unknown> => (await postAllowlist(url, '/check', { host })).json()
+  for (const [host, address] of [
+    ['localhost', '127.0.0.1'],
+    ['intranet.example', '10.1.2.3'],
+    ['127.0.0.1', '127.0.0.1'],
+    ['169.254.169.254', '169.254.169.254'],
+  ] as const) {
+    expect(await checked(host)).toEqual({
+      kind: 'failed',
+      reason: `"${host}" resolves to a non-public address (${address}), so web_fetch would refuse it: it reaches the public web only`,
+    })
+  }
+  expect(await checked('nowhere.example')).toEqual({
+    kind: 'failed',
+    reason: '"nowhere.example" did not resolve (Error: queryA ENOTFOUND nowhere.example), so web_fetch would refuse it',
+  })
+  expect(asked).toEqual([])
+})
+
+test('the host check: a request that throws is a failure that says so, never a hang (#924 review)', async () => {
+  const checkFetch: HostCheckFetch = async () => {
+    throw new Error('The operation timed out.')
+  }
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    hostCheck: { checkFetch, checkResolve: resolvesPublic },
+  })
+  expect(await (await postAllowlist(url, '/check', { host: 'slow.example' })).json()).toEqual({
+    kind: 'failed',
+    reason: 'https://slow.example/ did not answer: Error: The operation timed out.',
+  })
+})
+
+test('a server that reads no user config refuses to show or change an allowlist (#924 review)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  const read = await fetch(`${url}/api/settings/web-fetch`)
+  expect([read.status, await read.text()]).toEqual([
+    422,
+    'this server reads no user config, so it has no web tools settings to show',
+  ])
+  expect((await postAllowlist(url, '', { add: 'a.example' })).status).toBe(422)
+})
+
+test('⚠ a foreign page can neither change the allowlist nor read it (#924, #717)', async () => {
+  const userText = '{"webFetch":{"allowedHosts":[]}}'
+  const { url, userPath } = await allowlistServer(userText)
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }
+  expect((await postAllowlist(url, '', { add: 'evil.example' }, otherPort)).status).toBe(403)
+  expect((await postAllowlist(url, '/check', { host: 'evil.example' }, otherPort)).status).toBe(403)
+  expect((await fetch(`${url}/api/settings/web-fetch`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(
+    403,
+  )
+  expect(readFileSync(userPath, 'utf8')).toBe(userText)
+})
+
+function postSearch(
+  url: string,
+  path: '' | '/tavily-key',
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/settings/web-search${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+async function searchOf(response: Response): Promise<WebSearchSettings> {
+  const answered: unknown = await response.json()
+  if (!Check(WebSearchSettings, answered)) throw new Error('the answer is not WebSearchSettings')
+  return answered
+}
+
+test('Searching round trip: the backend and a domain changed from the page, only those keys in the file (#932)', async () => {
+  const userText = '{\n  "projects": { "roots": ["/srv"] },\n  "webFetch": { "allowedHosts": ["a.example"] }\n}\n'
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const userPath = join(home, 'config.json')
+  writeFileSync(userPath, userText)
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: userPath,
+    userSecretsPath: join(home, 'secrets.env'),
+  })
+  expect(await prompt(url, 'before-change', 'hi')).toBe(202)
+  await searchOf(await postSearch(url, '', { backend: 'deepseek' }))
+  const added = await searchOf(await postSearch(url, '', { list: 'excludeDomains', add: 'spam.example' }))
+  expect(added).toMatchObject({
+    backend: 'deepseek',
+    excludeDomains: ['spam.example'],
+    staleThreads: ['before-change'],
+  })
+  expect(readFileSync(userPath, 'utf8')).toStartWith(
+    '{\n  "projects": { "roots": ["/srv"] },\n  "webFetch": { "allowedHosts": ["a.example"] },\n',
+  )
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual({
+    ...JSON.parse(userText),
+    webSearch: { backend: 'deepseek', tavily: { excludeDomains: ['spam.example'] } },
+  })
+  // The record says which file changed (#978 review).
+  const changed = logs.records.find((record) => record.properties.what === 'web_search settings')
+  expect(changed?.properties.path).toBe(userPath)
+  expect((await postSearch(url, '', { list: 'excludeDomains', add: 'https://spam.example/' })).status).toBe(422)
+  expect((await postSearch(url, '', { backend: 'tavily' })).status).toBe(400)
+  // Back again over HTTP (#978 review): the domain removed, and `model` — the default — takes the key out.
+  await searchOf(await postSearch(url, '', { list: 'excludeDomains', remove: 'spam.example' }))
+  const back = await searchOf(await postSearch(url, '', { backend: 'model' }))
+  expect(back).toMatchObject({ backend: 'model', excludeDomains: [] })
+  expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual({
+    ...JSON.parse(userText),
+    webSearch: { tavily: { excludeDomains: [] } },
+  })
+})
+
+test('a secrets file that can’t be read is said so: whether a key is set is unknown, not "no key" (#978 review)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  // A directory where the file should be: reading it fails.
+  const secretsPath = join(home, 'secrets.env')
+  mkdirSync(secretsPath)
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: secretsPath,
+  })
+  const read = await searchOf(await fetch(`${url}/api/settings/web-search`))
+  expect(read).toMatchObject({ tavilyKeySet: false, secretsUnreadable: expect.stringContaining('EISDIR') })
+})
+
+test('⚠ the Tavily key: set from the page, then in no answer and no log line — only whether one is set (#932)', async () => {
+  const key = 'tvly-dev-SECRET0123456789'
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const secretsPath = join(home, 'secrets.env')
+  writeFileSync(secretsPath, 'DEEPSEEK_API_KEY=sk-deep-0123456789\n')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: secretsPath,
+  })
+  const answers: string[] = []
+  const answered = async (response: Response): Promise<number> => {
+    answers.push(await response.text())
+    return response.status
+  }
+  expect(await answered(await postSearch(url, '/tavily-key', { set: key }))).toBe(200)
+  expect(JSON.parse(answers[0] ?? '')).toMatchObject({ tavilyKeySet: true, secretsPath })
+  expect(readFileSync(secretsPath, 'utf8')).toBe(`DEEPSEEK_API_KEY=sk-deep-0123456789\nTAVILY_API_KEY=${key}\n`)
+  expect(await answered(await fetch(`${url}/api/settings/web-search`))).toBe(200)
+  // A malformed body is refused without quoting it; so is one the file could not hold.
+  expect(await answered(await postSearch(url, '/tavily-key', `{"set": ${key}}`))).toBe(400)
+  expect(await answered(await postSearch(url, '/tavily-key', { set: `${key} x` }))).toBe(422)
+  expect(await answered(await postSearch(url, '/tavily-key', { remove: true }))).toBe(200)
+  expect(readFileSync(secretsPath, 'utf8')).toBe('DEEPSEEK_API_KEY=sk-deep-0123456789\n')
+  for (const answer of answers) expect(answer).not.toContain('SECRET0123456789')
+  const logged = JSON.stringify(logs.records)
+  expect(logged).toContain('Tavily key')
+  expect(logged).not.toContain('SECRET0123456789')
+})
+
+test('a trusted project’s own webSearch is listed under it, apart from the user’s (#932)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-search-project-')))
+  mkdirSync(join(project, '.enso'))
+  writeFileSync(
+    join(project, '.enso', 'config.json'),
+    JSON.stringify({ webSearch: { backend: 'deepseek', tavily: { includeDomains: ['bun.sh'] } } }),
+  )
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-search-agent-'))
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: true }))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    launch: project,
+    agentDir,
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: join(home, 'secrets.env'),
+    projectsDir: approvedProjectsDir(project).projectsDir,
+  })
+  const read = await searchOf(await fetch(`${url}/api/settings/web-search`))
+  expect(read).toMatchObject({ backend: 'model', includeDomains: [], tavilyKeySet: false })
+  expect(read.projects).toEqual([
+    expect.objectContaining({
+      path: join(project, '.enso', 'config.json'),
+      backend: 'deepseek',
+      includeDomains: ['bun.sh'],
+      excludeDomains: [],
+    }),
+  ])
+})
+
+test('⚠ a foreign page can neither change Searching, set the key, nor read it (#932, #717)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-search-home-'))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    userConfigPath: join(home, 'config.json'),
+    userSecretsPath: join(home, 'secrets.env'),
+  })
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }
+  expect((await postSearch(url, '', { backend: 'deepseek' }, otherPort)).status).toBe(403)
+  expect((await postSearch(url, '/tavily-key', { set: 'tvly-foreign-123456' }, otherPort)).status).toBe(403)
+  expect((await fetch(`${url}/api/settings/web-search`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(
+    403,
+  )
+  expect(readdirSync(home)).toEqual([])
+})
+
+// ── A project page's Web tools tab (#937): the project's own webFetch / webSearch ──────────────
+
+/** A server launched in a fresh project — `.enso/config.json` holding `shared` when given — that pi trusts or not. */
+async function projectToolsServer(options: {
+  readonly trusted: boolean
+  readonly shared?: unknown
+}): Promise<{ url: string; project: string; projectId: string; sharedPath: string; approvals: string }> {
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-tools-project-')))
+  const sharedPath = join(project, '.enso', 'config.json')
+  if (options.shared !== undefined) {
+    mkdirSync(join(project, '.enso'))
+    writeFileSync(sharedPath, JSON.stringify(options.shared))
+  }
+  const { projectsDir, approvals } = approvedProjectsDir(project)
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-tools-agent-'))
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: options.trusted }))
+  const home = mkdtempSync(join(tmpdir(), 'enso-tools-home-'))
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ webFetch: { allowedHosts: ['docs.user.example'] } }))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    launch: project,
+    agentDir,
+    userConfigPath: join(home, 'config.json'),
+    projectsDir,
+  })
+  const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
+  if (launch === undefined) throw new Error('no launch project')
+  return { url, project, projectId: launch.projectId, sharedPath, approvals }
+}
+
+function postProjectTools(
+  url: string,
+  projectId: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/projects/${projectId}/web-tools`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  })
+}
+
+async function projectToolsOf(response: Response): Promise<ProjectWebTools> {
+  expect(response.status).toBe(200)
+  const answered: unknown = await response.json()
+  if (!Check(ProjectWebTools, answered)) throw new Error('the answer is not ProjectWebTools')
+  return answered
+}
+
+test('a trusted project’s web tools round trip: hosts and Searching in its shared .enso/config.json, its other keys kept (#937)', async () => {
+  const { url, projectId, sharedPath } = await projectToolsServer({
+    trusted: true,
+    shared: { threads: { setup: ['make'] } },
+  })
+  expect(await prompt(url, 'before-change', 'hi')).toBe(202)
+  const added = await projectToolsOf(await postProjectTools(url, projectId, { add: 'docs.project.example' }))
+  expect(added).toMatchObject({
+    path: sharedPath,
+    trusted: true,
+    own: { hosts: ['docs.project.example'], includeDomains: [], excludeDomains: [] },
+    yours: { hosts: ['docs.user.example'], backend: 'model' },
+    staleThreads: ['before-change'],
+  })
+  await projectToolsOf(await postProjectTools(url, projectId, { backend: 'deepseek' }))
+  await projectToolsOf(await postProjectTools(url, projectId, { list: 'includeDomains', add: 'bun.sh' }))
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8'))).toEqual({
+    threads: { setup: ['make'] },
+    webFetch: { allowedHosts: ['docs.project.example'] },
+    webSearch: { backend: 'deepseek', tavily: { includeDomains: ['bun.sh'] } },
+  })
+  // Read back as a fresh page would; `model` takes the project's backend off, so yours applies.
+  expect((await projectToolsOf(await fetch(`${url}/api/projects/${projectId}/web-tools`))).own).toEqual({
+    hosts: ['docs.project.example'],
+    backend: 'deepseek',
+    includeDomains: ['bun.sh'],
+    excludeDomains: [],
+  })
+  const reset = await projectToolsOf(await postProjectTools(url, projectId, { backend: 'model' }))
+  expect(reset.own?.backend).toBeUndefined()
+  await projectToolsOf(await postProjectTools(url, projectId, { remove: 'docs.project.example' }))
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8')).webFetch).toEqual({ allowedHosts: [] })
+  // A URL is not a host: refused with its reason, the file untouched.
+  const before = readFileSync(sharedPath, 'utf8')
+  expect((await postProjectTools(url, projectId, { add: 'https://docs.project.example/' })).status).toBe(422)
+  expect(readFileSync(sharedPath, 'utf8')).toBe(before)
+})
+
+test('a trusted project with no .enso/ yet: the first host makes its shared file (#937)', async () => {
+  const { url, projectId, sharedPath } = await projectToolsServer({ trusted: true })
+  await projectToolsOf(await postProjectTools(url, projectId, { add: 'docs.project.example' }))
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8'))).toEqual({ webFetch: { allowedHosts: ['docs.project.example'] } })
+})
+
+test('⚠ a project’s file not the version approved is shown as approved and never written; a change approves what it writes (#937, #753)', async () => {
+  const shared = { webFetch: { allowedHosts: ['docs.project.example'] } }
+  const { url, project, projectId, sharedPath, approvals } = await projectToolsServer({ trusted: true, shared })
+  // Changed by hand (a tool, a pull): the tab shows the version approved, says so, and writes nothing.
+  const byHand = JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example', 'evil.example'] } })
+  writeFileSync(sharedPath, byHand)
+  const read = await projectToolsOf(await fetch(`${url}/api/projects/${projectId}/web-tools`))
+  expect(read).toMatchObject({ pending: 'changed', own: { hosts: ['docs.project.example'] } })
+  const refused = await postProjectTools(url, projectId, { add: 'docs.more.example' })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain('has changed since you approved it')
+  expect(readFileSync(sharedPath, 'utf8')).toBe(byHand)
+  // Approved as it is, a change goes through, and what it wrote is the version approved.
+  for (const reviewed of reviewProjectConfig(project, approvals)) {
+    approveProjectTier(project, approvals, { tier: reviewed.tier, sha256: reviewed.current })
+  }
+  const added = await projectToolsOf(await postProjectTools(url, projectId, { add: 'docs.more.example' }))
+  expect(added.pending).toBeUndefined()
+  expect(added.own?.hosts).toEqual(['docs.project.example', 'evil.example', 'docs.more.example'])
+  expect(reviewProjectConfig(project, approvals)).toEqual([
+    expect.objectContaining({ tier: 'shared', state: 'approved' }),
+  ])
+})
+
+test('⚠ a project’s .enso/config.json linked to another config is never written through (#937, PR #978 merge-up)', async () => {
+  const { url, project, projectId, sharedPath } = await projectToolsServer({ trusted: true })
+  // The link a repo could ship: its "own" file is the user's config.
+  const elsewhere = join(mkdtempSync(join(tmpdir(), 'enso-tools-elsewhere-')), 'config.json')
+  const elsewhereText = '{"webFetch":{"allowedHosts":["docs.user.example"]}}'
+  writeFileSync(elsewhere, elsewhereText)
+  mkdirSync(join(project, '.enso'))
+  symlinkSync(elsewhere, sharedPath)
+  const refused = await postProjectTools(url, projectId, { add: 'docs.project.example' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('is a link')
+  expect(readFileSync(elsewhere, 'utf8')).toBe(elsewhereText)
+  expect(lstatSync(sharedPath).isSymbolicLink()).toBe(true)
+})
+
+test('a refused or unchanged change to a project with no .enso/ leaves none behind (#984 review)', async () => {
+  const { url, project, projectId } = await projectToolsServer({ trusted: true })
+  expect((await postProjectTools(url, projectId, { add: 'https://docs.project.example/' })).status).toBe(422)
+  await projectToolsOf(await postProjectTools(url, projectId, { remove: 'docs.project.example' }))
+  expect(existsSync(join(project, '.enso'))).toBe(false)
+})
+
+test('⚠ a project’s .enso/ linked to another directory is never written through (#984 review)', async () => {
+  const { url, project, projectId } = await projectToolsServer({ trusted: true })
+  const elsewhere = mkdtempSync(join(tmpdir(), 'enso-tools-elsewhere-'))
+  const elsewhereText = '{"webFetch":{"allowedHosts":["docs.user.example"]}}'
+  writeFileSync(join(elsewhere, 'config.json'), elsewhereText)
+  symlinkSync(elsewhere, join(project, '.enso'))
+  const refused = await postProjectTools(url, projectId, { add: 'docs.project.example' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('is reached through a link')
+  expect(readFileSync(join(elsewhere, 'config.json'), 'utf8')).toBe(elsewhereText)
+})
+
+test('a trusted project whose folder is gone shows nothing editable, and a change is refused (#984 review)', async () => {
+  const { url, project, projectId } = await projectToolsServer({ trusted: true })
+  rmSync(project, { recursive: true })
+  const read = await projectToolsOf(await fetch(`${url}/api/projects/${projectId}/web-tools`))
+  expect(read).toMatchObject({ trusted: true, yours: { hosts: ['docs.user.example'] } })
+  expect(read.own).toBeUndefined()
+  const refused = await postProjectTools(url, projectId, { add: 'docs.project.example' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('gone')
+  expect(existsSync(project)).toBe(false)
+})
+
+test('⚠ an untrusted project’s .enso/config.json is never read nor written: the tab is read only (#937)', async () => {
+  const { url, project, projectId, sharedPath } = await projectToolsServer({ trusted: false })
+  // A FIFO: a read would block the answer, so an answer at all proves the file was not opened.
+  mkdirSync(join(project, '.enso'))
+  execFileSync('mkfifo', [sharedPath])
+  const read = await projectToolsOf(await fetch(`${url}/api/projects/${projectId}/web-tools`))
+  expect(read).toMatchObject({ trusted: false, yours: { hosts: ['docs.user.example'] } })
+  expect(read.own).toBeUndefined()
+  const refused = await postProjectTools(url, projectId, { add: 'docs.project.example' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('not trusted')
+  expect(lstatSync(sharedPath).isFIFO()).toBe(true)
+})
+
+test('⚠ a foreign page can neither change a project’s web tools nor read them (#937, #717)', async () => {
+  const shared = { webFetch: { allowedHosts: ['docs.project.example'] } }
+  const { url, projectId, sharedPath } = await projectToolsServer({ trusted: true, shared })
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }
+  expect((await postProjectTools(url, projectId, { add: 'evil.example' }, otherPort)).status).toBe(403)
+  const crossSite = { headers: { 'Sec-Fetch-Site': 'cross-site' } }
+  expect((await fetch(`${url}/api/projects/${projectId}/web-tools`, crossSite)).status).toBe(403)
+  expect(JSON.parse(readFileSync(sharedPath, 'utf8'))).toEqual(shared)
+  expect((await postProjectTools(url, '0123456789abcdef', { add: 'a.example' })).status).toBe(404)
 })
 
 // A revoke fails closed AT ONCE, as removal does: never under a running thread of the project, and

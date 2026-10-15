@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   ENSO_CONFIG_FILENAME,
   EXTERNAL_WEB_CONTENT_NOTICE,
@@ -6,6 +9,7 @@ import {
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
+import { changeUserAllowedHosts } from '@enso/core/web-fetch-allowlist'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { SessionEnsoConfig } from '../../../core/index.ts'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
@@ -126,9 +130,29 @@ test('with an empty allowlist the description says EMPTY instead of listing host
   expect(loaded.tool.description).toContain('EMPTY')
 })
 
+// #924: Settings writes the user's file; the next session's tool reads that file at its start.
+test('a host added from Settings is in the next session’s tool description; one removed is gone', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'enso-web-fetch-settings-')), ENSO_CONFIG_FILENAME)
+  const fromFile = (): Partial<WebFetchDependencies> => ({
+    locateConfigFile: () => path,
+    readConfigText: () => readFileSync(path, 'utf8'),
+    resolveSessionConfig: () =>
+      Promise.resolve({ result: parseEnsoConfig(readFileSync(path, 'utf8')), path, sources: [path] }),
+  })
+  changeUserAllowedHosts(path, { add: 'www.enso.engineer' })
+  const next = loadWebFetch(fromFile())
+  await next.startSession()
+  expect(next.tool.description).toContain('(currently: www.enso.engineer)')
+  changeUserAllowedHosts(path, { remove: 'www.enso.engineer' })
+  const after = loadWebFetch(fromFile())
+  await after.startSession()
+  expect(after.tool.description).toContain('currently EMPTY')
+})
+
 // --- the empty-allowlist refusal is the product (#54): it must carry everything a human
 // needs — the file path, the exact JSON shape, and that the change is theirs to make.
 
+// @pins web-search-call/web-fetch-gates
 test('empty allowlist: the refusal names the file, the shape, the restart, and the human', async () => {
   const loaded = loadWebFetch({ readConfigText: () => configWith([]) })
   const text = await run(loaded, 'https://docs.example.com/guide')
@@ -138,6 +162,7 @@ test('empty allowlist: the refusal names the file, the shape, the restart, and t
   expect(text).toContain('restart')
   expect(text).toContain('human')
   expect(loaded.fetchedUrls).toEqual([])
+  expect(loaded.resolvedHosts).toEqual([])
 })
 
 // #421: at session_start the tool takes the SESSION's config — here a trusted project's, whose
@@ -248,11 +273,22 @@ test('a config that cannot be located refuses every call and still names where i
   expect(loaded.fetchedUrls).toEqual([])
 })
 
+// @pins web-search-call/web-fetch-gates
 test('malformed config JSON refuses, naming the parse failure and the expected shape', async () => {
   const loaded = loadWebFetch({ readConfigText: () => '{ webFetch: [' })
   const text = await run(loaded, 'https://docs.example.com/')
   expect(text).toContain('not valid JSON')
   expect(loaded.fetchedUrls).toEqual([])
+  expect(loaded.resolvedHosts).toEqual([])
+})
+
+// @pins web-search-call/web-fetch-gates
+test('a URL refusal comes BEFORE a config problem', async () => {
+  const loaded = loadWebFetch({ readConfigText: () => '{ webFetch: [' })
+  const text = await run(loaded, 'https://user:secret@docs.example.com/')
+  expect(text).toContain('credentials')
+  expect(text).not.toContain('not valid JSON')
+  expect(loaded.resolvedHosts).toEqual([])
 })
 
 test('a config with the wrong shape refuses, showing the expected shape', async () => {
@@ -272,6 +308,7 @@ test('a TYPO in a key refuses loudly — strict schema, a typo must not configur
 
 // --- the host gate ----------------------------------------------------------------------
 
+// @pins web-search-call/web-fetch-gates
 test('a host off the allowlist is refused, listing what IS allowed — and nothing is fetched or resolved', async () => {
   const loaded = loadWebFetch()
   const text = await run(loaded, 'https://evil.example/payload')
@@ -282,6 +319,7 @@ test('a host off the allowlist is refused, listing what IS allowed — and nothi
   expect(loaded.resolvedHosts).toEqual([])
 })
 
+// @pins web-search-call/web-fetch-gates
 test('a URL with credentials is refused BEFORE any allowlist or DNS work', async () => {
   const loaded = loadWebFetch()
   const text = await run(loaded, 'https://user:secret@docs.example.com/')
@@ -292,6 +330,7 @@ test('a URL with credentials is refused BEFORE any allowlist or DNS work', async
 
 // --- the address gate (advisory — see web-fetch-policy.ts's stated non-coverage) ---------
 
+// @pins web-search-call/web-fetch-gates
 test('an allowlisted host resolving to a private address is refused, naming the address', async () => {
   const loaded = loadWebFetch({ resolveHostAddresses: async () => ['10.0.0.7'] })
   const text = await run(loaded, 'https://docs.example.com/')
@@ -306,15 +345,21 @@ test('ONE private address among public ones still refuses — any answer can be 
   expect(loaded.fetchedUrls).toEqual([])
 })
 
-test('a host that does not resolve is refused, and an empty answer refuses too', async () => {
+// @pins web-search-call/web-fetch-gates
+test('a host that does not resolve is refused as missing, not private; an empty answer refuses as non-public', async () => {
   const failing = loadWebFetch({
     resolveHostAddresses: async () => {
       throw new Error('NXDOMAIN')
     },
   })
-  expect(await run(failing, 'https://docs.example.com/')).toContain('did not resolve')
+  expect(await run(failing, 'https://docs.example.com/')).toBe(
+    'Not fetched: "docs.example.com" did not resolve (Error: NXDOMAIN).',
+  )
+  expect(failing.fetchedUrls).toEqual([])
   const empty = loadWebFetch({ resolveHostAddresses: async () => [] })
-  expect(await run(empty, 'https://docs.example.com/')).toContain('non-public')
+  expect(await run(empty, 'https://docs.example.com/')).toBe(
+    `Not fetched: "docs.example.com" resolves to a non-public address — ${WEB_FETCH_TOOL_NAME} reaches the public web only.`,
+  )
 })
 
 test('an allowlisted PRIVATE IP literal is refused without consulting the resolver', async () => {
