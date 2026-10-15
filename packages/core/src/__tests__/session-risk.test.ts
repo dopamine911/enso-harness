@@ -257,15 +257,23 @@ test('in-place, dd and prefixed writes to a config tier are signals; a dd read f
 })
 
 // Review of 1d095ec3: a runner flag that takes a value (`sudo -u root`, `nice -n 10`, `xargs -n 1`,
-// `timeout 5`) and a `|` inside a quoted sed script must not hide the write behind them.
+// `timeout 5`), a `|` inside a quoted sed script and the `sed -i.bak` in-place spelling must not hide
+// the write. Review of 80c002f1: neither may `timeout -s KILL 5` / `timeout -k 1 5`, nor an escaped
+// or unterminated quote before the separator.
 test.each([
-  ['sudo -u root', 'echo x | sudo -u root tee .enso/config.json'],
-  ['nice -n 10', 'nice -n 10 cp /tmp/evil.json .enso/config.json'],
-  ['xargs -n 1', 'echo x | xargs -n 1 tee .enso/config.json'],
-  ['timeout 5', 'timeout 5 cp /tmp/evil.json .enso/config.json'],
-  ['quoted alternation', `sed -E -i 's/(a|b)/c/' .enso/config.json`],
-  ['-i.bak', `sed -i.bak 's/a/b/' .enso/config.json`],
-])('a write behind %s to a config tier is a signal', (_route, command) => {
+  ['behind sudo -u root', 'echo x | sudo -u root tee .enso/config.json'],
+  ['behind sudo -n', 'echo x | sudo -n tee .enso/config.json'],
+  ['behind nice -n 10', 'nice -n 10 cp /tmp/evil.json .enso/config.json'],
+  ['behind xargs -n 1', 'echo x | xargs -n 1 tee .enso/config.json'],
+  ['behind timeout 5', 'timeout 5 cp /tmp/evil.json .enso/config.json'],
+  ['behind timeout -s KILL 5', 'timeout -s KILL 5 cp /tmp/evil.json .enso/config.json'],
+  ['behind timeout -k 1 5', 'timeout -k 1 5 cp /tmp/evil.json .enso/config.json'],
+  ['with a quoted alternation', `sed -E -i 's/(a|b)/c/' .enso/config.json`],
+  ['with sed -i.bak', `sed -i.bak 's/a/b/' .enso/config.json`],
+  ['after an escaped double quote', 'echo \\"; cp /tmp/evil.json .enso/config.json'],
+  ['after an escaped single quote', "echo it\\'s; tee .enso/config.json"],
+  ['after an unterminated quote', 'echo "oops; cp /tmp/evil.json .enso/config.json'],
+])('a write %s to a config tier is a signal', (_route, command) => {
   expect(signalsOf(oneCallEach([bash('c1', command)])).filter(([signal]) => signal === 'config-tier-touch')).toEqual([
     ['config-tier-touch', 'c1'],
   ])
@@ -283,6 +291,7 @@ test('a read or a mention of a config tier in a shell command is no signal', () 
         [bash('c4', 'git commit -m "config(#753): approve .enso/config.json"')],
         [bash('c5', 'cp .enso/config.json /tmp/backup.json')],
         [bash('c6', 'git diff .enso/config.local.json 2>&1 | less')],
+        [bash('c7', 'echo "a; tee b" .enso/config.json')],
       ),
     ).filter(([signal]) => signal === 'config-tier-touch'),
   ).toEqual([])

@@ -529,9 +529,10 @@ const TIER_REDIRECT = /\d?>[>|]?\s*['"]?[^\s'";&|]*\.enso[/\\]config(?:\.local)?
  * The words a command can stand behind and still be the command: `VAR=value` assignments and the
  * runners in the alternation below with their flags — the value-taking short flags those runners
  * use (`sudo -u root`, `nice -n 10`, `xargs -n 1`) take their value along — and `timeout` with its
- * duration. Best-effort: a runner or flag spelling not listed here hides the command behind it.
+ * duration and its flags (`-s KILL`, `-k 1` take their value along). Best-effort: a runner or flag
+ * spelling not listed here hides the command behind it.
  */
-const COMMAND_PREFIX = String.raw`^(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs|stdbuf|ionice|setsid|busybox)(?:\s+-[ugnCILPdsacpUrtSo]\s+\S+|\s+-\S+)*\s+|timeout(?:\s+-\S+)*\s+\d[\w.]*\s+|[A-Za-z_]\w*=\S*\s+)*`
+const COMMAND_PREFIX = String.raw`^(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs|stdbuf|ionice|setsid|busybox)(?:\s+-[ugnCILPdsacpUrtSo]\s+\S+|\s+-\S+)*\s+|timeout(?:\s+-[sk]\s+\S+|\s+-\S+)*\s+\d[\w.]*\s+|[A-Za-z_]\w*=\S*\s+)*`
 /**
  * Commands that write the file named among their arguments: `tee`, `truncate`, and `sed`/`perl`
  * with an in-place flag in any spelling (`-i`, `-Ei`, `-ni`, `-pi`, `-i.bak`, `--in-place`).
@@ -566,13 +567,21 @@ function shellWritesTier(command: string): boolean {
   })
 }
 
-/** A command split at `;`, `&`, `|` and newlines that stand outside quotes (`sed 's/(a|b)/c/'` stays whole). */
+/**
+ * A command split at `;`, `&`, `|` and newlines that stand outside quotes (`sed 's/(a|b)/c/'` stays
+ * whole). A backslash outside single quotes escapes the next character (`echo \"; cp …` splits).
+ * A quote left open at the end falls back to splitting at every separator: for a guard an unbalanced
+ * quote must over-split, never hide the command after it.
+ */
 function shellSegments(command: string): string[] {
   const segments: string[] = []
   let current = ''
   let quote: string | undefined
+  let escaped = false
   for (const char of command) {
-    if (quote !== undefined) {
+    if (escaped) escaped = false
+    else if (char === '\\' && quote !== "'") escaped = true
+    else if (quote !== undefined) {
       if (char === quote) quote = undefined
     } else if (char === "'" || char === '"') quote = char
     else if (';&|\n'.includes(char)) {
@@ -582,6 +591,7 @@ function shellSegments(command: string): string[] {
     }
     current += char
   }
+  if (quote !== undefined) return command.split(/[;&|\n]+/)
   segments.push(current)
   return segments
 }
