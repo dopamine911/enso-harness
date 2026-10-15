@@ -100,6 +100,10 @@ export type ProjectRegistrationOutcome =
 
 export type ProjectRemovalOutcome = 'removed' | 'unknown' | 'launch'
 
+export type ProjectRetitleOutcome =
+  | { readonly kind: 'retitled'; readonly project: EnsoProject }
+  | { readonly kind: 'unknown' }
+
 export type ProjectBrowseOutcome =
   | { readonly kind: 'listing'; readonly listing: EnsoDirectoryListing }
   | { readonly kind: 'refused'; readonly reason: string }
@@ -133,6 +137,11 @@ export interface ProjectRegistry {
    */
   browse(path: string | undefined, hidden: boolean): ProjectBrowseOutcome
   remove(projectId: string): ProjectRemovalOutcome
+  /**
+   * Name a served project `title` (#939), stored in `projects.json`: the folder keeps its name and
+   * its path, and the id stays the path's. `unknown` for an id no served project has.
+   */
+  retitle(projectId: string, title: string): ProjectRetitleOutcome
   /**
    * A page names the project of a thread (`X-Enso-Project`). The first name a thread gets is
    * kept; it matters only until the thread has a session. `undefined` when accepted (or when
@@ -322,12 +331,14 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   // With no roots declared, browsing starts at the home folder (#866): the one place a page lists from.
   const browseRoots = roots.length > 0 ? roots : [home]
   const launchPath = realpathOrSelf(options.launchDirectory)
-  const launch = { projectId: projectIdOf(launchPath), path: launchPath, title: basename(launchPath) || launchPath }
+  const launch = { projectId: projectIdOf(launchPath), path: launchPath }
   // ⚠ The rule is applied to what the state file holds on every read, not once: a root taken out
   // of the config takes its projects with it. The file keeps them, so putting the root back
   // restores them — which is why `stored` is written back whole and only `served()` is filtered.
   let stored: Registration[] = options.statePath === undefined ? [] : readRegistrations(options.statePath)
   for (const registration of stored) {
+    // The launch path's entry is its rename (#939): served here as the launch project whatever the rule says.
+    if (registration.path === launch.path) continue
     const refusal = refusalOf(registration.path, true)
     if (refusal !== undefined) {
       log.warn('registered project not served: {path}: {reason}', { path: registration.path, reason: refusal })
@@ -350,6 +361,18 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return stored.filter(
       (registration) => registration.path !== launch.path && refusalOf(registration.path, true) === undefined,
     )
+  }
+
+  /**
+   * The launch project, named by its folder unless renamed (#939). A rename is stored as an entry
+   * for the launch path, which `served()` leaves out while the server runs here; launched elsewhere,
+   * that entry is a project registered under the name it was given, checked as every stored one is
+   * — with hidden folders allowed, as for any entry, so a renamed launch folder inside a hidden one
+   * is served from elsewhere without the "show hidden folders" tick a page's registration needs.
+   */
+  function launchView(): EnsoProject {
+    const renamed = stored.find((registration) => registration.path === launch.path)?.title
+    return viewOf(launch.path, renamed, true)
   }
 
   function persist(next: Registration[]): void {
@@ -377,10 +400,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   }
 
   function list(): EnsoProject[] {
-    return [
-      viewOf(launch.path, launch.title, true),
-      ...served().map((registration) => viewOf(registration.path, registration.title, false)),
-    ]
+    return [launchView(), ...served().map((registration) => viewOf(registration.path, registration.title, false))]
   }
 
   function get(projectId: string): EnsoProject | undefined {
@@ -394,7 +414,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     const treeProject = options.projectsDir === undefined ? undefined : treeProjectId(options.projectsDir, directory)
     if (treeProject !== undefined) return get(treeProject)
     const canonical = realpathOrSelf(directory)
-    if (canonical === launch.path) return viewOf(launch.path, launch.title, true)
+    if (canonical === launch.path) return launchView()
     const registration = served().find((candidate) => candidate.path === canonical)
     return registration === undefined ? undefined : viewOf(registration.path, registration.title, false)
   }
@@ -403,7 +423,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     const resolved = canonicalDirectory(expandHome(request.path, home), request.path)
     if (typeof resolved !== 'string') return resolved
     const canonical = resolved
-    if (canonical === launch.path) return { kind: 'existing', project: viewOf(launch.path, launch.title, true) }
+    if (canonical === launch.path) return { kind: 'existing', project: launchView() }
     const refusal = refusalOf(canonical, request.hidden === true)
     if (refusal !== undefined) return { kind: 'refused', reason: refusal }
     const existing = served().find((registration) => registration.path === canonical)
@@ -488,6 +508,19 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return 'removed'
   }
 
+  function retitle(projectId: string, title: string): ProjectRetitleOutcome {
+    const path =
+      projectId === launch.projectId
+        ? launch.path
+        : served().find((registration) => projectIdOf(registration.path) === projectId)?.path
+    if (path === undefined) return { kind: 'unknown' }
+    const named: Registration = { path, title }
+    const at = stored.findIndex((registration) => registration.path === path)
+    persist(at === -1 ? [...stored, named] : stored.with(at, named))
+    log.info('project {projectId} renamed', { projectId, path })
+    return { kind: 'retitled', project: path === launch.path ? launchView() : viewOf(path, title, false) }
+  }
+
   function claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined {
     if (projectId === undefined) return undefined
     const named = claims.get(threadId)
@@ -521,7 +554,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
 
   function projectOfNewThread(threadId: string): EnsoProject | undefined {
     const claimed = claims.get(threadId)
-    return claimed === undefined ? viewOf(launch.path, launch.title, true) : get(claimed)
+    return claimed === undefined ? launchView() : get(claimed)
   }
 
   function directoryForNewThread(threadId: string): string {
@@ -540,6 +573,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     register,
     browse,
     remove,
+    retitle,
     claim,
     dropClaim,
     claimOf,

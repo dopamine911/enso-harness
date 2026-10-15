@@ -18,12 +18,12 @@ import {
 } from './prompt-library.ts'
 import {
   answerJson,
-  answerOrFail,
   endAndClose,
   readPromptSizedBody,
   refuseWith,
   type ThreadResponder,
   type ThreadRouteHandler,
+  withServed,
   writeConditionOf,
 } from './request-plumbing.ts'
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
@@ -293,15 +293,7 @@ export function createPromptRoutes(state: PromptRoutesState): PromptRoutes {
     response: ServerResponse,
     work: (library: PromptLibrary) => void | Promise<void>,
   ): true {
-    if (prompts === undefined) {
-      endAndClose(request, response, 404, NO_PROMPT_LIBRARY)
-      return true
-    }
-    answerOrFail(
-      Promise.resolve().then(() => work(prompts)),
-      response,
-    )
-    return true
+    return withServed(request, response, [prompts, NO_PROMPT_LIBRARY], work)
   }
 
   /** True when the request was a prompt-library route (#443). */

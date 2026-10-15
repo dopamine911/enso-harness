@@ -1,8 +1,20 @@
 import { expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { projectIdOf, projectTreesDir } from '@enso/core/paths'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
+import { readProjectsSettings, writeProjectsSettings } from '../../host/projects-config-file.ts'
 import { canonicalConfigPath, createProjectRegistry, ProjectUnavailable } from '../projects.ts'
 
 /**
@@ -219,6 +231,73 @@ test('registrations outlive the process; a root taken out of the config hides it
   expect(rootBack.byDirectory(app)?.projectId).toBe(registered.project.projectId)
 })
 
+// #939: a rename changes the name only — the folder, its path and the id stay — and outlives the
+// process. The launch project renames too, and stays the launch project: first, unremovable.
+test('a rename outlives the process and touches only the title — the folder, path and id stay; the launch project renames too (#939)', () => {
+  const { launch, root, statePath } = layout()
+  const app = join(root, 'app')
+  mkdirSync(app)
+  const first = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+  const registered = first.register({ path: app, title: 'The app' })
+  if (registered.kind === 'refused') throw new Error(registered.reason)
+  const { projectId } = registered.project
+  const launchId = projectIdOf(launch)
+
+  expect(first.retitle(projectId, 'Ledger')).toEqual({
+    kind: 'retitled',
+    project: { projectId, title: 'Ledger', path: app, status: 'ok', launch: false },
+  })
+  expect(first.retitle(launchId, 'Home base')).toMatchObject({ kind: 'retitled', project: { launch: true } })
+  expect(first.retitle('0123456789abcdef', 'Nobody')).toEqual({ kind: 'unknown' })
+
+  const restarted = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+  expect(
+    restarted.list().map(({ projectId: id, title, path, launch: isLaunch }) => [id, title, path, isLaunch]),
+  ).toEqual([
+    [launchId, 'Home base', launch, true],
+    [projectId, 'Ledger', app, false],
+  ])
+  expect(restarted.byDirectory(app)?.title).toBe('Ledger')
+  expect(restarted.remove(launchId)).toBe('launch')
+  expect(readdirSync(root)).toEqual(['app'])
+
+  // Removed, the id is unknown: a stale page cannot rename a project that is gone.
+  expect(restarted.remove(projectId)).toBe('removed')
+  expect(restarted.retitle(projectId, 'Ledger again')).toEqual({ kind: 'unknown' })
+})
+
+// PR #982 review: the launch folder's rename is an entry for its path. Started there again it is the
+// launch project, never "not served", even outside the roots; started elsewhere it is an ordinary
+// registration under its new name, checked as every stored one is.
+test('⚠ a renamed launch folder warns nothing on a restart there, outside the roots; started elsewhere it is a registered project under its new name, or refused by the roots (#939)', async () => {
+  const { launch, root, statePath } = layout()
+  const logs = await recordEnsoLogs()
+  try {
+    const first = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+    expect(first.retitle(projectIdOf(launch), 'Home base')).toMatchObject({ kind: 'retitled' })
+    logs.clear()
+
+    const again = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+    expect(logs.filter({ rawMessage: /^registered project not served/ })).toEqual([])
+    expect(again.list().map(({ title, launch: isLaunch }) => [title, isLaunch])).toEqual([['Home base', true]])
+
+    const elsewhere = join(root, 'elsewhere')
+    mkdirSync(elsewhere)
+    const unfenced = createProjectRegistry({ launchDirectory: elsewhere, roots: [], statePath })
+    expect(unfenced.list().map(({ title, path, launch: isLaunch }) => [title, path, isLaunch])).toEqual([
+      ['elsewhere', elsewhere, true],
+      ['Home base', launch, false],
+    ])
+
+    logs.clear()
+    const fenced = createProjectRegistry({ launchDirectory: elsewhere, roots: [root], statePath })
+    expect(fenced.list().map(({ path }) => path)).toEqual([elsewhere])
+    expect(logs.filter({ rawMessage: /^registered project not served/ })).toHaveLength(1)
+  } finally {
+    await releaseEnsoLogs()
+  }
+})
+
 test('a new thread is built in the one project a page named for it, else the launch directory; never in a vanished one', () => {
   const { launch, root } = layout()
   const app = join(root, 'app')
@@ -392,4 +471,31 @@ test('a config path written with ~/, a trailing slash or through a symlink is th
   expect(canonicalConfigPath(`${app}/`, home)).toBe(app)
   expect(canonicalConfigPath('~/link', home)).toBe(app)
   expect(canonicalConfigPath(app, home)).toBe(app)
+})
+
+// #979 re-review, testing gap: Settings › Projects & threads keys a project's own mode as the
+// resolver does, with this module's `canonicalConfigPath`, so a symlinked key names its target.
+test('a project mode keyed through a symlink is read and written as the path it resolves to', () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-projects-settings-'))
+  const places = { home, agentDir: join(home, 'pi-agent'), canonical: (key: string) => canonicalConfigPath(key) }
+  mkdirSync(places.agentDir)
+  const real = join(places.home, 'real-app')
+  const link = join(places.home, 'linked-app')
+  mkdirSync(real)
+  symlinkSync(real, link)
+  const resolved = realpathSync(real)
+  writeFileSync(join(places.home, 'config.json'), JSON.stringify({ threads: { projects: { [link]: 'off' } } }))
+  const read = readProjectsSettings(places)
+  if (read.kind !== 'ok' || read.etag === undefined) throw new Error('expected a readable file')
+  expect(read.threads.projects).toEqual({ [resolved]: 'off' })
+
+  expect(
+    writeProjectsSettings(places, { threads: { projects: { [link]: 'copy' } } }, { kind: 'matches', etag: read.etag }),
+  ).toMatchObject({ kind: 'written' })
+  expect(JSON.parse(readFileSync(join(places.home, 'config.json'), 'utf8'))).toEqual({
+    threads: { projects: { [resolved]: 'copy' } },
+  })
+  expect(
+    writeProjectsSettings(places, { threads: { projects: { [link]: 'off', [real]: 'copy' } } }, { kind: 'present' }),
+  ).toMatchObject({ kind: 'refused', reason: expect.stringContaining('name the same project') })
 })

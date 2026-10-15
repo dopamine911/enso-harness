@@ -56,7 +56,7 @@ export const ENSO_PROJECT_HEADER = 'x-enso-project'
 export const EnsoProject = Type.Object(
   {
     projectId: Type.String(),
-    /** The directory's name unless one was given at registration. */
+    /** The directory's name unless one was given at registration or by a rename since (#939). */
     title: Type.String(),
     /** The canonical path — shown so a person can tell two projects apart; never sent back. */
     path: Type.String(),
@@ -91,8 +91,23 @@ export const EnsoProjectRegistration = Type.Object(
 export type EnsoProjectRegistration = Static<typeof EnsoProjectRegistration>
 
 /**
- * `.enso/projects.json`: the projects registered from a page, as the server keeps them. The id
- * is not stored — it is the canonical path's (`EnsoProject.projectId`), so it cannot drift.
+ * `PUT /api/projects/:projectId/title` (#939): the name a project is shown by — in the rail, the
+ * switcher, Projects and its page. Not blank; the server trims it. Only the title changes: the
+ * folder keeps its name and its path.
+ *
+ * @group Projects
+ */
+export const EnsoProjectTitleUpdate = Type.Object(
+  { title: Type.String({ minLength: 1, pattern: '\\S' }) },
+  { additionalProperties: false },
+)
+/** @group Projects */
+export type EnsoProjectTitleUpdate = Static<typeof EnsoProjectTitleUpdate>
+
+/**
+ * `.enso/projects.json`: the projects registered from a page, as the server keeps them, and the
+ * launch folder's rename (#939), an entry for its path. The id is not stored — it is the canonical
+ * path's (`EnsoProject.projectId`), so it cannot drift.
  *
  * @group Projects
  */
