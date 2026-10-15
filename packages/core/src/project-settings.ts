@@ -10,8 +10,11 @@ import { EnsoThreadTreeMode } from './config.ts'
  * The project tiers are read only once the project is trusted, as before.
  *
  * Slice #754 tiers the `threads` keys a new tree needs: its mode, the files copied into it and the
- * commands run in it. ⚠ ACCEPTED RISK until #753: those commands run from config trusted by PATH,
- * not from contents the operator approved.
+ * commands run in it. #753 protects the two project tiers, which the agent works beside: what applies
+ * from each is the CONTENTS THE OPERATOR APPROVED on the project page, never the file as it is now
+ * (`@enso/core/project-config`). A file that changed after its approval — by a tool, a shell
+ * command, a commit or a pull — is shown there as a diff with **Approve**, and until then the
+ * approved version applies; a file never approved applies nothing.
  */
 
 /**
@@ -173,6 +176,95 @@ export const EnsoProjectTrustUpdate = Type.Object({ trusted: Type.Boolean() }, {
 export type EnsoProjectTrustUpdate = Static<typeof EnsoProjectTrustUpdate>
 
 /**
+ * Where one of the project's own tiers stands against what the operator approved (#753):
+ * - `approved` — the file is the version approved, and it applies;
+ * - `changed` — it differs from the version approved, which applies until the change is approved;
+ * - `removed` — it is gone, and the version approved applies until the removal is approved;
+ * - `unapproved` — it was never approved: nothing in it applies.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectTierApprovalState = Type.Union([
+  Type.Literal('approved'),
+  Type.Literal('changed'),
+  Type.Literal('removed'),
+  Type.Literal('unapproved'),
+])
+/** @group Project settings */
+export type EnsoProjectTierApprovalState = Static<typeof EnsoProjectTierApprovalState>
+
+/** A file's SHA-256, as an approval names it. */
+const Sha256 = Type.String({ pattern: '^[0-9a-f]{64}$' })
+
+/**
+ * One of the project's own tiers whose file is not the version approved (#753), as a thread is told
+ * it: the tier, its file, and how it differs.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectTierPending = Type.Object(
+  {
+    tier: EnsoProjectTier,
+    path: Type.String({ minLength: 1 }),
+    state: Type.Union([Type.Literal('changed'), Type.Literal('removed'), Type.Literal('unapproved')]),
+  },
+  { additionalProperties: false },
+)
+/** @group Project settings */
+export type EnsoProjectTierPending = Static<typeof EnsoProjectTierPending>
+
+/**
+ * One of the project's own tiers as its page reviews it (#753): its state, the file's hash as read
+ * now — what an approval names, so the operator approves what they saw — and the diff from the
+ * approved version to it.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectTierReview = Type.Object(
+  {
+    tier: EnsoProjectTier,
+    path: Type.String({ minLength: 1 }),
+    state: EnsoProjectTierApprovalState,
+    /** The file's SHA-256 now; `null` when there is no file. */
+    current: Type.Union([Sha256, Type.Null()]),
+    /** A unified diff (git's hunk format) from the approved version — none is empty — to the file now; `''` when they agree. */
+    patch: Type.String(),
+    /** Why the file cannot be approved as it is (too large, unreadable, not a config Enso reads): fix it first. */
+    problem: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  { additionalProperties: false },
+)
+/** @group Project settings */
+export type EnsoProjectTierReview = Static<typeof EnsoProjectTierReview>
+
+/**
+ * `GET /api/projects/<projectId>/config-approval` (#753): each of the project's own tiers that has a
+ * file or an approval, the local tier first.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectConfigReview = Type.Object(
+  { projectId: Type.String({ minLength: 1 }), tiers: Type.Array(EnsoProjectTierReview) },
+  { additionalProperties: false },
+)
+/** @group Project settings */
+export type EnsoProjectConfigReview = Static<typeof EnsoProjectConfigReview>
+
+/**
+ * `PUT /api/projects/<projectId>/config-approval` (#753): approve one tier's file as the page showed
+ * it, by its hash — `null` approves its removal. A file that changed since is refused (409), so
+ * nothing is approved unseen. Answered with the new `EnsoProjectConfigReview`.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectConfigApproval = Type.Object(
+  { tier: EnsoProjectTier, sha256: Type.Union([Sha256, Type.Null()]) },
+  { additionalProperties: false },
+)
+/** @group Project settings */
+export type EnsoProjectConfigApproval = Static<typeof EnsoProjectConfigApproval>
+
+/**
  * One setup command as it ran in a new tree.
  *
  * @group Project settings
@@ -210,6 +302,11 @@ export const EnsoTreeSetupOutcome = Type.Object(
     steps: Type.Array(EnsoTreeSetupStep),
     /** The tier each list came from, so a failure says which file to fix. */
     tiers: Type.Object({ setup: EnsoConfigTier, copy: EnsoConfigTier }, { additionalProperties: false }),
+    /**
+     * The project's own tiers whose file was not the version approved when the tree was made (#753):
+     * the tree was made from the approved version, or without the file. Absent when there were none.
+     */
+    pending: Type.Optional(Type.Array(EnsoProjectTierPending)),
   },
   { additionalProperties: false },
 )

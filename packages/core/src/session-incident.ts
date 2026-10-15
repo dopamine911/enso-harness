@@ -215,9 +215,10 @@ export const EnsoIncidentRecord = Type.Object(
 export type EnsoIncidentRecord = Static<typeof EnsoIncidentRecord>
 
 /**
- * `config.json`'s `security` section (#466). **User-only**: a trusted project's `security` is
- * dropped with a notice (`session-config.ts`), so a checkout cannot switch halting off or raise
- * the thresholds its own session is measured against.
+ * `config.json`'s `security` section (#466). Set in the user's file; a trusted project's approved
+ * `security.incidents` can only TIGHTEN it (#753, `tightenIncidentPolicy`), so a checkout the agent
+ * can write cannot switch halting off or raise the thresholds its own session is measured against.
+ * `judge` stays user-only: a project may not switch a judge on, which sends commands off the machine.
  *
  * - `incidents.halt` — whether an incident suspends tools (default `false`: it only alerts, until
  *   the thresholds are tuned on real sessions, #468);
@@ -271,6 +272,45 @@ export function incidentPolicyOf(security: EnsoSecurityConfig | undefined): Enso
       incidentAtSignals: incidents?.incidentAtSignals ?? DEFAULT_RISK_THRESHOLDS.incidentAtSignals,
     },
   }
+}
+
+type IncidentKnobs = NonNullable<EnsoSecurityConfig['incidents']>
+
+/**
+ * Which way each threshold tightens (#753): a larger window counts more calls together; every
+ * count is reached sooner when smaller.
+ */
+const TIGHTER_THRESHOLD: Readonly<Record<keyof EnsoRiskThresholds, 'larger' | 'smaller'>> = {
+  windowCalls: 'larger',
+  highAtSignals: 'smaller',
+  highAtKinds: 'smaller',
+  incidentAtSignals: 'smaller',
+}
+
+/**
+ * `user`'s incident policy with a project tier's `security.incidents` over it (#753): TIGHTEN ONLY.
+ * A key that tightens applies — halting turned on, a threshold reached sooner, a wider window — and
+ * one that loosens is ignored and named in `loosening` (`security.incidents.<key>`), for the thread
+ * to be told. A key equal to the user's changes nothing and is neither.
+ *
+ * @group Session incident
+ */
+export function tightenIncidentPolicy(
+  user: EnsoIncidentPolicy,
+  project: IncidentKnobs | undefined,
+): { readonly policy: EnsoIncidentPolicy; readonly loosening: readonly string[] } {
+  if (project === undefined) return { policy: user, loosening: [] }
+  const loosening: string[] = []
+  if (project.halt === false && user.halt) loosening.push('security.incidents.halt')
+  const thresholds = { ...user.thresholds }
+  for (const key of Object.keys(TIGHTER_THRESHOLD) as (keyof EnsoRiskThresholds)[]) {
+    const asked = project[key]
+    if (asked === undefined) continue
+    const tighter = TIGHTER_THRESHOLD[key] === 'larger' ? asked >= user.thresholds[key] : asked <= user.thresholds[key]
+    if (tighter) thresholds[key] = asked
+    else loosening.push(`security.incidents.${key}`)
+  }
+  return { policy: { halt: user.halt || project.halt === true, thresholds }, loosening }
 }
 
 /**

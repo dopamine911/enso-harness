@@ -29,8 +29,24 @@ export const ENSO_THREAD_TREE_ENTRY = 'enso-thread-tree' as const
  */
 export const ENSO_TREE_RESTORED_ENTRY = 'enso-tree-restored' as const
 
-/** A snapshot commit: 40 or 64 hex digits, as the store's object format (sha1 or sha256) makes it. */
-const SnapshotHash = Type.String({ pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$' })
+/**
+ * A snapshot commit: 40 or 64 hex digits, as the store's object format (sha1 or sha256) makes it.
+ * The one pattern every record, wire field and route query that names a snapshot is held to.
+ *
+ * @group Thread tree
+ */
+export const EnsoSnapshotHash = Type.String({ pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$' })
+
+const snapshotHashValidator = Compile(EnsoSnapshotHash)
+
+/**
+ * Whether `value` names a snapshot commit ({@link EnsoSnapshotHash}): lowercase hex, 40 or 64 digits.
+ *
+ * @group Thread tree
+ */
+export function isSnapshotHash(value: unknown): value is string {
+  return snapshotHashValidator.Check(value)
+}
 
 /**
  * How a thread's tree is made: a `git worktree` of the project on the thread's own branch, or a
@@ -58,7 +74,7 @@ export const EnsoThreadTreeRecord = Type.Object(
     /** The worktree's branch; `null` for a copy. */
     branch: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
     /** The snapshot the tree's content was made from. */
-    base: SnapshotHash,
+    base: EnsoSnapshotHash,
   },
   { additionalProperties: false },
 )
@@ -84,7 +100,7 @@ export function readEnsoThreadTree(customType: string, data: unknown): ThreadTre
  * @group Thread tree
  */
 export const EnsoTreeRestored = Type.Object(
-  { hash: SnapshotHash, safety: SnapshotHash },
+  { hash: EnsoSnapshotHash, safety: EnsoSnapshotHash },
   { additionalProperties: false },
 )
 /** @group Thread tree */

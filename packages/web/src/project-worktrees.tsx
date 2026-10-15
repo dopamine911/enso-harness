@@ -431,18 +431,21 @@ type Loading =
 
 /**
  * The tab for one project: its settings read when it opens, and every write's answer shown in their
- * place. Read again when `revision` moves — the page's trust changed (#873), and with it what the
- * settings resolve to; the form is remounted on the new answer, as after a save.
+ * place. Read again when `revision` moves — the page's trust or an approval changed (#873, #753), and
+ * with it what the settings resolve to; the form is remounted on the new answer, as after a save.
+ * `onSaved` says a save went through: it wrote a file and approved it as written (#753).
  */
 export function ProjectWorktrees({
   projectId,
   fetch: fetchImpl,
   revision = 0,
+  onSaved,
 }: {
   projectId: string
   /** Injected by tests; the page's global by default. */
   fetch?: FetchLike | undefined
   revision?: number
+  onSaved?: (() => void) | undefined
 }): React.ReactNode {
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
@@ -476,6 +479,7 @@ export function ProjectWorktrees({
         settings: outcome.value,
         version: was.kind === 'loaded' ? was.version + 1 : 0,
       }))
+      onSaved?.()
     } catch (error) {
       // A request that never reached the server: said, and the form answerable again.
       setRefusal(`the settings could not be sent: ${String(error)}`)

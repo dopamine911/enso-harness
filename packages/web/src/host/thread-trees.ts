@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import {
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  type EnsoRunContext,
   type EnsoTranscriptEntry,
   type EnsoTreeRestored,
   lastCustomEntryData,
@@ -12,11 +13,11 @@ import {
 } from '@enso/core'
 import {
   projectIdOf,
+  projectIdOfCwd,
   projectSessionsDir,
   projectSnapshotsDir,
   projectTreesDir,
   realpathOrSelf,
-  treeProjectId,
 } from '@enso/core/paths'
 
 /**
@@ -27,17 +28,9 @@ import {
  *
  * ⚠ A THREAD ON A TREE RUNS IN A DIRECTORY THAT IS NO PROJECT. pi's cwd — and so the session
  * header, the listing's `cwd`, the guards' write root — is the tree. Everything filed or served BY
- * PROJECT asks {@link projectIdOfCwd} first: the session directory, the snapshot store, the server's
- * projects (`server/projects.ts`).
+ * PROJECT asks `projectIdOfCwd` (`@enso/core/paths`) first: the session directory, the snapshot
+ * store, the server's projects (`server/projects.ts`).
  */
-
-/**
- * The project a cwd belongs to, by id: the one a minted tree's path names, else the cwd's own (its
- * canonical path, hashed — `projectIdOf`).
- */
-export function projectIdOfCwd(projectsDir: string, cwd: string): string {
-  return treeProjectId(projectsDir, cwd) ?? projectIdOf(realpathOrSelf(cwd))
-}
 
 /** The session directory a thread in `cwd` files under (#552): its project's, whether `cwd` is the checkout or one of its trees. */
 export function sessionDirectoryFor(projectsDir: string, cwd: string): string {
@@ -76,28 +69,33 @@ export function lastRestoreOf(transcript: readonly EnsoTranscriptEntry[]): EnsoT
 }
 
 /**
- * The tree as it was when the turn opened by `entryId` began: the snapshot on the newest
- * `enso-run-context` record at or before that entry, root first — the record a run writes at its
- * start precedes its user message on the branch. `undefined` when the entry is not on the branch, or
- * no record before it carries a snapshot (a thread from before #551, or a run whose snapshot failed).
+ * The newest `enso-run-context` record at or before `position` on the branch, root first — the
+ * record a run writes at its start precedes its user message — or `undefined` for none. The newest
+ * decides: a record without a snapshot means the tree was not captured there, and an older
+ * record's snapshot is an older tree, never to be offered in its place.
+ */
+export function runContextAt(transcript: readonly EnsoTranscriptEntry[], position: number): EnsoRunContext | undefined {
+  for (let entryIndex = position; entryIndex >= 0; entryIndex -= 1) {
+    const entry = transcript[entryIndex]
+    const record = entry?.kind === 'custom' ? readEnsoRunContext(entry.customType, entry.data) : undefined
+    if (record !== undefined) return record
+  }
+  return undefined
+}
+
+/**
+ * The tree as it was when the turn opened by `entryId` began: the snapshot on {@link runContextAt}
+ * that entry. `undefined` when the entry is not on the branch, or no record before it carries a
+ * snapshot (a thread from before #551, or a run whose snapshot failed).
  */
 export function snapshotAtEntry(
   transcript: readonly EnsoTranscriptEntry[],
   entryId: string,
 ): { readonly hash: string; readonly revision: string | null } | undefined {
   const position = transcript.findIndex((entry) => entry.id === entryId)
-  if (position === -1) return undefined
-  for (let entryIndex = position; entryIndex >= 0; entryIndex -= 1) {
-    const entry = transcript[entryIndex]
-    if (entry?.kind !== 'custom') continue
-    const record = readEnsoRunContext(entry.customType, entry.data)
-    if (record === undefined) continue
-    // The newest record decides: one without a snapshot means the tree was not captured there, and
-    // an older record's snapshot is an older tree — never offered in its place.
-    if (record.snapshot === undefined || record.snapshot === null) return undefined
-    return { hash: record.snapshot.hash, revision: record.git?.revision ?? null }
-  }
-  return undefined
+  const record = position === -1 ? undefined : runContextAt(transcript, position)
+  if (record?.snapshot === undefined || record.snapshot === null) return undefined
+  return { hash: record.snapshot.hash, revision: record.git?.revision ?? null }
 }
 
 /** True when `entryId` is on the branch at all — `snapshotAtEntry`'s `undefined` says why not otherwise. */
