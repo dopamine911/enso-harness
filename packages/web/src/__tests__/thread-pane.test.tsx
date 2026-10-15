@@ -4924,6 +4924,53 @@ test('a URL naming a deleted thread (410) is said on the rail and never started 
   }
 })
 
+// #938: back/forward to panes the page partly holds adopts the rest — and adopting one past the
+// follow budget evicts the oldest idle thread. The held panes the URL names are about to be shown,
+// so they are never that thread: otherwise the layout lands naming a thread the page just dropped.
+test('⚠ restoring panes at the follow budget never evicts a held pane the URL names (#938)', async () => {
+  const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()]
+  const [held, other, left, right, adopted] = ids as [string, string, string, string, string]
+  // Stored and prompted, so leaving one keeps it on the page; `adopted` is the server's, not yet the page's.
+  const stored = (threadId: string): EnsoThreadHistory => ({
+    threadId,
+    projectId: 'p-launch',
+    messages: [
+      { id: `u-${threadId}`, role: 'user', parts: [{ type: 'text', content: 'hello' }] },
+      { id: `a-${threadId}`, role: 'assistant', parts: [{ type: 'text', content: 'hi' }] },
+    ],
+    permissionMode: { mode: 'default', available: ['default', 'plan'] },
+    sessionRisk: { level: 'low', signals: 0 },
+    incidents: NO_SESSION_INCIDENTS,
+  })
+  const page = await mountPage({
+    histories: Object.fromEntries([held, other, left, right, adopted].map((threadId) => [threadId, stored(threadId)])),
+  })
+  try {
+    for (const threadId of [held, other, left, right]) {
+      await visitThreadUrl(threadId)
+      await eventually(() => expect(threadListStore.get().map((thread) => thread.threadId)).toContain(threadId))
+    }
+    await flush(async () => {
+      window.history.pushState(null, '', `?thread=${left}&panes=${left},${right}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+    })
+    await flush(async () => {
+      window.history.pushState(null, '', `?thread=${held}&panes=${held},${adopted}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+    })
+    await eventually(() => {
+      const open = threadListStore.get().map((thread) => thread.threadId)
+      expect(open).toContain(adopted)
+      expect(open).toContain(held)
+    })
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
 // ── the pages beside the threads (#869): Settings at its own URL, opened from the rail, left by a thread ──
 
 /** Where the browser's back or forward button lands: the URL moves, then the page is told. */

@@ -95,18 +95,21 @@ export function replacePane(layout: PaneLayout, gone: string, next: string): Pan
   return closePane({ ...layout, focused: already }, at)
 }
 
-/** How many panes fit side by side in a window `width` wide. */
-function panesThatFit(width: number): number {
-  if (width >= WIDTH_FOR_THREE_PANES) return 3
-  return width >= WIDTH_FOR_TWO_PANES ? 2 : 1
+/**
+ * The widths two and three panes fit from, as media queries: in rems, so 1024 and 1440 pixels at the
+ * browser's default 16-pixel font and wider with a larger one. The count is read from these same
+ * queries, never `innerWidth`, so it changes exactly when they fire.
+ */
+const PANE_QUERIES = [WIDTH_FOR_TWO_PANES, WIDTH_FOR_THREE_PANES].map((width) => `(min-width: ${width / 16}rem)`)
+
+/** How many panes fit side by side in the window: one, and one more for each width it reaches. */
+function panesThatFit(): number {
+  return 1 + PANE_QUERIES.filter((query) => window.matchMedia(query).matches).length
 }
 
-/** The widths the count changes at, watched as media queries: a resize that crosses none re-renders nothing. */
+/** The widths the count changes at, watched: a resize that crosses none re-renders nothing. */
 function subscribeToWidth(changed: () => void): () => void {
-  const queries = [WIDTH_FOR_TWO_PANES, WIDTH_FOR_THREE_PANES].map((width) =>
-    // In rems, the 16-pixel root's: the same widths `panesThatFit` reads.
-    window.matchMedia(`(min-width: ${width / 16}rem)`),
-  )
+  const queries = PANE_QUERIES.map((query) => window.matchMedia(query))
   for (const query of queries) query.addEventListener('change', changed)
   return () => {
     for (const query of queries) query.removeEventListener('change', changed)
@@ -115,11 +118,7 @@ function subscribeToWidth(changed: () => void): () => void {
 
 /** How many panes the window fits side by side, kept current as it is resized. */
 export function usePanesThatFit(): number {
-  return useSyncExternalStore(
-    subscribeToWidth,
-    () => panesThatFit(window.innerWidth),
-    () => 1,
-  )
+  return useSyncExternalStore(subscribeToWidth, panesThatFit, () => 1)
 }
 
 /** Side by side when every pane fits; tabs when they don't; one pane needs neither. */

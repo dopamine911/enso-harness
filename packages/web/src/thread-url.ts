@@ -62,10 +62,12 @@ const PANES_QUERY_PARAMETER = 'panes'
  * The panes a URL names around its thread, `focusedId` (#938): the listed ids that can be threads,
  * each once, at most three — or the thread alone, when the list does not hold it or there is none.
  *
- * @invariant resume/url-names-panes The URL names the open panes and the focused one; reload and
- * back/forward show them. Opening, closing or replacing a pane pushes (`urlOpeningPanes`), moving the
- * focus rewrites the entry it is on (`urlForPanes`): back walks the panes you had, not every click
- * between them.
+ * @invariant resume/url-names-panes The URL names the open panes and the focused one, and reading
+ * it back gives that layout again: what a reload and back/forward restore from.
+ *
+ * Which entry a change writes is the page's (`show` in `chat-screen.tsx`), not pinned here: opening
+ * or closing a pane pushes (`urlOpeningPanes`); moving the focus, or a delete putting another
+ * thread in a pane, rewrites the entry it is on (`urlForPanes`).
  */
 export function readPaneLayout(search: string, focusedId: string): PaneLayout {
   const listed = new URLSearchParams(search).get(PANES_QUERY_PARAMETER)?.split(',') ?? []

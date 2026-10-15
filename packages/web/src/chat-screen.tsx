@@ -248,6 +248,17 @@ function useRestorePanes({
       const issued = epoch.current
       void Promise.all(wanted.threadIds.map(readPaneHistory)).then((reads) => {
         if (issued !== epoch.current) return
+        // The held panes are about to be shown: protect them before adopting the rest, whose room
+        // the follow budget makes by evicting the oldest idle thread — never one this layout names.
+        // None held, the panes on screen stay protected: this restore may yet show nothing.
+        const held = wanted.threadIds.filter((_, index) => reads[index]?.kind === 'held')
+        const heldFocus = focusedThread(wanted)
+        if (held.length > 0) {
+          markThreadActive(
+            heldFocus !== undefined && held.includes(heldFocus) ? heldFocus : held[0],
+            held.filter((threadId) => threadId !== heldFocus),
+          )
+        }
         let failure: string | undefined
         const kept = wanted.threadIds.flatMap((threadId, index) => {
           const read = reads[index]
