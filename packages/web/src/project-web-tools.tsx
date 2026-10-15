@@ -48,6 +48,8 @@ export interface ProjectWebToolsTabProps {
   readonly stored: readonly EnsoStoredThread[]
   /** Open Settings › Web tools, where your own are changed. */
   readonly onOpenSettings: () => void
+  /** A change went through: it wrote the project's file and approved it as written (#753). */
+  readonly onSaved?: (() => void) | undefined
 }
 
 export function ProjectWebToolsTab({
@@ -55,6 +57,7 @@ export function ProjectWebToolsTab({
   fetch,
   stored,
   onOpenSettings,
+  onSaved,
 }: ProjectWebToolsTabProps): React.ReactNode {
   const answer = useSettingsAnswer(
     fetch,
@@ -63,10 +66,16 @@ export function ProjectWebToolsTab({
     "project's web tools",
   )
   const { read, writing, writeError, fetchNow } = answer
-  const change = (body: ProjectWebToolsChange): Promise<boolean> => answer.post(body)
+  const change = async (body: ProjectWebToolsChange): Promise<boolean> => {
+    const saved = await answer.post(body)
+    if (saved) onSaved?.()
+    return saved
+  }
   if (read.kind !== 'read') return <SettingsUnread read={read} what="this project's web tools" />
   const { value: tools } = read
   const { own } = tools
+  // A file not the version approved is never written here (#753): its controls wait for the approval.
+  const busy = writing || tools.pending !== undefined
 
   return (
     <div className="grid gap-6">
@@ -100,7 +109,7 @@ export function ProjectWebToolsTab({
               <RemovableList
                 label="this project's hosts"
                 hostNames={own.hosts}
-                busy={writing}
+                busy={busy}
                 removeLabel={(host) => `remove ${host} from this project`}
                 onRemove={(host) => void change({ remove: host })}
               />
@@ -108,7 +117,7 @@ export function ProjectWebToolsTab({
             <HostAddForm
               idPrefix="project"
               fetchNow={fetchNow}
-              writing={writing}
+              writing={busy}
               onAdd={(host) => change({ add: host })}
             />
           </div>
@@ -131,7 +140,7 @@ export function ProjectWebToolsTab({
               unset="yours applies"
               options={projectBackends(tools.yours.backend)}
               idPrefix="project"
-              busy={writing}
+              busy={busy}
               onChoose={(backend) => void change({ backend })}
             />
             {DOMAIN_LISTS.map((field) => (
@@ -143,7 +152,7 @@ export function ProjectWebToolsTab({
                 idPrefix="project"
                 path={tools.path}
                 domains={own[field.list]}
-                busy={writing}
+                busy={busy}
                 onChange={change}
               />
             ))}
@@ -179,7 +188,17 @@ export function ProjectWebToolsTab({
   )
 }
 
-/** An untrusted project's tab is read only; a file that can't be read is said, never written. */
+/** What each pending state is said as: the file as it is against the version approved (#753). */
+const PENDING_WORDS: Readonly<Record<NonNullable<ProjectWebTools['pending']>, string>> = {
+  changed: 'has changed since you approved it, so the version you approved applies',
+  removed: 'is gone since you approved it, so the version you approved applies',
+  unapproved: 'has not been approved, so nothing in it applies',
+}
+
+/**
+ * An untrusted project's tab is read only; a file that is not the version approved is said, and not
+ * written until it is approved; an approved version that can't be read is said, never written.
+ */
 function ReadNotes({ tools }: { tools: ProjectWebTools }): React.ReactNode {
   if (!tools.trusted)
     return (
@@ -195,12 +214,23 @@ function ReadNotes({ tools }: { tools: ProjectWebTools }): React.ReactNode {
         </p>
       </div>
     )
+  if (tools.pending !== undefined)
+    return (
+      <p role="note" className="flex items-start gap-2 text-sm text-muted-foreground">
+        <LockIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <span>
+          {tools.path} {PENDING_WORDS[tools.pending]}. Review and approve it above before changing it here, so nothing
+          is approved unseen.
+        </span>
+      </p>
+    )
   if (tools.unreadable === undefined) return null
   return (
     <p role="alert" className="flex items-start gap-2 text-sm text-refuse">
       <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>
-        {tools.path} can't be read ({tools.unreadable}), so nothing is written here until it is fixed by hand.
+        The version of {tools.path} you approved can't be read ({tools.unreadable}), so nothing in it applies and
+        nothing is written here until it is fixed.
       </span>
     </p>
   )

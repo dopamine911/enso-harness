@@ -162,8 +162,8 @@ export function refuseWith(
 /** A strong entity tag as the library quotes one: a file's sha256, hex. */
 export const PROMPT_ETAG = /^"[0-9a-f]{64}"$/
 
-/** What a conditional write names in its refusals: a library prompt (#443), the permission policy (#474), or the security settings (#933). */
-type WriteSubject = 'prompt' | 'permission policy' | 'security settings'
+/** What a conditional write names in its refusals: a library prompt (#443), the permission policy (#474), the security settings (#933), or the projects settings (#934). */
+export type WriteSubject = 'prompt' | 'permission policy' | 'security settings' | 'projects settings'
 
 /** Why a write or delete does not say what it expects: the one line `refuseWith` sends. */
 function missingPrecondition(what: 'write' | 'delete', subject: WriteSubject): string {
@@ -289,4 +289,26 @@ export function answerOrFail(work: Promise<void>, response: ServerResponse): voi
     if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'text/plain' })
     response.end('the request failed — see the server log')
   })
+}
+
+/**
+ * A route's work with what it needs (the prompt library, `ENSO_HOME`), answered or failed: a disk
+ * that throws is a 500, never a throw with nothing above it; a server started without it is a 404
+ * saying so. True: the request was handled.
+ */
+export function withServed<Served>(
+  request: IncomingMessage,
+  response: ServerResponse,
+  [served, missing]: readonly [Served | undefined, string],
+  work: (served: Served) => void | Promise<void>,
+): true {
+  if (served === undefined) {
+    endAndClose(request, response, 404, missing)
+    return true
+  }
+  answerOrFail(
+    Promise.resolve().then(() => work(served)),
+    response,
+  )
+  return true
 }

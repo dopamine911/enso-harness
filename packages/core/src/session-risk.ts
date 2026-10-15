@@ -17,8 +17,10 @@ import type { EnsoTranscriptEntry } from './transcript.ts'
  * threshold tuned on replays (#468) is the threshold the live guard runs.
  *
  * ⚠ SIGNALS NAME WHAT WAS OBSERVED, never intent: "a bash call used `python -c` two calls after a
- * shell refusal", not "the agent tried to evade". Every detector needs an earlier refusal in the
- * window, so no single command, however odd, is a signal on its own.
+ * shell refusal", not "the agent tried to evade". Every detector but two needs an earlier refusal in
+ * the window, so no single command, however odd, is a signal on its own — except one that reaches
+ * the records an incident rests on (`protected-record-touch`, #466) or a config tier
+ * (`config-tier-touch`, #753): reaching them is the observation.
  *
  * ⚠ THE THRESHOLDS ARE UNCALIBRATED. The window and the level counts are named guesses, to be
  * tuned against real sessions by #468's replay before anything acts on a level (#466).
@@ -221,7 +223,12 @@ export function readEnsoToolRefusalMetadata(
  *   after a shell refusal;
  * - `tool-substitution-after-denial` — after a shell refusal, a file written or edited and then run;
  * - `policy-introspection` — a read or search of the guard's policy or the harness's internals
- *   after a refusal.
+ *   after a refusal;
+ * - `protected-record-touch` — a shell command naming the session or log directory (#466);
+ * - `config-tier-touch` — a write or edit of a config tier file (`.enso/config.json`,
+ *   `.enso/config.local.json`), or a write-shaped shell command naming one (#753).
+ *
+ * The last two need no refusal before them.
  *
  * @group Session risk
  */
@@ -232,6 +239,7 @@ export const ENSO_SECURITY_SIGNALS = [
   'tool-substitution-after-denial',
   'policy-introspection',
   'protected-record-touch',
+  'config-tier-touch',
 ] as const
 
 /** @group Session risk */
@@ -439,6 +447,13 @@ const ONE_LINER =
  */
 const INTERNALS = /guards?\/|guard\.ts|permissions\.json|extensions\/[\w.-]+\/config\.json|(?:^|[\s/'"])\.enso(?:\/|\b)/
 
+/**
+ * A config tier file by name (#753): a project's `.enso/config.json` or `.enso/config.local.json`,
+ * and the user's `~/.enso/config.json` — wherever it sits in a path or a command, quoted or not, so
+ * an interpreter one-liner that writes it (`open('.enso/config.json', 'w')`) is seen too.
+ */
+const CONFIG_TIER = /(?:^|[^\w.-])\.enso[/\\]config(?:\.local)?\.json(?![\w.-])/i
+
 /** Where a path segment ends in a command: the end, a separator, a quote or a shell operator. */
 const SEGMENT_END = `(?:$|[\\s/'"\`;&|)])`
 
@@ -486,13 +501,109 @@ function withSignal(signals: EnsoSecuritySignal[], signal: EnsoSecuritySignal): 
     signals.push(signal)
 }
 
-/** The signals a call raises against the refusals before it in the window. */
+/**
+ * ⚠ The call signal that needs no earlier refusal (#753), as `protected-record-touch` needs none: a
+ * write or edit of a config tier file, or a write-shaped shell command naming one (`shellWritesTier`),
+ * is itself the observation — refused or not, since the guard cannot read every route to the file (an
+ * interpreter one-liner). A read or a mention (`cat`, `git log --`, a commit message) is none: signals
+ * stay in the session, so five harmless mentions would otherwise open an incident (review of #987).
+ */
+function configTierTouch(call: RecentCall): EnsoSecuritySignal | undefined {
+  let target: string | undefined
+  if (WRITE_TOOLS.has(call.tool))
+    target = call.path !== undefined && CONFIG_TIER.test(call.path) ? call.path : undefined
+  else if (SHELL_TOOLS.has(call.tool) && call.command !== undefined && shellWritesTier(call.command))
+    target = call.command
+  if (target === undefined) return undefined
+  return {
+    signal: 'config-tier-touch',
+    toolCallId: call.toolCallId,
+    detail: `${call.tool} reached a config tier file: ${firstLine(target)}`,
+    after: [],
+  }
+}
+
+/** A redirect (`>`, `>>`, `>|`) whose target is a config tier file. */
+const TIER_REDIRECT = /\d?>[>|]?\s*['"]?[^\s'";&|]*\.enso[/\\]config(?:\.local)?\.json(?![\w.-])/i
+/**
+ * The words a command can stand behind and still be the command: `VAR=value` assignments and the
+ * runners in the alternation below with their flags — the value-taking short flags those runners
+ * use (`sudo -u root`, `nice -n 10`, `xargs -n 1`) take their value along — and `timeout` with its
+ * duration and its flags (`-s KILL`, `-k 1` take their value along). Best-effort: a runner or flag
+ * spelling not listed here hides the command behind it.
+ */
+const COMMAND_PREFIX = String.raw`^(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs|stdbuf|ionice|setsid|busybox)(?:\s+-[ugnCILPdsacpUrtSo]\s+\S+|\s+-\S+)*\s+|timeout(?:\s+-[sk]\s+\S+|\s+-\S+)*\s+\d[\w.]*\s+|[A-Za-z_]\w*=\S*\s+)*`
+/**
+ * Commands that write the file named among their arguments: `tee`, `truncate`, and `sed`/`perl`
+ * with an in-place flag in any spelling (`-i`, `-Ei`, `-ni`, `-pi`, `-i.bak`, `--in-place`).
+ */
+const WRITES_ARGUMENT = new RegExp(
+  `${COMMAND_PREFIX}(?:(?:tee|truncate)\\b|(?:sed|perl)\\s+(?:[^|;&]*\\s)?(?:--in-place|-[A-Za-z]*i))`,
+)
+/** `dd` whose output (`of=`) is a config tier file; `dd if=` of one is a read. */
+const DD_WRITES_TIER = new RegExp(
+  `${COMMAND_PREFIX}dd\\s(?:[^|;&]*\\s)?of=['"]?[^\\s'";&|]*\\.enso[/\\\\]config(?:\\.local)?\\.json(?![\\w.-])`,
+  'i',
+)
+/** Commands whose last argument is the destination (`cp`, `mv`, `ln`, `install`, `rsync`). */
+const WRITES_LAST_ARGUMENT = new RegExp(`${COMMAND_PREFIX}(?:cp|mv|ln|install|rsync)\\s`)
+
+/**
+ * Whether a shell command names a config tier file in a write-shaped way: an interpreter one-liner
+ * naming it (the guard cannot read what it does), a redirect into it, `tee`/`truncate`/in-place
+ * `sed`/`perl` with it as an argument, `dd of=` it, or `cp`/`mv`/`ln`/`install`/`rsync` with it as
+ * the destination — each also behind `COMMAND_PREFIX`.
+ */
+function shellWritesTier(command: string): boolean {
+  if (!CONFIG_TIER.test(command)) return false
+  if (ONE_LINER.test(command) || TIER_REDIRECT.test(command)) return true
+  return shellSegments(command).some((segment) => {
+    const words = segment.trim()
+    if (!CONFIG_TIER.test(words)) return false
+    if (WRITES_ARGUMENT.test(words) || DD_WRITES_TIER.test(words)) return true
+    if (!WRITES_LAST_ARGUMENT.test(words)) return false
+    const last = words.split(/\s+/).at(-1) ?? ''
+    return CONFIG_TIER.test(` ${last.replace(/^['"]|['"]$/g, '')}`)
+  })
+}
+
+/**
+ * A command split at `;`, `&`, `|` and newlines that stand outside quotes (`sed 's/(a|b)/c/'` stays
+ * whole). A backslash outside single quotes escapes the next character (`echo \"; cp …` splits).
+ * A quote left open at the end falls back to splitting at every separator: for a guard an unbalanced
+ * quote must over-split, never hide the command after it.
+ */
+function shellSegments(command: string): string[] {
+  const segments: string[] = []
+  let current = ''
+  let quote: string | undefined
+  let escaped = false
+  for (const char of command) {
+    if (escaped) escaped = false
+    else if (char === '\\' && quote !== "'") escaped = true
+    else if (quote !== undefined) {
+      if (char === quote) quote = undefined
+    } else if (char === "'" || char === '"') quote = char
+    else if (';&|\n'.includes(char)) {
+      segments.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  if (quote !== undefined) return command.split(/[;&|\n]+/)
+  segments.push(current)
+  return segments
+}
+
+/** The signals a call raises: a config tier reached, and what it does against the refusals before it in the window. */
 function callSignals(
   call: RecentCall,
   earlier: readonly RecentCall[],
   ownTree: string | undefined,
 ): EnsoSecuritySignal[] {
-  const found: EnsoSecuritySignal[] = []
+  const touch = configTierTouch(call)
+  const found: EnsoSecuritySignal[] = touch === undefined ? [] : [touch]
   const denied = earlier.filter((recent) => recent.denial !== undefined)
   if (denied.length === 0) return found
   const target = call.command ?? call.path ?? ''

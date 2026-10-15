@@ -2,6 +2,7 @@ import { type Static, Type } from 'typebox'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoSessionIncidents } from './session-incident.ts'
 import { EnsoSessionRiskChange } from './session-risk.ts'
+import { EnsoSnapshotHash } from './thread-tree-record.ts'
 import { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
@@ -289,6 +290,40 @@ export const EnsoStoredThread = Type.Object(
 export type EnsoStoredThread = Static<typeof EnsoStoredThread>
 
 /**
+ * A thread's run as `GET /api/run-states` says it (#911): `busy` and `waiting` mean what they mean
+ * on {@link EnsoStoredThread}, read at the moment the server built, took, released or dropped the thread.
+ *
+ * @group Thread inspection
+ */
+export const EnsoThreadRunState = Type.Object(
+  { threadId: Type.String(), busy: Type.Boolean(), waiting: Type.Boolean() },
+  { additionalProperties: false },
+)
+/** @group Thread inspection */
+export type EnsoThreadRunState = Static<typeof EnsoThreadRunState>
+
+/**
+ * One frame of `GET /api/run-states` (#911): first `run-states`, every thread the server holds and
+ * its run — a thread it does not hold is neither busy nor waiting — then a `run-state` each time a
+ * thread is built, taken by a run, released or dropped. How a page hears that a thread it has not opened
+ * stopped running, at the moment the server says so.
+ *
+ * @group Thread inspection
+ */
+export const EnsoRunStatesFrame = Type.Union([
+  Type.Object(
+    { type: Type.Literal('run-states'), threads: Type.Array(EnsoThreadRunState) },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { type: Type.Literal('run-state'), threadId: Type.String(), busy: Type.Boolean(), waiting: Type.Boolean() },
+    { additionalProperties: false },
+  ),
+])
+/** @group Thread inspection */
+export type EnsoRunStatesFrame = Static<typeof EnsoRunStatesFrame>
+
+/**
  * `POST /api/threads/:id/fork` (#433): fork the thread at one of its user messages, pi's `/fork`
  * with its default position `before`. `entryId` is the pi entry id of that user message — the
  * id a stored history's message carries.
@@ -317,10 +352,7 @@ export type EnsoRestoreRequest = Static<typeof EnsoRestoreRequest>
  * safety, so a notice of an older restore can never undo a later one.
  * @group Thread inspection
  */
-export const EnsoRestoreUndoRequest = Type.Object(
-  { safety: Type.String({ pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' }) },
-  { additionalProperties: false },
-)
+export const EnsoRestoreUndoRequest = Type.Object({ safety: EnsoSnapshotHash }, { additionalProperties: false })
 /** @group Thread inspection */
 export type EnsoRestoreUndoRequest = Static<typeof EnsoRestoreUndoRequest>
 

@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.t
 import { cn } from './lib/utils.ts'
 import type { ListingState } from './listing-store.ts'
 import { PAGE_BANNER, PAGE_COLUMN, PAGE_OUTLINE_BUTTON } from './page-styles.ts'
+import { ProjectConfigApproval } from './project-config-approval.tsx'
 import {
   type ProjectRequestOutcome,
   type ProjectThread,
@@ -38,7 +39,9 @@ import { ProjectStorage } from './trees-settings.tsx'
  * (now the Storage tab) — beside its threads, and its own web tools (#937, the Web tools tab). Over the tabs, what is wrong with the project — its
  * folder is gone (Check again reads the projects again — the server recomputes the status on every
  * list, `projects.ts` `viewOf`) — and its trust (#873): not trusted, with **Trust this project…**,
- * or trusted, with **Revoke trust…**, each behind a confirmation. Under them, its removal, said as
+ * or trusted, with **Revoke trust…**, each behind a confirmation. Under the trust, its own config
+ * files that need approval (#753): each one not
+ * the version approved, as a diff with **Approve**. Under them, its removal, said as
  * the server does it (`project-routes.ts`): the registration goes, its threads' files stay and are
  * served again when the folder is added again.
  */
@@ -188,7 +191,7 @@ function useTrustChange(
 
 /** What isn't read while the project is untrusted, and what is once it is trusted. */
 const UNTRUSTED_WORDS = `Enso isn’t reading this project’s own files (${OWN_FILES}), so only your settings and Enso’s defaults apply: the setup commands and files to copy they list aren’t used.`
-const TRUSTED_WORDS = `New threads read this project’s own files (${OWN_FILES}) and its .pi/ folder, and a new tree runs the setup commands they list.`
+const TRUSTED_WORDS = `New threads read this project’s own files (${OWN_FILES}) as you approved them, and its .pi/ folder, and a new tree runs the setup commands they list.`
 
 /**
  * The project's trust over the tabs (#417, as the prototype draws it): not trusted is a dashed banner
@@ -482,17 +485,20 @@ function ProjectBanners({
 
 /**
  * The tabs, at the route's: each a navigation of its own, so back returns to the tab before.
- * `trustRevision` moves when the trust changes: the Worktrees and Web tools tabs read their settings
- * again, since what they show depends on it.
+ * `settingsRevision` moves when the trust or an approval changes: the Worktrees and Web tools tabs
+ * read their settings again, since what they resolve to depends on both. `onSaved` says a save went
+ * through, which writes and approves a file.
  */
 function ProjectTabs({
   project,
   props,
-  trustRevision,
+  settingsRevision,
+  onSaved,
 }: {
   project: EnsoProject
   props: ProjectPageProps
-  trustRevision: number
+  settingsRevision: number
+  onSaved: () => void
 }): React.ReactNode {
   const { route, fetch: fetchImpl, pageThreads, stored, onOpen } = props
   return (
@@ -524,15 +530,22 @@ function ProjectTabs({
         <ThreadsTab project={project} pageThreads={pageThreads} stored={stored} onOpenThread={props.onOpenThread} />
       </TabsContent>
       <TabsContent value="worktrees">
-        <ProjectWorktrees projectId={project.projectId} fetch={fetchImpl} revision={trustRevision} />
+        <ProjectWorktrees
+          projectId={project.projectId}
+          fetch={fetchImpl}
+          revision={settingsRevision}
+          onSaved={onSaved}
+          onOpenSettings={() => onOpen({ kind: 'settings', section: 'projects' })}
+        />
       </TabsContent>
       <TabsContent value="web-tools">
-        {/* Keyed by the trust: a change reads the tab again, since whether the file is read depends on it. */}
+        {/* Keyed by the trust and the approvals: a change reads the tab again, since what applies depends on both. */}
         <ProjectWebToolsTab
-          key={trustRevision}
+          key={settingsRevision}
           projectId={project.projectId}
           fetch={fetchImpl}
           stored={stored}
+          onSaved={onSaved}
           onOpenSettings={() => onOpen({ kind: 'settings', section: 'web-tools' })}
         />
       </TabsContent>
@@ -547,19 +560,32 @@ function ProjectTabs({
 function ProjectBody({ project, props }: { project: EnsoProject; props: ProjectPageProps }): React.ReactNode {
   const { fetch: fetchImpl, pageThreads, stored } = props
   const [trust, setTrust] = useProjectTrust(project.projectId, true, fetchImpl)
-  const [trustRevision, setTrustRevision] = useState(0)
+  const [settingsRevision, setSettingsRevision] = useState(0)
+  const [approvalRevision, setApprovalRevision] = useState(0)
   const threadCount = threadsOfProject(project.projectId, { projects: [project], pageThreads, stored }).length
   const removal: Removal = { project, words: removalWords(threadCount), onRemove: props.onRemove }
+  const settingsChanged = (): void => setSettingsRevision((revision) => revision + 1)
   const trustChanged = (next: EnsoProjectTrust): void => {
     setTrust(next)
-    setTrustRevision((revision) => revision + 1)
+    settingsChanged()
   }
   return (
     <div className={PAGE_COLUMN}>
       <ProjectBanners removal={removal} notice={props.notice} onCheckAgain={props.onCheckAgain}>
         <TrustState project={project} trust={trust} fetchImpl={fetchImpl} onChanged={trustChanged} />
+        <ProjectConfigApproval
+          projectId={project.projectId}
+          fetch={fetchImpl}
+          revision={approvalRevision}
+          onApproved={settingsChanged}
+        />
       </ProjectBanners>
-      <ProjectTabs project={project} props={props} trustRevision={trustRevision} />
+      <ProjectTabs
+        project={project}
+        props={props}
+        settingsRevision={settingsRevision}
+        onSaved={() => setApprovalRevision((revision) => revision + 1)}
+      />
       <RemoveCard removal={removal} />
     </div>
   )

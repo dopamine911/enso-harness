@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import { incidentPolicyOf, parseEnsoConfig } from '@enso/core'
+import { type EnsoConfigParseResult, incidentPolicyOf, parseEnsoConfig } from '@enso/core'
 import { startLauncher } from '@enso/core/log-process'
 import {
   ensoAgentDir,
@@ -95,8 +95,30 @@ const { listening } = startEnsoServer({
   userConfigPath: configPath,
   userSecretsPath: ensoSecretsPath(home),
   // Each new thread in its own tree (#551), prepared by its project's settings (#754): the user's
-  // `threads` is their lowest tier, a trusted project's own files override it.
-  threadSettings: { user: config.config, userPath: configPath, canonical: (key) => canonicalConfigPath(key) },
+  // `threads` is their lowest tier, a trusted project's own files override it as approved (#753),
+  // the approvals kept in its project folder. Read afresh each time (#934: Settings saves it); a
+  // file made unreadable since launch is no user tier at all — Enso's defaults, no setup commands —
+  // and said.
+  threadSettings: {
+    readUser: () => {
+      // A file there that cannot be read at all (EACCES, EISDIR) is unreadable too, never a throw.
+      let fresh: EnsoConfigParseResult
+      try {
+        fresh = parseEnsoConfig(readTextIfPresent(configPath))
+      } catch (error: unknown) {
+        fresh = { kind: 'unreadable', reason: `could not be read: ${String(error)}` }
+      }
+      if (fresh.kind === 'ok') return fresh.config
+      log.error('{configPath} is unreadable, so your thread settings are not applied: {reason}', {
+        configPath,
+        reason: fresh.reason,
+      })
+      return {}
+    },
+    userPath: configPath,
+    canonical: (key) => canonicalConfigPath(key),
+    projectsDir: ensoProjectsDir(home),
+  },
   harnessPackageDir: harnessDir,
   agentDir,
   permissionRulesPath: ensoPermissionRulesPath(home),

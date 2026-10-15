@@ -4,6 +4,7 @@ import type { ListingState } from './listing-store.ts'
 import { recentModelIds } from './model-picker.tsx'
 import { isFixtureMode } from './page-mode.ts'
 import { createProjectsStore, projectOf } from './project-list.ts'
+import { watchRunStates } from './run-states-connection.ts'
 import { useStore } from './store.ts'
 import { createStoredThreadsStore } from './stored-threads.ts'
 import { type ThreadSummary, threadListStore } from './thread-stores.ts'
@@ -40,7 +41,17 @@ export interface PageListings {
   readonly projects: ListingState<EnsoProject>
 }
 
-/** The page's listings, fetched on load; the stored sessions again each time the page's runs settle. */
+/**
+ * The page's listings, fetched on load; the stored sessions again each time the page's runs settle.
+ *
+ * ⚠ A STORED ROW HEARS ITS RUN END ON THE SERVER'S RUN STATES (#911). A thread this page has open
+ * says its run on its own follow; one it has not opened says what the listing said when it was read,
+ * and no run of this page settling need ever read it again — measured, a row and its closed
+ * project's signal still said running 20 s after the server released the thread. So while a row not
+ * on this page says it runs or waits, the page watches `GET /api/run-states` and the row clears on
+ * the frame that releases it. Only then: the stream is one of the browser's six connections to the
+ * server, and four can be follows (`MAX_LIVE_THREADS`).
+ */
 export function usePageListings(): PageListings {
   const threads = useStore(threadListStore)
   const stored = useStore(storedThreads)
@@ -53,5 +64,18 @@ export function usePageListings(): PageListings {
   useEffect(() => {
     if (!isFixtureMode) void projectList.refresh()
   }, [])
+  const watchRuns = !isFixtureMode && storedRowRuns(stored.rows, threads)
+  useEffect(() => {
+    if (!watchRuns) return undefined
+    const leaving = new AbortController()
+    void watchRunStates({ signal: leaving.signal, onFrame: storedThreads.applyRunStates })
+    return () => leaving.abort()
+  }, [watchRuns])
   return { threads, stored, projects }
+}
+
+/** Whether a stored row this page has not opened says it runs or waits (#911). */
+function storedRowRuns(rows: readonly EnsoStoredThread[], pageThreads: readonly ThreadSummary[]): boolean {
+  const onPage = new Set(pageThreads.map((thread) => thread.threadId))
+  return rows.some((row) => (row.busy || row.waiting) && !onPage.has(row.threadId))
 }

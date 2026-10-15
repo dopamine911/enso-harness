@@ -437,3 +437,30 @@ test('an ask and a run arriving together share ONE build, and the run holds it (
   // The run holds the thread: no idle disposal is armed under its lease.
   expect(clock.pending()).toBe(0)
 })
+
+// #911: a page shows threads it has not opened as stored rows, and nothing told it when their runs
+// ended — the row said running until the page read the listing again. The watch is that word, for
+// every thread, followed or not.
+test('⚠ the run-states watch hears every thread nobody follows taken, released and dropped, at the moment it happens (#911)', async () => {
+  const { threads, built, clock } = fakeHost()
+  const held = await take(threads, 't1')
+  built[0]?.open.set('d1', { method: 'confirm', title: 'Apply?', message: 'It is reversible' })
+  const heard: unknown[] = []
+  const watch = threads.watchRunStates((state) => heard.push(state))
+  // Read in the same tick as the watch: the run in flight, and the question it holds open.
+  expect(watch.states).toEqual([{ threadId: 't1', busy: true, waiting: true }])
+
+  built[0]?.open.clear()
+  held.release()
+  expect(heard).toEqual([{ threadId: 't1', busy: false, waiting: false }])
+  await take(threads, 't2')
+  expect(heard.at(-1)).toEqual({ threadId: 't2', busy: true, waiting: false })
+  clock.advance(20)
+  expect(heard.at(-1)).toEqual({ threadId: 't1', busy: false, waiting: false })
+  expect(threads.liveThreadCount()).toBe(1)
+
+  watch.unsubscribe()
+  const count = heard.length
+  ;(await take(threads, 't1')).release()
+  expect(heard).toHaveLength(count)
+})

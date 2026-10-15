@@ -19,7 +19,7 @@ const ROUTE_GROUP_PATHS: readonly string[] = [
   'packages/web/src/server/prompt-routes.ts',
   'packages/web/src/server/project-routes.ts',
   'packages/web/src/server/permission-routes.ts',
-  'packages/web/src/server/security-routes.ts',
+  'packages/web/src/server/settings-routes.ts',
   'packages/web/src/server/literal-routes.ts',
 ]
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
@@ -27,6 +27,7 @@ const BUNDLE_PATH = 'packages/web/src/server/bundle-route.ts'
 const LOGS_PATH = 'packages/web/src/server/logs-route.ts'
 const LOGS_TAIL_PATH = 'packages/web/src/server/logs-tail-route.ts'
 const LOGS_STATS_PATH = 'packages/web/src/server/logs-stats-route.ts'
+const RUN_STATES_PATH = 'packages/web/src/server/run-states-route.ts'
 
 interface RouteMetadata {
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -122,6 +123,28 @@ function literalRead(
 
 const BODY_ERRORS = '400 malformed id/body; 403 untrusted origin'
 
+/** Settings' server-side writes (#933, #934): a control that builds nothing and logs its outcome. */
+function settingsWrite(
+  facts: Pick<RouteMetadata, 'handler' | 'input' | 'success' | 'errors'>,
+): Omit<RouteMetadata, 'method' | 'path'> {
+  return { ...facts, routeClass: 'control', builds: 'no', logs: 'yes' }
+}
+
+/** A settings read's errors: none but a server started without `ENSO_HOME`. */
+const SETTINGS_READ_ERRORS = '403 untrusted origin; 404 a server started without `ENSO_HOME`; 500 handler failure'
+
+/** A `config.json` section's save (#933, #934): its precondition, then the section's body. */
+const CONFIG_WRITE_INPUT =
+  'headers: exactly one precondition — `If-Match: <ETag>`, `If-Match: *` or `If-None-Match: *` (no file); body: '
+
+/** A `config.json` section's save's errors, `refused` the section's own 422s. */
+const configWriteErrors = (refused: string): string =>
+  `400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 404 no \`ENSO_HOME\`; 412 the file changed on disk since it was read; 413 body too large; 422 ${refused} — nothing written; 428 no precondition; 500 handler failure`
+
+/** A save beside the file's (the judge key, the trust default): no precondition, its own 422s. */
+const sideWriteErrors = (refused: string): string =>
+  `400 malformed body; 403 untrusted origin; 404 no \`ENSO_HOME\`; 413 body too large; 422 ${refused}; 500 handler failure`
+
 const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_ROUTE: threadRead('respondWithThread', '200 JSON', NO_LIVE_SESSION_ERRORS, { path: '/api/threads/:threadId' }),
   THREAD_EVENTS_ROUTE: threadRead('respondWithThreadEvents', '200 `EnsoThreadEvents` JSON', NO_LIVE_SESSION_ERRORS),
@@ -198,6 +221,30 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
       path: '/api/threads/:threadId/changes/file',
       input:
         'path: `threadId`; query: `path` (the file now, from the repository root), optional `oldPath` (a rename or copy’s path at the baseline)',
+    },
+  ),
+  THREAD_PROMPT_RUNS_ROUTE: threadRead(
+    'respondWithThreadPromptRuns → AgentHost.threadPromptRuns',
+    "200 `EnsoThreadPromptRuns` JSON (#553) — the Diff Viewer's steps: the thread's own prompt runs (a prompt and everything that ran under it, up to the next prompt; a fork's inherited prompts are counted in `prompt`, not listed), each with the snapshot its run began with (`start`) and the one the next prompt's run began with (`end`) — `taken`, `failed`, `unrecorded` (before #551), `pending` (no later prompt yet) or `unavailable` (a commit the store lacks) — `idle` when both hold one tree, `restored` when a restore ran in its span; and `baseline`, the tree's base snapshot (a fork's inherited one, with its source) or a checkout thread's first snapshot. Off the branch and the store's objects; the live tree is never read. Read-only",
+    NO_SESSION_ERRORS,
+  ),
+  THREAD_PROMPT_RUN_CHANGES_ROUTE: threadRead(
+    'respondWithPromptRunChanges → AgentHost.readPromptRunChanges',
+    "200 `EnsoPromptRunChanges` JSON (#553) — every file that differs between two of the thread's snapshots, compared in its store (never the live tree), each with its unified diff unless binary or too large; `truncated` past 500 files. Read-only: nothing in the store, the tree or the session is written",
+    "400 malformed thread id, or `from`/`to` missing or not a snapshot hash (lowercase hex, 40 or 64 digits); 403 untrusted origin; 404 no session; 409 a snapshot the thread's prompt runs do not record, no snapshot store on this host, or two snapshots git cannot compare (git's words); 500 handler failure",
+    {
+      path: '/api/threads/:threadId/prompt-runs/changes',
+      input: "path: `threadId`; query: `from`, `to` — two snapshot commits the thread's prompt runs record",
+    },
+  ),
+  THREAD_PROMPT_RUN_FILE_ROUTE: threadRead(
+    'respondWithPromptRunFile → AgentHost.readPromptRunFileTexts',
+    "200 `EnsoThreadChangedFile` JSON (#553) — one file whole at two of the thread's snapshots: `oldText` at `from` (a rename's at `oldPath`), `newText` at `to`, both read from the store as stored; a side no file has at its snapshot is `none`, one git cannot read `unavailable` with git's words. What the Diff Viewer expands the unchanged lines between hunks from. Read-only",
+    "400 malformed thread id, `from`/`to` missing or not a snapshot hash, or a malformed path (either: empty, `..`, an empty segment, a NUL); 403 untrusted origin; 404 no session; 409 a snapshot the thread's prompt runs do not record, or no snapshot store on this host; 500 handler failure",
+    {
+      path: '/api/threads/:threadId/prompt-runs/file',
+      input:
+        "path: `threadId`; query: `from`, `to` — two snapshot commits the thread's prompt runs record; `path`; optional `oldPath` (a rename or copy’s path at `from`)",
     },
   ),
   THREAD_PAGES_ROUTE: threadRead(
@@ -431,7 +478,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     handler: 'respondWithProjectSettings → createProjectSettingsRoute.read → resolveProjectThreadSettings',
     input: 'path: `projectId` (sixteen hex digits)',
     success:
-      "200 `EnsoProjectSettings` JSON — each `threads` key (tree mode, files to copy, setup commands) with the tier it resolves from, whether the project is trusted (its own tiers are read only then), the file behind each tier, and the project's tier files that could not be read (#754)",
+      "200 `EnsoProjectSettings` JSON — each `threads` key (tree mode, files to copy, setup commands) with the tier it resolves from, as approved (#753), whether the project is trusted (its own tiers are read only then), the file behind each tier, and the project's tiers whose approved text no longer reads (#754)",
     errors:
       '403 untrusted origin; 404 no registered project with that id; 422 a server started without the user config; 500 handler failure',
     routeClass: 'observation',
@@ -445,9 +492,9 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     input:
       "path: `projectId`; body: `EnsoProjectSettingsUpdate` — the tier (`shared`, the project's committed `.enso/config.json`, or `local`, its gitignored `.enso/config.local.json`) and the `threads` keys to set, `null` removing one",
     success:
-      "200 `EnsoProjectSettings` JSON as the settings now resolve; the tier's file keeps every other key, written as 2-space JSON (#754)",
+      "200 `EnsoProjectSettings` JSON as the settings now resolve; the tier's file keeps every other key, written as 2-space JSON (#754), and is approved as written (#753)",
     errors:
-      "400 malformed body, or one that is not an update; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 422 the tier's file is there and unreadable (never overwritten), the project's directory is gone, or a server started without the user config; 500 handler failure",
+      "400 malformed body, or one that is not an update; 403 untrusted origin; 404 no registered project with that id; 409 the tier's file is not the version approved — changed, gone or never approved — so a save over it would approve it unseen (#753); 413 body too large; 422 the tier's file is there and unreadable (never overwritten), the project's directory is gone, or a server started without the user config; 500 handler failure",
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',
@@ -473,6 +520,46 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
       "200 `EnsoProjectTrust` JSON as it now stands — saved in pi's `trust.json` under the project's path, the store a thread's **Trust project** answer writes; a revoke is an explicit `false`, never a deletion, so no trusted ancestor shows through, and retires the project's live threads that are not running, so each is rebuilt under it at its next prompt. A grant reaches each thread when it is next built (#873)",
     errors:
       '400 malformed body, or one that is not exactly `{ trusted }`; 403 untrusted origin; 404 no registered project with that id; 409 a revoke while a thread in the project is running; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  PROJECT_TITLE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/title',
+    handler: 'respondToProjectRetitle → ProjectRegistry.retitle',
+    input: 'path: `projectId` (sixteen hex digits); body: `EnsoProjectTitleUpdate` — `{ "title": "…" }`, not blank',
+    success:
+      "200 `EnsoProject` JSON as it is now listed — the title, trimmed, stored in `ENSO_HOME/projects.json` (the launch project's too, as an entry for its path); the folder, its path and the id are untouched (#939)",
+    errors:
+      '400 malformed body, a blank title, or one that is not exactly `{ title }`; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  PROJECT_CONFIG_APPROVAL_READ_ROUTE: {
+    method: 'GET',
+    path: '/api/projects/:projectId/config-approval',
+    handler: 'createProjectSettingsRoute.review → reviewProjectConfig',
+    input: 'path: `projectId` (sixteen hex digits)',
+    success:
+      "200 `EnsoProjectConfigReview` JSON — each of the project's own tier files that is there or approved, local first: its state against the version approved (`approved`, `changed`, `removed`, `unapproved`), its SHA-256 now, the unified diff from the approved version to it, and why it can't be approved as it is (#753); read whatever the trust, applying nothing",
+    errors:
+      '403 untrusted origin; 404 no registered project with that id; 422 a server started without the user config; 500 handler failure',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
+  PROJECT_CONFIG_APPROVAL_WRITE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/config-approval',
+    handler: 'respondToProjectConfigApproval → createProjectSettingsRoute.approve → approveProjectTier',
+    input:
+      'path: `projectId`; body: `EnsoProjectConfigApproval` — the tier and the file’s SHA-256 as reviewed, `null` approving its removal',
+    success:
+      '200 `EnsoProjectConfigReview` JSON as it now stands — the file as reviewed is the version that applies, kept in `ENSO_HOME/projects/<id>/config-approvals.json` (#753)',
+    errors:
+      "400 malformed body, or one that is not an approval; 403 untrusted origin; 404 no registered project with that id; 409 the file changed after it was reviewed — nothing approved; 413 body too large; 422 the file can't be approved as it is (a link, a FIFO, over 64 KiB, not a config Enso reads), the project's directory is gone, or a server started without the user config; 500 handler failure",
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',
@@ -504,6 +591,17 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     success: '200 `EnsoStoredThread[]` JSON',
     errors: '403 untrusted origin; 500 handler failure',
   }),
+  'GET /api/run-states': {
+    handler: 'followRunStates → ThreadRegistry.watchRunStates',
+    input: 'none',
+    success:
+      '200 SSE stream of `EnsoRunStatesFrame` (#911): `run-states`, every thread the server holds with its `busy` and `waiting`, then a `run-state` each time a thread is built, a run takes it, releases it or the thread is dropped — how a page hears a run it has not opened end',
+    errors: '403 untrusted origin',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+    factory: { path: RUN_STATES_PATH, declaration: 'export function followRunStates' },
+  },
   'GET /api/prompts': literalRead({
     handler: 'respondWithPrompts → PromptLibrary.list',
     success:
@@ -540,34 +638,47 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     logs: 'yes',
   },
   'GET /api/settings/security': literalRead({
-    handler: 'answerWithEtag → readSecuritySettings',
+    handler: 'respondToConfigSection → readSecuritySettings',
     success:
       "200 `EnsoSecuritySettingsRead` JSON (#933) — `ok` with the user's `config.json` `security` section as written, or `unreadable` with why (every consumer fails closed on such a file); both with the file's path, the secrets file's path and `judgeKeySet` — whether `TYPESAFE_API_KEY` is set, never its value — and an `ETag` header when there is a file",
-    errors: '403 untrusted origin; 404 a server started without `ENSO_HOME`; 500 handler failure',
+    errors: SETTINGS_READ_ERRORS,
   }),
-  'PUT /api/settings/security': {
-    handler: 'respondToSettingsWrite → writeSecuritySettings',
-    input:
-      'headers: exactly one precondition — `If-Match: <ETag>`, `If-Match: *` or `If-None-Match: *` (no file); body: `EnsoSecuritySettingsWrite` — `{ security }`, the whole section',
+  'PUT /api/settings/security': settingsWrite({
+    handler: 'respondToConfigSection → writeSecuritySettings',
+    input: `${CONFIG_WRITE_INPUT}\`EnsoSecuritySettingsWrite\` — \`{ security }\`, the whole section`,
     success:
       "200 `EnsoSecuritySettingsRead` JSON with its new `ETag` — every other key of `config.json` kept, empty objects dropped, the whole file validated with `parseEnsoConfig` and written to a temporary file renamed over; read by the guard at each new session's start",
-    errors:
-      '400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 404 no `ENSO_HOME`; 412 the file changed on disk since it was read; 413 body too large; 422 the file is unreadable now, or the result would be — nothing written; 428 no precondition; 500 handler failure',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-  },
-  'PUT /api/settings/security/judge-key': {
-    handler: 'respondToJudgeKeyWrite → writeJudgeKey',
+    errors: configWriteErrors('the file is unreadable now, or the result would be'),
+  }),
+  'PUT /api/settings/security/judge-key': settingsWrite({
+    handler: 'respondToSideWrite → writeJudgeKey',
     input: 'body: `EnsoJudgeKeyWrite` — `{ value }`, the key, or `null` to remove it',
     success:
       '200 `EnsoJudgeKeyState` JSON — only whether a key is set; `ENSO_HOME/secrets.env` rewritten `0600` with every other line kept, the key never logged or answered; read by the `jev` judge at its next call',
-    errors:
-      '400 malformed body; 403 untrusted origin; 404 no `ENSO_HOME`; 413 body too large; 422 not one token (spaces, quotes or `#`); 500 handler failure',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-  },
+    errors: sideWriteErrors('not one token (spaces, quotes or `#`)'),
+  }),
+  'GET /api/settings/projects': literalRead({
+    handler: 'respondToConfigSection → readProjectsSettings',
+    success:
+      "200 `EnsoProjectsSettingsRead` JSON (#934) — `ok` with the user's `config.json` `projects` and `threads` as written, or `unreadable` with why (every consumer fails closed on such a file); both with the file's path, pi's `settings.json` path and its `defaultProjectTrust` (`ask` when unset), and an `ETag` header when there is a file",
+    errors: SETTINGS_READ_ERRORS,
+  }),
+  'PUT /api/settings/projects': settingsWrite({
+    handler: 'respondToConfigSection → writeProjectsSettings',
+    input: `${CONFIG_WRITE_INPUT}\`EnsoProjectsSettingsWrite\` — \`{ projects?, threads }\`, each section whole (no \`projects\`: no roots fence)`,
+    success:
+      "200 `EnsoProjectsSettingsRead` JSON with its new `ETag` — every other key of `config.json` kept, empty lists dropped, the whole file validated with `parseEnsoConfig` and written to a temporary file renamed over; `threads` is read at each new tree and project page, `projects.roots` at the server's next start",
+    errors: configWriteErrors(
+      "the file is unreadable now, a root or a project's own mode is keyed by a path neither absolute nor `~/`, or the result would be unreadable",
+    ),
+  }),
+  'PUT /api/settings/projects/trust': settingsWrite({
+    handler: 'respondToSideWrite → writeDefaultProjectTrust',
+    input: 'body: `EnsoDefaultProjectTrustState` — `{ defaultProjectTrust }`: `ask`, `always` or `never`',
+    success:
+      "200 `EnsoDefaultProjectTrustState` JSON, the value read back — pi's `defaultProjectTrust` in the agent dir's `settings.json`, written by pi's own settings writer with every other key kept; read at each new thread and project page",
+    errors: sideWriteErrors("pi's settings file unreadable or not written"),
+  }),
   'GET /api/projects': literalRead({
     handler: 'respondWithProjects',
     success: '200 `EnsoProject[]` JSON — the launch project first, then the registered ones',
@@ -727,6 +838,7 @@ export function discoverRoutes(): ResolvedRoute[] {
     [LOGS_PATH]: readFileSync(join(ROOT, LOGS_PATH), 'utf8'),
     [LOGS_TAIL_PATH]: readFileSync(join(ROOT, LOGS_TAIL_PATH), 'utf8'),
     [LOGS_STATS_PATH]: readFileSync(join(ROOT, LOGS_STATS_PATH), 'utf8'),
+    [RUN_STATES_PATH]: readFileSync(join(ROOT, RUN_STATES_PATH), 'utf8'),
   }
 
   const groups = ROUTE_GROUP_PATHS.map(routesIn)

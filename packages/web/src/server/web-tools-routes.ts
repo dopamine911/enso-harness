@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   type EnsoConfig,
   ensoLogger,
+  parseEnsoConfig,
   type ProjectWebTools,
   ProjectWebToolsChange,
   readWebFetchHostInput,
@@ -20,8 +21,8 @@ import {
   type WebSearchSettings,
   WebSearchSettingsChange,
 } from '@enso/core'
-import { projectConfigPath } from '@enso/core/paths'
-import { changeProjectWebTools } from '@enso/core/project-config'
+import { projectConfigApprovalsPath, projectConfigPath, projectIdOf } from '@enso/core/paths'
+import { changeProjectWebTools, projectTierStanding } from '@enso/core/project-config'
 import { readDotenvFile, writeSecret } from '@enso/core/secrets'
 import { readEnsoConfigFile } from '@enso/core/user-config-write'
 import { changeUserAllowedHosts, nonPublicAddressReason } from '@enso/core/web-fetch-allowlist'
@@ -30,6 +31,7 @@ import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
 import type { HostedThread } from '../host/live-thread.ts'
 import { projectTrusted } from '../host/project-trust.ts'
+import { tierWriteRefusal } from './project-settings-route.ts'
 import type { ProjectRegistry } from './projects.ts'
 import {
   answerJson,
@@ -56,14 +58,17 @@ import type { ThreadRegistry } from './thread-registry.ts'
  *
  * A project page's Web tools tab (#937) reads and changes the same keys in a project's shared
  * `.enso/config.json` (`/api/projects/<projectId>/web-tools`). ⚠ An untrusted project's file is
- * never read — nor written: its tab is read only until the project is trusted.
+ * never read — nor written: its tab is read only until the project is trusted. ⚠ What it shows is
+ * the version the operator approved (#753), what a session applies; a change is written as the
+ * project page's Worktrees settings are, approved as written and never over a file not the version
+ * approved (`changeProjectWebTools`).
  */
 
 /** `/api/projects/<projectId>/web-tools` (#937): `GET` reads a project's own web tools, `POST` changes one key. */
 const PROJECT_WEB_TOOLS_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/web-tools$/
 
 /** Why a project's Web tools are not answered or not changed: its status and reason, sent as the body. */
-type ProjectRefusal = { readonly status: 404 | 422; readonly reason: string }
+type ProjectRefusal = { readonly status: 404 | 409 | 422; readonly reason: string }
 
 const log = ensoLogger('server', 'http')
 
@@ -97,6 +102,8 @@ export interface WebToolsRoutesState extends HostCheckNetwork {
   readonly threads: Pick<ThreadRegistry, 'list'>
   /** pi's agent dir, whose `trust.json` decides whether a project's own hosts are read. */
   readonly agentDir: string
+  /** The project folders (`ENSO_HOME/projects`), where each project's approved tiers are kept (#753); absent, none is approved. */
+  readonly projectsDir: string | undefined
 }
 
 export interface WebToolsRoutes {
@@ -163,7 +170,7 @@ function webToolsOf(config: EnsoConfig): NonNullable<ProjectWebTools['own']> {
 }
 
 export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes {
-  const { userConfigPath, userSecretsPath, projects, threads, agentDir } = state
+  const { userConfigPath, userSecretsPath, projects, threads, agentDir, projectsDir } = state
   const network: Required<HostCheckNetwork> = {
     checkFetch:
       state.checkFetch ??
@@ -181,13 +188,24 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
   /** The same, per project, for the last change on its Web tools tab (#937): its own threads only. */
   const onOldProjectTools = new Map<string, Map<string, HostedThread>>()
 
-  /** Each trusted project's own config, read as a new session there would read it (#421). */
+  /** Where `project`'s (a canonical path) approved tiers are kept (#753); `undefined` when this server keeps none. */
+  function approvalsOf(project: string): string | undefined {
+    return projectsDir === undefined ? undefined : projectConfigApprovalsPath(projectsDir, projectIdOf(project))
+  }
+
+  /**
+   * Each trusted project's own config, read as a new session there would read it (#421): its shared
+   * tier as the operator approved it (#753) — a file changed since applies its approved text, one
+   * never approved applies nothing.
+   */
   function trustedProjectConfigs(): (WebToolsProject & { readonly config: EnsoConfig })[] {
     const found: (WebToolsProject & { readonly config: EnsoConfig })[] = []
     for (const project of projects.list()) {
-      if (project.status === 'missing-dir' || !projectTrusted(project.path, agentDir)) continue
-      const path = projectConfigPath(project.path)
-      const parsed = readEnsoConfigFile(path)
+      const approvals = approvalsOf(project.path)
+      if (approvals === undefined || project.status === 'missing-dir' || !projectTrusted(project.path, agentDir))
+        continue
+      const { path, applied } = projectTierStanding(project.path, 'shared', approvals)
+      const parsed = parseEnsoConfig(applied)
       if (parsed.kind === 'ok')
         found.push({ projectId: project.projectId, title: project.title, path, config: parsed.config })
     }
@@ -442,8 +460,9 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
   }
 
   /**
-   * A project's Web tools tab (#937): its shared file, read only once the project is trusted, and
-   * the user's own settings beside it; or why there is none to answer.
+   * A project's Web tools tab (#937): its shared file as the operator approved it (#753) — what a
+   * session there applies — read only once the project is trusted, whether the file is that version,
+   * and the user's own settings beside it; or why there is none to answer.
    */
   function projectWebToolsOf(projectId: string): ProjectWebTools | ProjectRefusal {
     const project = projects.get(projectId)
@@ -451,19 +470,25 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
     if (userConfigPath === undefined)
       return { status: 422, reason: 'this server reads no user config, so it has no web tools settings to show' }
     const user = readEnsoConfigFile(userConfigPath)
-    const path = projectConfigPath(project.path)
     const trusted = projectTrusted(project.path, agentDir)
+    const approvals = approvalsOf(project.path)
     // ⚠ Untrusted, the file is never read (#502, #873): nothing of it is shown. A folder that is
     // gone shows nothing editable either: every change to it is refused (`writableProject`).
-    const read = trusted && project.status !== 'missing-dir' ? readEnsoConfigFile(path) : undefined
+    const standing =
+      trusted && project.status !== 'missing-dir' && approvals !== undefined
+        ? projectTierStanding(project.path, 'shared', approvals)
+        : undefined
+    const read = standing === undefined ? undefined : parseEnsoConfig(standing.applied)
+    const pending = standing?.state === 'approved' ? undefined : standing?.state
     const yours = webToolsOf(user.kind === 'ok' ? user.config : {})
     return {
       projectId,
       title: project.title,
-      path,
+      path: standing?.path ?? projectConfigPath(project.path),
       trusted,
       ...(read?.kind === 'ok' ? { own: webToolsOf(read.config) } : {}),
       ...(read?.kind === 'unreadable' ? { unreadable: read.reason } : {}),
+      ...(pending === undefined ? {} : { pending }),
       yours: {
         ...yours,
         path: userConfigPath,
@@ -482,7 +507,8 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
   /**
    * `POST /api/projects/<projectId>/web-tools` (#937): one host or Searching key changed in the
    * project's shared `.enso/config.json`, answered with the tab as it now stands. ⚠ Refused for an
-   * untrusted project, before its file is read, and for a folder that is gone.
+   * untrusted project, before its file is read, and for a folder that is gone; and, as every page
+   * write to the project's files (`changeProjectWebTools`), over a file not the version approved (409).
    */
   async function respondToProjectChange(
     projectId: string,
@@ -496,12 +522,15 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
         'a project web tools change takes exactly `add` or `remove`, a host name; or a web search change: `backend` (`model` or `deepseek`), or `list` (`includeDomains` or `excludeDomains`) with `add` or `remove`, a domain',
     })
     if (change === undefined) return
-    const target = writableProject(projectId)
-    const written = 'status' in target ? target : changeProjectWebTools(target.path, change)
-    if ('status' in written || written.kind === 'refused') {
-      log.warn('project {projectId}: web tools change refused: {reason}', { projectId, reason: written.reason })
-      return refuseWith(response, 'status' in written ? written : { status: 422, reason: written.reason })
+    const refuse = (refused: ProjectRefusal): void => {
+      log.warn('project {projectId}: web tools change refused: {reason}', { projectId, reason: refused.reason })
+      refuseWith(response, refused)
     }
+    const target = writableProject(projectId)
+    if ('status' in target) return refuse(target)
+    const written = changeProjectWebTools(target.path, change, target.approvals)
+    const refused = tierWriteRefusal(written)
+    if (refused !== undefined) return refuse(refused)
     if (written.kind === 'written') {
       log.info('project {projectId}: web tools changed from its page: {change}', { projectId, change })
       onOldProjectTools.set(projectId, liveThreadsOf(projectId))
@@ -510,7 +539,7 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
   }
 
   /** The project whose file a change may be written to: registered, there, and trusted — or why not. */
-  function writableProject(projectId: string): { readonly path: string } | ProjectRefusal {
+  function writableProject(projectId: string): { readonly path: string; readonly approvals: string } | ProjectRefusal {
     const project = projects.get(projectId)
     if (project === undefined) return { status: 404, reason: `no registered project has the id ${projectId}` }
     if (project.status === 'missing-dir')
@@ -521,7 +550,10 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
         reason:
           'this project is not trusted, so Enso does not read its .enso/config.json; trust it to change its web tools',
       }
-    return { path: project.path }
+    const approvals = approvalsOf(project.path)
+    if (approvals === undefined)
+      return { status: 422, reason: 'this server keeps no project approvals, so it writes no project config' }
+    return { path: project.path, approvals }
   }
 
   function dispatchWebToolsRoute(request: IncomingMessage, response: ServerResponse): boolean {

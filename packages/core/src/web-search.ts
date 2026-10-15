@@ -197,9 +197,11 @@ export type ProjectWebToolsChange = Static<typeof ProjectWebToolsChange>
 /**
  * A project's page › Web tools (#937): its shared `.enso/config.json` (`path`) — the one project
  * tier a session merges (`.enso/config.local.json` is never read for web tools) — and, beside it,
- * the user's own settings it adds to. ⚠ `own` is there only when the project is trusted and its
- * file read: an untrusted project's file is never read, and its tab is read only. `staleThreads`:
- * the project's live threads still on its settings as they were before the last change made there.
+ * the user's own settings it adds to. ⚠ `own` is the file AS THE OPERATOR APPROVED IT (#753), what a
+ * session applies, and there only when the project is trusted: an untrusted project's file is never
+ * read, and its tab is read only. `pending`: the file is not that version — changed, removed or never
+ * approved — so nothing is written to it until it is approved. `staleThreads`: the project's live
+ * threads still on its settings as they were before the last change made there.
  *
  * @group Web tools
  */
@@ -214,8 +216,14 @@ export const ProjectWebTools = Type.Object({
       excludeDomains: Type.Array(Type.String()),
     }),
   ),
-  /** Why the project's file could not be read; it is never overwritten then. */
+  /** Why the approved version of the project's file no longer reads (a key a newer Enso wrote): nothing in it applies. */
   unreadable: Type.Optional(Type.String()),
+  /**
+   * How the file differs from the version approved, as `EnsoProjectTierPending` says it (not imported:
+   * `config.ts` reads this module, and `project-settings.ts` reads `config.ts`); absent when it is
+   * that version, or there is neither.
+   */
+  pending: Type.Optional(Type.Union([Type.Literal('changed'), Type.Literal('removed'), Type.Literal('unapproved')])),
   /** The user's own `webFetch` and `webSearch`, which the project's add to (lists) or replace (the backend). */
   yours: Type.Object({
     path: Type.String(),

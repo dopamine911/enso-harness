@@ -1,29 +1,36 @@
+import type { UIMessage } from '@tanstack/ai-client'
 import type { LayoutProps } from '@tanstack/ai-react/ui'
-import { useCallback, useContext, useId, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useId, useRef, useState } from 'react'
 import { Conversation, ConversationContent, ConversationScrollButton } from './components/ai-elements/conversation.tsx'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { PendingQueue } from './composer.tsx'
 import { PendingDialog } from './dialog-card.tsx'
 import { LaunchHead, LaunchNotices, LaunchRecent } from './launch-panel.tsx'
 import { useLaunching } from './launch-settings.tsx'
+import { cn } from './lib/utils.ts'
+import { type LiveRun, pendingWrite } from './live-request.ts'
+import { PaneBoundary } from './page-fault.tsx'
 import { useThreadProject } from './page-listings.ts'
 import {
   useChatContext,
   type ThreadChatOptions,
   DebugOpenContext,
+  PaneSlotContext,
   type ThreadView,
   PaneViewContext,
 } from './pane-context.ts'
-import { useThreadStores } from './store.ts'
+import { useStore, useThreadStores } from './store.ts'
 import { DiffFocusContext, ThreadChanges } from './thread-changes.tsx'
 import { ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadEvalDrawer } from './thread-eval.tsx'
 import { settledToolResults } from './thread-git.tsx'
+import { ComposerStandIn } from './thread-panes.tsx'
+import { ThreadPromptRunDiffs } from './thread-prompt-run-diffs.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
-import { ThreadStatusBar } from './thread-status.tsx'
+import { ThreadStatusBar, useRunClock } from './thread-status.tsx'
 import { OpenInDiffContext } from './tool-views.tsx'
-import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
+import { locateStatsTarget, type RevealStatsTarget, revealElement, ringElement } from './transcript-reveal.ts'
 import {
   type TranscriptScroller,
   TranscriptRevealBridge,
@@ -42,6 +49,14 @@ import {
 const LAUNCH_COLUMN = 'flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-8 max-md:px-4 max-md:py-6'
 
 /**
+ * How long Show in Chat (#553) waits, after scrolling a message's row into view, before ringing it.
+ * A guess, not a signal: the windowed list measures the rows it draws and corrects its scroll on its
+ * own time, and nothing says when it is done. The ring is decoration only — the row is already
+ * scrolled to — so a ring a little early costs nothing.
+ */
+const RING_AFTER_SCROLL_MS = 400
+
+/**
  * Renders a run-level error as a destructive Alert. Reads the thread's chat through the
  * shared contexts declared above — the same `useChatContext` every widget here uses.
  */
@@ -58,28 +73,54 @@ function RunProblem(): React.ReactNode {
   )
 }
 
-/** A view panel's `id`s, in the pane on screen only — a hidden pane's would duplicate them. */
-function panelIdsOf(shown: ThreadView | undefined, view: ThreadView): { id?: string; 'aria-labelledby'?: string } {
-  return shown === undefined ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
+/**
+ * A view panel's `id`s, in the focused pane on screen only — a hidden pane's, or one beside it
+ * (#938), would duplicate them, and the header's tabs name the focused pane's.
+ */
+function panelIdsOf(
+  shown: ThreadView | undefined,
+  view: ThreadView,
+  peek: boolean,
+): { id?: string; 'aria-labelledby'?: string } {
+  return shown === undefined || peek ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
 }
 
 /** The view drawn over the transcript (#361), when one other than the chat is shown. */
 function ThreadViewOverlay({
   shown,
+  peek,
   revealInTranscript,
+  revealMessage,
   changesMoment,
+  messages,
+  generating,
 }: {
   shown: ThreadView | undefined
+  /** A pane beside the focused one (#938): the view is read, not acted on — a click focuses the pane. */
+  peek: boolean
   revealInTranscript: RevealStatsTarget
+  /** Chat opened at the message `messageId` names, ringed; `false` when the transcript does not hold it. */
+  revealMessage: (messageId: string) => boolean
   /** When the tree may have moved: a settled tool result, the run starting or ending. */
   changesMoment: string
+  messages: ReadonlyArray<UIMessage>
+  generating: boolean
 }): React.ReactNode {
+  const stores = useThreadStores()
+  const refusals = useStore(stores.refusals)
+  // The run in flight (#913), read off the follow each render — every delta re-renders the pane —
+  // and on the run's clock, so the elapsed times move while nothing streams.
+  const now = useRunClock(generating && shown !== undefined && shown !== 'chat')
+  const pulse = stores.connection.pulse()
+  const live: LiveRun | undefined = generating
+    ? { runSince: pulse.runStartedAt, request: pulse.request, now }
+    : undefined
   // The thread's context (#361): what each request was made of, over the transcript.
   if (shown === 'context') {
     return (
-      <div role="tabpanel" {...panelIdsOf(shown, 'context')} className="absolute inset-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-context-view">
-          <ThreadContextDrawer />
+      <div role="tabpanel" {...panelIdsOf(shown, 'context', peek)} className="absolute inset-0 overflow-y-auto">
+        <div inert={peek} className="mx-auto w-full max-w-context-view">
+          <ThreadContextDrawer live={live} />
         </div>
       </div>
     )
@@ -87,23 +128,73 @@ function ThreadViewOverlay({
   // The thread's stats (#45 phase 2), over the transcript (#361).
   if (shown === 'stats') {
     return (
-      <div role="tabpanel" {...panelIdsOf(shown, 'stats')} className="absolute inset-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-stats-view">
-          <ThreadStatsDrawer onNavigate={revealInTranscript} />
+      <div role="tabpanel" {...panelIdsOf(shown, 'stats', peek)} className="absolute inset-0 overflow-y-auto">
+        <div inert={peek} className="mx-auto w-full max-w-stats-view">
+          <ThreadStatsDrawer onNavigate={revealInTranscript} live={live} />
           <ThreadEvalDrawer onNavigate={revealInTranscript} />
         </div>
       </div>
     )
   }
-  // What changed since the last push (#452): the tree and the chosen file's diff, over the transcript.
+  // What changed since the last push (#452): the tree and the chosen file's diff, over the transcript;
+  // above it, a write the run is composing and has not applied (#913).
   if (shown === 'changes') {
     return (
-      <div role="tabpanel" {...panelIdsOf(shown, 'changes')} className="absolute inset-0">
-        <ThreadChanges moment={changesMoment} />
+      <div role="tabpanel" {...panelIdsOf(shown, 'changes', peek)} inert={peek} className="absolute inset-0">
+        <ThreadChanges
+          moment={changesMoment}
+          live={live}
+          pending={pendingWrite(messages, pulse.composing, refusals, generating)}
+        />
+      </div>
+    )
+  }
+  // The Diff Viewer (#553): the thread's prompt runs, stepped through snapshot to snapshot, over the transcript.
+  if (shown === 'prompt-runs') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'prompt-runs', peek)} inert={peek} className="absolute inset-0">
+        <ThreadPromptRunDiffs
+          moment={changesMoment}
+          revealMessage={revealMessage}
+          revealInTranscript={revealInTranscript}
+        />
       </div>
     )
   }
   return null
+}
+
+/**
+ * A message by its id — a resumed thread's messages are its branch's entries (#553) — wherever it
+ * is: the windowed list (#739) scrolls its row into view first, as an incident's reveal does
+ * (#588), and the row, once drawn, is ringed after RING_AFTER_SCROLL_MS. Only the newest ring is
+ * waited for, and none once the views are gone.
+ */
+function useMessageReveal(
+  messages: ReadonlyArray<UIMessage>,
+  scrollerRef: React.RefObject<TranscriptScroller | null>,
+  rowScrollRef: React.RefObject<((row: number) => void) | null>,
+  open: (view: ThreadView) => void,
+): (messageId: string) => boolean {
+  const ringTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(ringTimer.current), [])
+  return useCallback(
+    (messageId: string): boolean => {
+      const row = messages.findIndex((message) => message.id === messageId)
+      const bridge = scrollerRef.current
+      if (row === -1 || bridge === null) return false
+      open('chat')
+      bridge.stopScroll()
+      rowScrollRef.current?.(row)
+      window.clearTimeout(ringTimer.current)
+      ringTimer.current = window.setTimeout(() => {
+        const element = bridge.content()?.querySelector(`[data-index="${row}"] [data-role]`)
+        if (element !== null && element !== undefined) ringElement(element)
+      }, RING_AFTER_SCROLL_MS)
+      return true
+    },
+    [messages, scrollerRef, open, rowScrollRef],
+  )
 }
 
 /**
@@ -112,7 +203,9 @@ function ThreadViewOverlay({
  */
 function ThreadViews(): React.ReactNode {
   const chat = useChatContext()
+  const stores = useThreadStores()
   const { shown, open } = useContext(PaneViewContext)
+  const { peek, narrow } = useContext(PaneSlotContext)
   const scroller = useRef<TranscriptScroller | null>(null)
   const revealInTranscript = useCallback<RevealStatsTarget>(
     (target, stats) => {
@@ -144,6 +237,7 @@ function ThreadViews(): React.ReactNode {
   const onChat = (shown ?? 'chat') === 'chat'
   const { selection, placed } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
   const incidentReveal = useIncidentReveal(scroller)
+  const revealMessage = useMessageReveal(chat.messages, scroller, incidentReveal.rowScroll, open)
   return (
     <OpenInDiffContext.Provider value={openInDiff}>
       <DiffFocusContext.Provider value={diffFocus}>
@@ -154,7 +248,7 @@ function ThreadViews(): React.ReactNode {
           and its bubbles (the stats rows' targets) survive a trip to Context or Stats. */}
           <div
             role="tabpanel"
-            {...panelIdsOf(shown, 'chat')}
+            {...panelIdsOf(shown, 'chat', peek)}
             inert={!onChat}
             className={
               onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
@@ -162,14 +256,26 @@ function ThreadViews(): React.ReactNode {
           >
             <Conversation>
               <TranscriptRevealBridge into={scroller} />
-              <ConversationContent className="mx-auto w-full max-w-transcript gap-6 px-6 pt-6 pb-8 max-md:p-4 ledger:gap-0">
-                <TranscriptContent
-                  messages={chat.messages}
-                  setMessages={chat.setMessages}
-                  selection={selection}
-                  placed={placed}
-                  incidentReveal={incidentReveal}
-                />
+              {/* A pane beside the focused one (#938): scrolled and read, never acted on — its question,
+              its buttons and their focus are the focused pane's to take; a click focuses the pane. */}
+              <ConversationContent
+                inert={peek}
+                className={cn(
+                  'mx-auto w-full max-w-transcript gap-6 ledger:gap-0',
+                  narrow ? 'p-4' : 'px-6 pt-6 pb-8 max-md:p-4',
+                )}
+              >
+                {/* Each pane its own boundary (#919): a throw drawing the transcript leaves the
+                question, the run's error and the composer under it working. */}
+                <PaneBoundary pane="transcript" threadId={stores.threadId}>
+                  <TranscriptContent
+                    messages={chat.messages}
+                    setMessages={chat.setMessages}
+                    selection={selection}
+                    placed={placed}
+                    incidentReveal={incidentReveal}
+                  />
+                </PaneBoundary>
                 {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
                 `ask` verdict reaches the browser, and an unmounted slot is precisely
                 why an approval would silently never appear. */}
@@ -179,14 +285,56 @@ function ThreadViews(): React.ReactNode {
               <ConversationScrollButton />
             </Conversation>
           </div>
-          <ThreadViewOverlay
-            shown={shown}
-            revealInTranscript={revealInTranscript}
-            changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
-          />
+          {/* Keyed by the view: another view, or the chat, is drawn afresh after one failed. */}
+          <PaneBoundary
+            key={shown ?? 'chat'}
+            pane="views"
+            threadId={stores.threadId}
+            placement="absolute top-0 left-0 z-10"
+          >
+            <ThreadViewOverlay
+              shown={shown}
+              peek={peek}
+              revealInTranscript={revealInTranscript}
+              revealMessage={revealMessage}
+              changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
+              messages={chat.messages}
+              generating={chat.sessionGenerating}
+            />
+          </PaneBoundary>
         </div>
       </DiffFocusContext.Provider>
     </OpenInDiffContext.Provider>
+  )
+}
+
+/**
+ * The composer's place, under every view (#707), and what goes with it: pi's queue over it, the
+ * launch panel's recent threads under it before the session starts (#877). In a pane beside the
+ * focused one (#938), its stand-in instead — the composer itself stays mounted, hidden, in this
+ * place, so what was typed and attached waits for the pane's focus.
+ *
+ * ⚠ UNDER EVERY VIEW, NOT IN THE CHAT'S PANEL (#707): inside it, the composer would go invisible and
+ * inert with the transcript whenever Context, Stats or Diff is in front, and text typed there would
+ * go nowhere. pi's queue (#75, not TanStack's `Queue` slot: a prompt sent during a run is listed here
+ * for every follower) goes with it.
+ * ⚠ ONE COMPOSER, MOVED, NEVER COPIED (#877): the launch panel's form and the docked composer are
+ * this one element, kept at this place in the tree — only its wrapper's class changes — so its draft,
+ * its attachments and its focus stay through Start, and through a pane's focus coming and going.
+ */
+function ComposerDock({ Input, launching }: { Input: React.ComponentType; launching: boolean }): React.ReactNode {
+  const { peek } = useContext(PaneSlotContext)
+  let place = launching ? 'mx-auto w-full max-w-launch' : 'contents'
+  if (peek) place = 'hidden'
+  return (
+    <>
+      {peek ? null : <PendingQueue />}
+      <div data-composer="" className={place}>
+        <Input />
+      </div>
+      {peek ? <ComposerStandIn /> : null}
+      {launching && !peek ? <LaunchRecent /> : null}
+    </>
   )
 }
 
@@ -204,6 +352,7 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
   const chat = useChatContext()
   const debugOpen = useContext(DebugOpenContext)
   const { shown, open } = useContext(PaneViewContext)
+  const { peek, narrow } = useContext(PaneSlotContext)
   const stores = useThreadStores()
   const threadProject = useThreadProject(stores.projectId)
   // A thread not started shows its launch panel (#877) where the views are.
@@ -220,7 +369,8 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
           {...(launching ? { role: 'region', 'aria-labelledby': launchTitle } : {})}
         >
           {launching ? (
-            <>
+            // Beside the focused pane (#938), read: the settings are set where the composer is.
+            <div inert={peek} className="contents">
               <LaunchHead titleId={launchTitle} />
               {/* Mounted here too: what the page said on the thread, a question or a failed run
                   before the first prompt is said. */}
@@ -229,22 +379,11 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
                 <PendingDialog />
                 <RunProblem />
               </div>
-            </>
+            </div>
           ) : (
             <ThreadViews />
           )}
-          {/* ⚠ UNDER EVERY VIEW, NOT IN THE CHAT'S PANEL (#707): inside it, the composer would go
-              invisible and inert with the transcript whenever Context, Stats or Diff is in front, and
-              text typed there would go nowhere. pi's queue (#75, not TanStack's `Queue` slot: a
-              prompt sent during a run is listed here for every follower) goes with it.
-              ⚠ ONE COMPOSER, MOVED, NEVER COPIED (#877): the launch panel's form and the docked
-              composer are this one element, kept at this place in the tree — only its wrapper's class
-              changes — so its draft, its attachments and its focus stay through Start. */}
-          <PendingQueue />
-          <div className={launching ? 'mx-auto w-full max-w-launch' : 'contents'}>
-            <Input />
-          </div>
-          {launching ? <LaunchRecent /> : null}
+          <ComposerDock Input={Input} launching={launching} />
         </div>
         {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
@@ -259,14 +398,19 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
         ) : null}
       </div>
       {/* The status bar (#90): activity, prompts, tool calls, cost — always visible, full
-					    width under transcript AND debug pane, so it is the one place to look. */}
-      <ThreadStatusBar
-        messages={chat.messages}
-        generating={chat.sessionGenerating}
-        projectTitle={threadProject?.title}
-        openView={open}
-        shown={shown !== undefined}
-      />
+					    width under transcript AND debug pane, so it is the one place to look. Every pane on
+					    screen has its own (#938), so each run's state sits under it; beside the focused one,
+					    read, not acted on. */}
+      <div inert={peek} className="contents">
+        <ThreadStatusBar
+          messages={chat.messages}
+          generating={chat.sessionGenerating}
+          projectTitle={threadProject?.title}
+          openView={open}
+          shown={shown !== undefined}
+          narrow={narrow}
+        />
+      </div>
     </div>
   )
 }

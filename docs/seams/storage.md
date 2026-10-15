@@ -107,6 +107,12 @@ export interface AgentHost {
    * to hold to the copy.
    */
   readCopyFileTexts(copy: ThreadTreePlace, paths: ChangedFilePaths): Promise<ChangedFileTexts>
+  /** The thread's prompt runs and their snapshots (#553), for the Diff Viewer; `undefined` for a thread held nowhere. */
+  threadPromptRuns: ThreadPromptRunReads['threadPromptRuns']
+  /** Two of the thread's snapshots compared in its store (#553), writing nothing; a pair git cannot compare is refused with git's words. */
+  readPromptRunChanges: ThreadPromptRunReads['readPromptRunChanges']
+  /** One file between two of the thread's snapshots, whole on both sides (#553), writing nothing. */
+  readPromptRunFileTexts: ThreadPromptRunReads['readPromptRunFileTexts']
   /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
@@ -589,7 +595,9 @@ fire (no loaded extension handles it). The host is tested against the real sessi
 
 **Consumed by the server.** The server's route groups own the read routes (#810):
 `GET /api/stored-threads` → `respondWithStoredThreads` (`server/literal-routes.ts`) maps each `StoredThread` to a `EnsoStoredThread`,
-marking `busy` by peeking the registry, `waiting` when that live thread's runtime has a question open (`openDialogs()`, #876), and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
+marking `busy` by peeking the registry, `waiting` when that live thread's runtime has a question open (`openDialogs()`, #876), and carrying a fork's `parentThreadId`.
+Those two flags are as of the read; `GET /api/run-states` (`server/run-states-route.ts`, #911) streams them again for every live thread at each take, release
+or drop (`ThreadRegistry.watchRunStates`), so a page clears the row of a run it has not opened when the server releases it. `POST …/fork` (`server/thread-control-routes.ts`) asks
 `host.forkThread` (409 while a run holds the source); `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and

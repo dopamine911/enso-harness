@@ -1,4 +1,5 @@
 import { isEnsoThreadId } from '@enso/core'
+import { type PaneLayout, paneLayoutOf } from './pane-layout.ts'
 
 /**
  * The thread a page URL names (#142): `?thread=<id>`. The URL is the source of truth for
@@ -28,8 +29,8 @@ export type ThreadUrl =
  * @invariant resume/url-names-thread The URL names the thread; the latest navigation wins.
  * A thread id resumes, none is fresh, a malformed one is fresh AND said; `urlForThread` keeps
  * every other parameter. The boot resumes with `pop` (no history written), a rail click pushes
- * (`chat-screen.tsx`, `BOOT` and `navigate`), and two guards drop a late answer whole:
- * `createResumeRequests` (last click wins) and the page's `epoch` (a navigation since).
+ * (`chat-screen.tsx`, `BOOT` and `show`), and two guards drop a late answer whole:
+ * `createResumeRequests` (last click wins) and the page's `epoch` (a navigation or a request since).
  */
 export function readThreadUrl(search: string, fellBackTo = 'opened a new thread instead'): ThreadUrl {
   const named = new URLSearchParams(search).get(THREAD_QUERY_PARAMETER)
@@ -47,6 +48,44 @@ export function readThreadUrl(search: string, fellBackTo = 'opened a new thread 
 export function urlForThread(search: string, threadId: string): string {
   const parameters = new URLSearchParams(search)
   parameters.set(THREAD_QUERY_PARAMETER, threadId)
+  return `?${parameters.toString()}`
+}
+
+/**
+ * The panes beside the thread (#938): `?panes=<id>,<id>,<id>`, left to right, beside `?thread=`,
+ * which stays the focused pane's — so a link from before panes opens its one thread, and a reload
+ * keeps the panes and the focus. Written only while there are two or more.
+ */
+const PANES_QUERY_PARAMETER = 'panes'
+
+/**
+ * The panes a URL names around its thread, `focusedId` (#938): the listed ids that can be threads,
+ * each once, at most three — or the thread alone, when the list does not hold it or there is none.
+ *
+ * @invariant resume/url-names-panes The URL names the open panes and the focused one, and reading
+ * it back gives that layout again: what a reload and back/forward restore from.
+ *
+ * Which entry a change writes is the page's (`show` in `chat-screen.tsx`), not pinned here: opening
+ * or closing a pane pushes (`urlOpeningPanes`); moving the focus, or a delete putting another
+ * thread in a pane, rewrites the entry it is on (`urlForPanes`).
+ */
+export function readPaneLayout(search: string, focusedId: string): PaneLayout {
+  const listed = new URLSearchParams(search).get(PANES_QUERY_PARAMETER)?.split(',') ?? []
+  const threadIds = listed.filter((named) => {
+    // Checked as `unknown`, as `readThreadUrl` checks it: the guard narrows `string` to `never`.
+    const candidate: unknown = named
+    return isEnsoThreadId(candidate)
+  })
+  return paneLayoutOf(threadIds, focusedId)
+}
+
+/** The same URL showing `layout`: its focused thread, and its panes while there are several — every other parameter kept. */
+export function urlForPanes(search: string, layout: PaneLayout): string {
+  const parameters = new URLSearchParams(search)
+  const focused = layout.threadIds[layout.focused]
+  if (focused !== undefined) parameters.set(THREAD_QUERY_PARAMETER, focused)
+  if (layout.threadIds.length > 1) parameters.set(PANES_QUERY_PARAMETER, layout.threadIds.join(','))
+  else parameters.delete(PANES_QUERY_PARAMETER)
   return `?${parameters.toString()}`
 }
 
@@ -69,7 +108,7 @@ const PAGE_PARAMETERS = [
 ] as const
 
 /** Settings' sections, in the order its navigation lists them; the first is where Settings opens. */
-export const SETTINGS_SECTIONS = ['appearance', 'permissions', 'security', 'web-tools', 'storage'] as const
+export const SETTINGS_SECTIONS = ['appearance', 'permissions', 'security', 'web-tools', 'projects', 'storage'] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 const isSettingsSection = (value: string): value is SettingsSection =>
@@ -155,7 +194,7 @@ const PAGE_READERS: Readonly<Record<string, (parameters: URLSearchParams) => Pag
  * @invariant resume/url-names-page The URL names the page beside the thread; reload and back/forward
  * show it. `?page=` with its own parameters sits beside `?thread=`, which stays: opening a page
  * pushes the same thread with the page added (`urlForPage`), opening a thread from a page pushes it
- * without the page (`urlOpeningThread`), so back returns to the page; a page's own rewrite of the
+ * without the page (`urlOpeningPanes`), so back returns to the page; a page's own rewrite of the
  * thread (a delete, a failed resume) keeps the page. A page or section Enso doesn't have is
  * not-found, never a blank page and never a guess at a page it might have meant.
  */
@@ -196,7 +235,7 @@ export function showsPage(search: string, route: PageRoute): boolean {
   return shown?.kind === route.kind && (route.kind === 'projects' || route.kind === 'add-project')
 }
 
-/** The URL showing `threadId` and no page — a thread opened from a page leaves it; every other parameter kept. */
-export function urlOpeningThread(search: string, threadId: string): string {
-  return urlForThread(`?${withoutPage(search).toString()}`, threadId)
+/** The URL showing `layout` and no page — a thread opened from a page leaves it; every other parameter kept. */
+export function urlOpeningPanes(search: string, layout: PaneLayout): string {
+  return urlForPanes(`?${withoutPage(search).toString()}`, layout)
 }

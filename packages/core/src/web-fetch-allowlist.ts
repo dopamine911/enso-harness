@@ -1,6 +1,6 @@
 import { isIP } from 'node:net'
-import type { ReplaceFileOptions } from './paths.ts'
-import { editUserConfig, hostListEdit } from './user-config-write.ts'
+import type { EnsoConfig } from './config.ts'
+import { editUserConfig, hostListEdit, type UserConfigEdit } from './user-config-write.ts'
 import { isPublicIpAddress, type WebFetchAllowlistChange } from './web-fetch.ts'
 
 /**
@@ -24,22 +24,24 @@ export type WebFetchAllowlistWrite =
   | { readonly kind: 'refused'; readonly reason: string }
 
 /**
- * Add or remove one host in the user's file at `path`. A host to add must already be in the form
- * `readWebFetchHostInput` gives back — the page has confirmed any reduction of a URL — or it is refused.
- * Only `webFetch.allowedHosts` changes (`editUserConfig`).
+ * The edit one host added or removed makes to `config`'s `webFetch.allowedHosts` — the user's file,
+ * or a project's own (#937). A host to add must already be in the form `readWebFetchHostInput` gives
+ * back — the page has confirmed any reduction of a URL — or it is refused.
  *
  * @group Web tools
  */
-export function changeUserAllowedHosts(
-  path: string,
-  change: WebFetchAllowlistChange,
-  write: Omit<ReplaceFileOptions, 'mode'> = {},
-): WebFetchAllowlistWrite {
-  const written = editUserConfig(
-    path,
-    (config) => hostListEdit(['webFetch', 'allowedHosts'], config.webFetch?.allowedHosts ?? [], change, 'host'),
-    write,
-  )
+export function allowedHostsEdit(config: EnsoConfig, change: WebFetchAllowlistChange): UserConfigEdit {
+  return hostListEdit(['webFetch', 'allowedHosts'], config.webFetch?.allowedHosts ?? [], change, 'host')
+}
+
+/**
+ * Add or remove one host in the user's file at `path` (`allowedHostsEdit`). Only
+ * `webFetch.allowedHosts` changes (`editUserConfig`).
+ *
+ * @group Web tools
+ */
+export function changeUserAllowedHosts(path: string, change: WebFetchAllowlistChange): WebFetchAllowlistWrite {
+  const written = editUserConfig(path, (config) => allowedHostsEdit(config, change))
   if (written.kind === 'refused') return written
   return { kind: written.kind, hosts: written.config.webFetch?.allowedHosts ?? [] }
 }

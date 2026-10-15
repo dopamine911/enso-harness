@@ -112,7 +112,8 @@ function fileBehindLinks(path: string): string {
  * Replace the file at `path` with `text` (or bytes — a file put back as it was, #945) in one step:
  * written beside the file it names, then renamed over it — a reader sees the old file or the new
  * one, never half of one. Settings' writes go through here: the permission policy and Enso's rule
- * record beside it (#474, #945), `config.json` (#924, #932, #933) and `secrets.env` (#932, #933).
+ * record beside it (#474, #945), `config.json` (#924, #932, #933, #934), `secrets.env` (#932, #933)
+ * and the project config approvals (#753).
  *
  * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config or secrets file kept as a symlink (into a
  * dotfiles repo, say) stays a link, and the file behind it changes — or is made, when the link points
@@ -128,15 +129,10 @@ function fileBehindLinks(path: string): string {
  * reset just after a hand edit) kept the OLD policy in force, silently. Found by
  * `agent-host.test.ts`'s reset test.
  *
- * `replaceLink`: a link at `path` itself is replaced by the file instead of written through (a
- * project's own `.enso/config.json`, #937). `makeDirectory`: the parent is made, only now that
- * there is something to write.
- *
  * @group Workspace paths
  */
-export function replaceFileText(path: string, text: string | Uint8Array, options: ReplaceFileOptions = {}): void {
-  if (options.makeDirectory === true) mkdirSync(dirname(path), { recursive: true })
-  const target = options.replaceLink === true ? path : fileBehindLinks(path)
+export function replaceFileText(path: string, text: string | Uint8Array, options: { mode?: number } = {}): void {
+  const target = fileBehindLinks(path)
   const previous = existsSync(target) ? statSync(target) : undefined
   const mode = options.mode ?? (previous === undefined ? undefined : previous.mode & 0o7777)
   const staged = `${target}.${process.pid}.${randomUUID()}.tmp`
@@ -153,18 +149,6 @@ export function replaceFileText(path: string, text: string | Uint8Array, options
   const written = statSync(target)
   if (written.mtimeMs > previous.mtimeMs) return
   utimesSync(target, written.atime, (previous.mtimeMs + 1) / 1000)
-}
-
-/**
- * How `replaceFileText` writes: `mode` set exactly; `replaceLink` replaces a link at the path rather
- * than the file behind it; `makeDirectory` makes the parent first.
- *
- * @group Workspace paths
- */
-export interface ReplaceFileOptions {
-  readonly mode?: number
-  readonly replaceLink?: boolean
-  readonly makeDirectory?: boolean
 }
 
 /**
@@ -694,6 +678,30 @@ export function threadTreeRoot(projectsDir: string, path: string): string | unde
 }
 
 /**
+ * The project a cwd belongs to, by id: the one a minted tree's path names, else the cwd's own (its
+ * canonical path, hashed — `projectIdOf`). ⚠ A THREAD ON A TREE RUNS IN A DIRECTORY THAT IS NO
+ * PROJECT: everything filed or served by project — the session directory, the snapshot store, the
+ * server's projects, the approved project config (#753) — asks this first.
+ *
+ * @group Workspace paths
+ */
+export function projectIdOfCwd(projectsDir: string, cwd: string): string {
+  return treeProjectId(projectsDir, cwd) ?? projectIdOf(realpathOrSelf(cwd))
+}
+
+/**
+ * The project config tiers the operator approved (#753): `<projectsDir>/<id>/config-approvals.json`,
+ * the contents of the project's `.enso/config.json` and `.enso/config.local.json` as approved on
+ * its page. ⚠ Under `ENSO_HOME`, beside the project's sessions, never in the project: the agent
+ * works in the project, and the approval is what stands between its writes there and what applies.
+ *
+ * @group Workspace paths
+ */
+export function projectConfigApprovalsPath(projectsDir: string, projectId: string): string {
+  return join(projectsDir, projectId, 'config-approvals.json')
+}
+
+/**
  * What `migrateSessionsIntoProjects` did: files moved, files left because the target held one,
  * directories whose cwd is gone.
  *
@@ -928,19 +936,13 @@ export function projectPromptsDir(projectDirectory: string): string {
 /**
  * A file's text, or `undefined` when there is no file — for a file whose absence means its
  * defaults (the config). Any other failure to read it throws: a file that is there and unreadable
- * is not a missing one. `noFollow`: a link at the path is not followed — the open throws ELOOP.
+ * is not a missing one.
  *
  * @group Workspace paths
  */
-export function readTextIfPresent(path: string, options: { readonly noFollow?: boolean } = {}): string | undefined {
+export function readTextIfPresent(path: string): string | undefined {
   try {
-    if (options.noFollow !== true) return readFileSync(path, 'utf8')
-    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    try {
-      return readFileSync(descriptor, 'utf8')
-    } finally {
-      closeSync(descriptor)
-    }
+    return readFileSync(path, 'utf8')
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error

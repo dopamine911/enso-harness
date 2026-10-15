@@ -1,5 +1,4 @@
 import type { EnsoConfig } from './config.ts'
-import type { ReplaceFileOptions } from './paths.ts'
 import { editUserConfig, hostListEdit, type UserConfigEdit, type UserConfigWrite } from './user-config-write.ts'
 import type { WebSearchConfig, WebSearchSettingsChange } from './web-search.ts'
 
@@ -12,8 +11,15 @@ import type { WebSearchConfig, WebSearchSettingsChange } from './web-search.ts'
  * The `TAVILY_API_KEY` secret is not here: it is never in the config (`secrets.ts`, `writeSecret`).
  */
 
-/** The edit `change` makes to `webSearch` as the file holds it. */
-function planWebSearch(search: WebSearchConfig | undefined, change: WebSearchSettingsChange): UserConfigEdit {
+/**
+ * The edit one Searching change makes to `config`'s `webSearch` — the user's file, or a project's
+ * own (#937). A domain to add must already be a bare host as `readWebFetchHostInput` gives it back,
+ * or it is refused.
+ *
+ * @group Web tools
+ */
+export function webSearchEdit(config: EnsoConfig, change: WebSearchSettingsChange): UserConfigEdit {
+  const search: WebSearchConfig | undefined = config.webSearch
   if ('backend' in change) {
     const backend = change.backend === 'deepseek' ? 'deepseek' : undefined
     return search?.backend === backend ? { kind: 'unchanged' } : { at: ['webSearch', 'backend'], value: backend }
@@ -22,15 +28,10 @@ function planWebSearch(search: WebSearchConfig | undefined, change: WebSearchSet
 }
 
 /**
- * Apply one Searching change to the user's file at `path`. A domain to add must already be a bare
- * host as `readWebFetchHostInput` gives it back, or it is refused.
+ * Apply one Searching change to the user's file at `path` (`webSearchEdit`).
  *
  * @group Web tools
  */
-export function changeUserWebSearch(
-  path: string,
-  change: WebSearchSettingsChange,
-  write: Omit<ReplaceFileOptions, 'mode'> = {},
-): UserConfigWrite {
-  return editUserConfig(path, (config: EnsoConfig) => planWebSearch(config.webSearch, change), write)
+export function changeUserWebSearch(path: string, change: WebSearchSettingsChange): UserConfigWrite {
+  return editUserConfig(path, (config) => webSearchEdit(config, change))
 }

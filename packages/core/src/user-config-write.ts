@@ -1,6 +1,6 @@
 import { applyEdits, type Edit, modify } from 'jsonc-parser'
 import { type EnsoConfig, type EnsoConfigParseResult, parseEnsoConfig } from './config.ts'
-import { type ReplaceFileOptions, readTextIfPresent, replaceFileText } from './paths.ts'
+import { readTextIfPresent, replaceFileText } from './paths.ts'
 import { readWebFetchHostInput } from './web-fetch.ts'
 
 /**
@@ -78,28 +78,15 @@ function nested(path: readonly string[], value: unknown): unknown {
 
 /**
  * Change one key of the user's file at `path`: `plan` reads the config as the file holds it and
- * names the edit. A missing file is written whole; an unreadable one is refused. `write` is how
- * the file is replaced (`replaceFileText`); with `replaceLink` the read does not follow a link at
- * `path` either, and such a link is refused.
+ * names the edit. A missing file is written whole; an unreadable one is refused.
  *
  * @group Configuration
  */
-export function editUserConfig(
-  path: string,
-  plan: (config: EnsoConfig) => UserConfigEdit,
-  write: Omit<ReplaceFileOptions, 'mode'> = {},
-): UserConfigWrite {
+export function editUserConfig(path: string, plan: (config: EnsoConfig) => UserConfigEdit): UserConfigWrite {
   let text: string | undefined
   try {
-    // `replaceLink` reads without following too: a link swapped in at the file would otherwise copy
-    // the text it names (the user's own config) into the file written here.
-    text = readTextIfPresent(path, { noFollow: write.replaceLink === true })
+    text = readTextIfPresent(path)
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOOP' && write.replaceLink === true)
-      return {
-        kind: 'refused',
-        reason: `${path} is reached through a link, so it is not written here; edit it by hand`,
-      }
     return { kind: 'refused', reason: `${path} could not be read (${String(error)}); nothing was changed` }
   }
   const read = parseEnsoConfig(text)
@@ -108,11 +95,35 @@ export function editUserConfig(
       kind: 'refused',
       reason: `${path} is unreadable (${read.reason}); fix it by hand — it is never overwritten`,
     }
-  const edit = plan(read.config)
-  if (!('at' in edit)) return edit.kind === 'refused' ? edit : { kind: 'unchanged', config: read.config }
+  const edited = editConfigText(text, read.config, plan(read.config))
+  if (edited.kind !== 'edited') return edited
+  replaceFileText(path, edited.text)
+  return { kind: 'written', config: edited.config }
+}
+
+/**
+ * What one key's edit makes of a config file's text: the new text, which `parseEnsoConfig` reads,
+ * and the config it holds — or nothing to write (already so), or why not.
+ *
+ * @group Configuration
+ */
+export type ConfigTextEdit =
+  | { readonly kind: 'edited'; readonly text: string; readonly config: EnsoConfig }
+  | { readonly kind: 'unchanged'; readonly config: EnsoConfig }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * `edit` made on `text` (`undefined`: no file yet), whose config is `config`, touching nothing else
+ * (the module header). Writes nothing: the user's file (`editUserConfig`) and a project's own
+ * (`changeProjectWebTools`, #937) each write it their own way.
+ *
+ * @group Configuration
+ */
+export function editConfigText(text: string | undefined, config: EnsoConfig, edit: UserConfigEdit): ConfigTextEdit {
+  if (!('at' in edit)) return edit.kind === 'refused' ? edit : { kind: 'unchanged', config }
   const [section, ...rest] = edit.at
-  const sectionMissing = (read.config as Record<string, unknown>)[section] === undefined
-  if (sectionMissing && edit.value === undefined) return { kind: 'unchanged', config: read.config }
+  const sectionMissing = (config as Record<string, unknown>)[section] === undefined
+  if (sectionMissing && edit.value === undefined) return { kind: 'unchanged', config }
   // ⚠ No formatting options: jsonc-parser's formatter reflows the edit's neighbours too, and they
   // must keep their text. Unformatted, the edit is the value alone; a new file is written whole.
   const after =
@@ -130,8 +141,7 @@ export function editUserConfig(
       kind: 'refused',
       reason: `the change would not be a config Enso reads (${checked.reason}); nothing was changed`,
     }
-  replaceFileText(path, after, write)
-  return { kind: 'written', config: checked.config }
+  return { kind: 'edited', text: after, config: checked.config }
 }
 
 /**
