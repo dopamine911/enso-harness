@@ -7,6 +7,7 @@ import {
   type EnsoThreadStatusKind,
   openIncidentOf,
   type ProviderRefusalClass,
+  shellExitCodeOf,
   THREAD_STATUS_WORDS,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
@@ -80,33 +81,56 @@ export interface ThreadCounts {
   readonly toolCalls: number
   /** Results something refused (#387, #523) — a guard, a permission rule, `auto`, the person: by decision, not by error. */
   readonly refused: number
-  /** Results that came back as errors and were not refusals: the tool ran, or tried to, and failed. */
+  /** `bash` commands that ran and exited non-zero (#928): an error result to pi, the command answering to us. */
+  readonly exited: number
+  /** Results that came back as errors, not refusals nor non-zero exits: the tool ran, or tried to, and failed. */
   readonly failed: number
+}
+
+/** An error result that is a shell command's non-zero exit (#928), by the call's name and the result's text — a shell result is text. */
+function exitedNonZero(toolName: string | undefined, content: unknown): boolean {
+  if (toolName === undefined || typeof content !== 'string') return false
+  return shellExitCodeOf({ toolName, isError: true, text: content }) !== undefined
+}
+
+type ToolResultPart = Extract<UIMessage['parts'][number], { type: 'tool-result' }>
+
+/** What a result counts as on the bar; undefined for one that is not an error. */
+function tallyOf(
+  part: ToolResultPart,
+  toolName: string | undefined,
+  refusals: ReadonlyMap<string, unknown>,
+): 'refused' | 'exited' | 'failed' | undefined {
+  if (refusals.has(part.toolCallId)) return 'refused'
+  if (part.state !== 'error') return undefined
+  return exitedNonZero(toolName, part.content) ? 'exited' : 'failed'
 }
 
 /**
  * Count the transcript. Cheap enough to run per render; the list is what is on screen.
  * `refusals` is the thread's store of refused call ids — the one thing that tells a refusal
- * from a failure, since pi hands both over as an error result.
+ * from a failure, since pi hands both over as an error result. A shell result's own text says a
+ * non-zero exit (`shellExitCodeOf`), told by the call's name.
  */
 export function countThread(
   messages: ReadonlyArray<UIMessage>,
   refusals: ReadonlyMap<string, unknown> = new Map(),
 ): ThreadCounts {
-  let prompts = 0
-  let toolCalls = 0
-  let refused = 0
-  let failed = 0
+  const counts = { prompts: 0, toolCalls: 0, refused: 0, exited: 0, failed: 0 }
+  const toolNames = new Map<string, string>()
   for (const message of messages) {
-    if (message.role === 'user') prompts += 1
+    if (message.role === 'user') counts.prompts += 1
     for (const part of message.parts) {
-      if (part.type === 'tool-call') toolCalls += 1
-      if (part.type !== 'tool-result') continue
-      if (refusals.has(part.toolCallId)) refused += 1
-      else if (part.state === 'error') failed += 1
+      if (part.type === 'tool-call') {
+        counts.toolCalls += 1
+        toolNames.set(part.id, part.name)
+      } else if (part.type === 'tool-result') {
+        const tally = tallyOf(part, toolNames.get(part.toolCallId), refusals)
+        if (tally !== undefined) counts[tally] += 1
+      }
     }
   }
-  return { prompts, toolCalls, refused, failed }
+  return counts
 }
 
 export interface ThreadStatusViewProps {
@@ -321,7 +345,7 @@ function IncidentWord({ incidents }: { readonly incidents: EnsoSessionIncidents 
   ) : (
     <span
       className="text-refuse"
-      title="an incident is open — halting is off (security.incidents.halt), so nothing is suspended; its card is in the Chat view"
+      title="an incident is open — halting is off (Settings › Security), so nothing is suspended; its card is in the Chat view"
     >
       incident open
     </span>
@@ -500,7 +524,7 @@ function RunWords(
   )
 }
 
-/** The transcript's tallies: prompts and tool calls always, refused and failed only when any. */
+/** The transcript's tallies: prompts and tool calls always, refused, exited non-zero and failed only when any. */
 function CountWords({ counts }: { readonly counts: ThreadStatusViewProps['counts'] }): React.ReactNode {
   return (
     <>
@@ -512,8 +536,16 @@ function CountWords({ counts }: { readonly counts: ThreadStatusViewProps['counts
       </span>
       {/* Said apart (#407): a refusal is policy doing its job, a failure is something to fix. */}
       {counts.refused === 0 ? null : (
-        <span className="text-refuse" title="tool calls an Enso guard refused — by policy, not by error">
+        <span
+          className="text-refuse"
+          title="tool calls something refused — a guard, your rule, auto, or you — by decision, not by error"
+        >
           {counts.refused} refused
+        </span>
+      )}
+      {counts.exited === 0 ? null : (
+        <span title="commands that ran and exited non-zero — the command answered, the tool did not fail">
+          {counts.exited} exited non-zero
         </span>
       )}
       {counts.failed === 0 ? null : (

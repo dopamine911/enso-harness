@@ -3,7 +3,7 @@ import { arch, platform, release } from 'node:os'
 import { join } from 'node:path'
 import { buildLogBundle, type EnsoBundleAbout, type EnsoLogLine, isEnsoThreadId } from '@enso/core'
 import { ensoLogFilename, parseEnsoLogText } from '@enso/core/log-process'
-import { findRepoRoot } from '@enso/core/paths'
+import { checkoutRootOfPackage, installedPackageDir, WEB_PACKAGE_NAME } from '@enso/core/paths'
 import { inspectThread, type ThreadView } from './thread-registry.ts'
 
 /**
@@ -80,12 +80,35 @@ function selectRecords(
 }
 
 /**
+ * An installed package's identity, from its own `package.json` (#950): `name@version (installed)`.
+ * Installed, there is no `.git` to read a commit from, and the version is what tells a bundle's
+ * reader which Enso wrote it. `unknown` for a manifest this cannot read, rather than a throw:
+ * the route still serves the records.
+ */
+export function describeInstalledPackage(packageDir: string): string {
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'))
+    if (typeof manifest === 'object' && manifest !== null) {
+      const { name, version } = manifest as Record<string, unknown>
+      if (typeof name === 'string' && typeof version === 'string') return `${name}@${version} (installed)`
+    }
+  } catch {
+    // Unreadable or malformed: said below, the same as a manifest missing its fields.
+  }
+  return `unknown (installed, no readable package.json at ${packageDir})`
+}
+
+/**
  * The checkout, read once per process: both routes are built at startup and
  * `.git/HEAD` — plus `packed-refs` on a packed branch — does not change under a running server.
+ * Installed rather than checked out (#950), the package's version stands in for the commit.
  */
 let checkoutOnce: string | undefined
 function thisCheckout(): string {
-  checkoutOnce ??= describeCheckout(findRepoRoot(import.meta.url))
+  if (checkoutOnce !== undefined) return checkoutOnce
+  const webDir = installedPackageDir(import.meta.url, WEB_PACKAGE_NAME)
+  const checkoutRoot = checkoutRootOfPackage(webDir)
+  checkoutOnce = checkoutRoot === undefined ? describeInstalledPackage(webDir) : describeCheckout(checkoutRoot)
   return checkoutOnce
 }
 

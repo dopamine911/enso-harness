@@ -225,6 +225,10 @@ start, so the allowlist is captured per session and an in-session edit is inert 
 public-address gate (`web-fetch/index.ts#addressGateReason`); `fetchUrl` is called once per call under
 `fetchUnderDeadline` (`web-fetch/index.ts#fetchUnderDeadline`) with `redirect: 'manual'` and `WEB_FETCH_TIMEOUT_MS`. The pure policy —
 URL gate, host match, content-type gate, the address classifier — is `harness/core/web-fetch-policy.ts`.
+A `text/html` body is handed on as its readable text, not its markup (#927, `web-fetch/index.ts#pageText`):
+`harness/core/html-text.ts` keeps headings, paragraphs, lists, links, code and tables, drops the page's
+chrome and everything it hides, and the header line names the conversion and the raw size. Every other
+type is returned as it came.
 
 **The second implementation is every test.** `web-search.test.ts` (`extensions/web-search/__tests__/`)
 drives `createWebSearch` with scripted `runProviders` and `readConfigText` — a searched primary, an

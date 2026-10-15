@@ -9,10 +9,17 @@ import {
   type EnsoThreadDeletePreview,
   type EnsoTreesListing,
 } from '@enso/core'
-import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
+import type { ChangedFilePaths, ChangedFileTexts } from '@enso/core/git'
+import {
+  checkoutRootOfPackage,
+  ensoHome,
+  ensoSecretsPath,
+  installedPackageDir,
+  WEB_PACKAGE_NAME,
+} from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { quarantineSecrets } from '@enso/core/secrets'
-import { readCopyChanges } from '@enso/core/snapshot-store'
+import { readCopyChanges, readCopyFileTexts } from '@enso/core/snapshot-store'
 import type { BranchRequestDetail } from './branch-context.ts'
 import type { BranchEval } from './branch-eval.ts'
 import type { BranchIncidentHistory } from './branch-incident-history.ts'
@@ -229,6 +236,12 @@ export interface AgentHost {
    */
   readCopyChanges(copy: ThreadTreePlace): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
   /**
+   * One of a copy's changed files whole, on both sides (#461), read from its store and the copy
+   * under the host's environment, writing nothing (`readCopyFileTexts`). The paths are the caller's
+   * to hold to the copy.
+   */
+  readCopyFileTexts(copy: ThreadTreePlace, paths: ChangedFilePaths): Promise<ChangedFileTexts>
+  /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
    * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the
@@ -330,9 +343,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   // The secrets file is the USER's (`ENSO_HOME`, #421), and the root `.env` bun autoloads is THIS
   // checkout's — neither is about the trees pi operates in (a session may run anywhere, a tmpdir
   // in tests). Both resolve from the environment and the harness, never from a session's cwd.
+  // Installed rather than checked out (#950) there is no checkout, so no root `.env` to report.
   const environment = options.environment ?? process.env
   const quarantine = quarantineSecrets(environment, {
-    repoRoot: findRepoRoot(import.meta.url),
+    repoRoot: checkoutRootOfPackage(installedPackageDir(import.meta.url, WEB_PACKAGE_NAME)),
     home: ensoHome(environment),
   })
   if (quarantine.removed.length > 0) {
@@ -506,6 +520,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     threadTree,
     readCopyChanges: ({ record, store }) =>
       readCopyChanges({ directory: store, tree: record.path, base: record.base, environment }),
+    readCopyFileTexts: ({ record, store }, paths) =>
+      readCopyFileTexts({ directory: store, tree: record.path, base: record.base, environment, paths }),
     deleteThread,
     threadDeleted,
     previewThreadDelete,

@@ -3,6 +3,7 @@ import { type ChatUIContexts, createChatHookContexts } from '@tanstack/ai-react/
 import { createContext } from 'react'
 import type { FollowConnection } from './follow-connection.ts'
 import type { ThreadAfterDelete } from './project-list.ts'
+import type { SettingsSection } from './thread-url.ts'
 
 /**
  * What the widgets in a thread's pane read through (#90): TanStack's chat contexts, shared by every
@@ -85,13 +86,15 @@ export const PaneSlotContext = createContext<PaneSlot>({
 })
 
 /**
- * What a draft's launch panel does on the page (#877): open one of its project's recent threads —
- * shown when on this page, else resumed, as a rail row opens it — and open Projects, where a
- * thread with no folder to start in is sent. Absent where no page holds the pane.
+ * What a pane does on the page (#877, #933): open one of its project's recent threads — shown when
+ * on this page, else resumed, as a rail row opens it — open Projects, where a thread with no folder
+ * to start in is sent, and open a Settings section (an incident card's hint opens Security). Absent
+ * where no page holds the pane.
  */
 export interface LaunchActions {
   readonly openThread: (thread: ThreadAfterDelete) => void
   readonly manageProjects: () => void
+  readonly openSettings: (section: SettingsSection) => void
 }
 
 export const LaunchActionsContext = createContext<LaunchActions | undefined>(undefined)

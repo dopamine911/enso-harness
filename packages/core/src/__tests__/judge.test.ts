@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ENSO_JUDGE_POLICY } from '../command-judge.ts'
+import { ENSO_JUDGE_POLICY, localJudgeUrlProblem } from '../command-judge.ts'
 import { DEFAULT_GUARD_POLICY } from '../guard.ts'
 import { judgeFilesOf, redactJudgeState, redactJudgeText } from '../judge.ts'
 
@@ -126,4 +126,28 @@ test('⚠ a secret-looking path is withheld, also through a symlink; a binary is
   })
   expect(judgeFilesOf('./bin/tool', workspace, fragments)).toEqual({ 'bin/tool': '[withheld: a binary file]' })
   expect(JSON.stringify(judgeFilesOf('bash notes.sh; source .env', workspace, fragments))).not.toContain('never-sent')
+})
+
+// #969 re-review: the one loopback test the guard and Settings › Security share. Only the hosts
+// `URL` spells as this machine pass; another loopback address (127.0.0.2) is refused too, since
+// the list is exact rather than a range.
+test('a local judge address: http(s) on 127.0.0.1, [::1] or localhost only', () => {
+  for (const ok of [
+    'http://127.0.0.1:8080',
+    'https://localhost/v1',
+    'http://LOCALHOST:1',
+    'http://[::1]:8080',
+    'http://[0:0:0:0:0:0:0:1]:8080',
+    'http://0x7f000001:8080',
+  ]) {
+    expect(localJudgeUrlProblem(ok)).toBeUndefined()
+  }
+  expect(localJudgeUrlProblem('http://127.0.0.2:8080')).toBe(
+    'the local judge must run on this machine (a loopback address), not 127.0.0.2',
+  )
+  expect(localJudgeUrlProblem('http://10.0.0.2')).toBe(
+    'the local judge must run on this machine (a loopback address), not 10.0.0.2',
+  )
+  expect(localJudgeUrlProblem('ftp://127.0.0.1')).toBe("the local judge's URL must be http(s), not ftp:")
+  expect(localJudgeUrlProblem('not a url')).toBe("the local judge's URL is not a URL: not a url")
 })

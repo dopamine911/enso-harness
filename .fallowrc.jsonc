@@ -21,6 +21,8 @@
     "scripts/enso-thread.ts",
     // Spawned by `test/docs-gate.test.ts` and run by hand: `bun scripts/docs/<name>.ts`.
     "scripts/docs/*.ts",
+    // Run by Claude Code as a PreToolUse hook, named by path in the settings `review-pr.ts` writes (#981).
+    "scripts/review/tool-grant-hook.ts",
     // Named by path in `site/astro.config.ts` (Starlight's `customCss` and `components`).
     "site/src/styles/theme.css",
     "site/src/components/LandingHero.astro"

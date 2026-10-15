@@ -86,7 +86,19 @@ import {
 } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { EnsoGitFileChange } from './git-state.ts'
-import { execGit, type GitResult, readTreeChanges, runGitIn, withoutGitLocalVariables } from './git.ts'
+import {
+  type ChangedFilePaths,
+  type ChangedFileTexts,
+  execGit,
+  type GitResult,
+  type GitRunner,
+  readFileTexts,
+  readTreeChanges,
+  runGitIn,
+  scopePathspec,
+  type WorkTreeListing,
+  withoutGitLocalVariables,
+} from './git.ts'
 
 /**
  * How long one git of the store may take. A mint on an unseeded 100k-file tree is the slow case;
@@ -1541,4 +1553,36 @@ export async function readCopyChanges(options: {
     files: read.files.map((file) => (file.status === 'untracked' ? { ...file, status: 'added' } : file)),
     truncated: read.truncated,
   }
+}
+
+/**
+ * One of a copy's changed files whole, on both sides (#461), as {@link readCopyChanges} reads the
+ * copy: the old side at `base` in the store, the new side in the copy — if the copy's changes would
+ * list it: in the store's index, or untracked and kept by the copy's ignore rules. Writes nothing.
+ *
+ * @group Snapshot store
+ */
+export function readCopyFileTexts(options: {
+  readonly directory: string
+  readonly tree: string
+  readonly base: string
+  readonly environment: NodeJS.ProcessEnv
+  readonly paths: ChangedFilePaths
+}): Promise<ChangedFileTexts> {
+  const { directory, tree, base, environment } = options
+  const store = { directory, tree }
+  const index = join(directory, 'enso-index')
+  const runStore: GitRunner = (args, cwd) =>
+    runGitIn(environment, args, cwd, { gitDirectory: directory, workTree: tree, index })
+  const listed = async (path: string): Promise<WorkTreeListing> => {
+    const tracked = await runStore(['ls-files', '-z', '--cached', '--', scopePathspec(path)], tree)
+    if (tracked.code !== 0) return { failed: `ls-files: ${tracked.stderr.trim()}` }
+    if (tracked.stdout.split('\0').includes(path)) return 'listed'
+    const rules = await ignoreRulesOf(environment, store)
+    if ('refused' in rules) return { failed: refusalText(rules) }
+    const untracked = await storeUntrackedFiles(environment, store, rules, index)
+    if ('refused' in untracked) return { failed: refusalText(untracked) }
+    return untracked.kept.includes(path) ? 'listed' : 'not-listed'
+  }
+  return readFileTexts(runStore, { root: tree, base, listed }, options.paths)
 }
