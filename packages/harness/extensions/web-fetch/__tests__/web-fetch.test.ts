@@ -162,6 +162,7 @@ test('empty allowlist: the refusal names the file, the shape, the restart, and t
   expect(text).toContain('restart')
   expect(text).toContain('human')
   expect(loaded.fetchedUrls).toEqual([])
+  expect(loaded.resolvedHosts).toEqual([])
 })
 
 // #421: at session_start the tool takes the SESSION's config — here a trusted project's, whose
@@ -278,6 +279,16 @@ test('malformed config JSON refuses, naming the parse failure and the expected s
   const text = await run(loaded, 'https://docs.example.com/')
   expect(text).toContain('not valid JSON')
   expect(loaded.fetchedUrls).toEqual([])
+  expect(loaded.resolvedHosts).toEqual([])
+})
+
+// @pins web-search-call/web-fetch-gates
+test('a URL refusal comes BEFORE a config problem', async () => {
+  const loaded = loadWebFetch({ readConfigText: () => '{ webFetch: [' })
+  const text = await run(loaded, 'https://user:secret@docs.example.com/')
+  expect(text).toContain('credentials')
+  expect(text).not.toContain('not valid JSON')
+  expect(loaded.resolvedHosts).toEqual([])
 })
 
 test('a config with the wrong shape refuses, showing the expected shape', async () => {
