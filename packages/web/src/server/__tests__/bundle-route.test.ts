@@ -11,6 +11,7 @@ import {
   createAboutRoute,
   createBundleRoute,
   describeCheckout,
+  describeInstalledPackage,
 } from '../bundle-route.ts'
 import type { ThreadView } from '../thread-registry.ts'
 import { createFakeHostedThread } from './fake-hosted-thread.ts'
@@ -195,4 +196,13 @@ test("⚠ /api/about carries the same about the bundle's header does — one bui
   }
   // Its own `selection` says what it is: a header with no records behind it.
   expect(about.selection).toContain('no records')
+})
+
+test('installed, with no checkout (#950): the bundle names the package and its version, and an unreadable manifest is said', () => {
+  const packageDir = mkdtempSync(join(tmpdir(), 'enso-installed-web-'))
+  writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ name: '@enso/web', version: '1.2.3' }))
+  expect(describeInstalledPackage(packageDir)).toBe('@enso/web@1.2.3 (installed)')
+
+  writeFileSync(join(packageDir, 'package.json'), '{ not json')
+  expect(describeInstalledPackage(packageDir)).toBe(`unknown (installed, no readable package.json at ${packageDir})`)
 })

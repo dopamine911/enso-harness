@@ -225,3 +225,50 @@ export const EnsoThreadChanges = Type.Object(
 )
 /** @group Git */
 export type EnsoThreadChanges = Static<typeof EnsoThreadChanges>
+
+/**
+ * One side of a changed file, as `GET …/changes/file` sends it (#461): its text, or why not —
+ * no file on that side (an added file's old side, a deleted one's new side), past the size a patch
+ * may be (`bytes` says how big), binary, or not readable (git's words, or why the server would not
+ * read it).
+ *
+ * @group Git
+ */
+export const EnsoGitFileText = Type.Union([
+  Type.Object({ kind: Type.Literal('text'), text: Type.String() }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('none') }, { additionalProperties: false }),
+  Type.Object(
+    { kind: Type.Literal('too-large'), bytes: Type.Integer({ minimum: 0 }) },
+    { additionalProperties: false },
+  ),
+  Type.Object({ kind: Type.Literal('binary') }, { additionalProperties: false }),
+  Type.Object(
+    { kind: Type.Literal('unavailable'), reason: Type.String({ minLength: 1 }) },
+    { additionalProperties: false },
+  ),
+])
+/** @group Git */
+export type EnsoGitFileText = Static<typeof EnsoGitFileText>
+
+/**
+ * `GET /api/threads/:threadId/changes/file?path=…[&oldPath=…]` (#461): one changed file whole, on
+ * both sides — the old side at the baseline (a copy's: its `base`), read from `oldPath` when the
+ * file was renamed or copied, and the new side in the work tree. What the Diff view expands the
+ * unchanged lines between hunks from, and highlights.
+ *
+ * @group Git
+ */
+export const EnsoThreadChangedFile = Type.Object(
+  {
+    threadId: Type.String({ minLength: 1 }),
+    /** The file's path now, relative to the repository's root (a copy's: the copy's), `/`-separated. */
+    path: Type.String({ minLength: 1 }),
+    /** The path the old side was read from, for a rename or copy; `null` when it is `path`. */
+    oldPath: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+    oldText: EnsoGitFileText,
+    newText: EnsoGitFileText,
+  },
+  { additionalProperties: false },
+)
+/** @group Git */
+export type EnsoThreadChangedFile = Static<typeof EnsoThreadChangedFile>

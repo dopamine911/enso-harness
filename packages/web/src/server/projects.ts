@@ -136,12 +136,18 @@ export interface ProjectRegistry {
   /**
    * A page names the project of a thread (`X-Enso-Project`). The first name a thread gets is
    * kept; it matters only until the thread has a session. `undefined` when accepted (or when
-   * there is no header, or the same name again), else why not: an id that is no registered
-   * project, or a thread already named for a different one.
+   * there is no header, or the same name again — registered still or not, #897), else why not: an
+   * id that is no registered project, or a thread already named for a different one.
    */
   claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined
   /** The thread has a session: its directory is fixed, and its claim is dead weight — forget it. */
   dropClaim(threadId: string): void
+  /**
+   * The project a page named a thread with no session yet for (#897) — registered still or not:
+   * a page that reloads it reads the name here, and says the project is gone rather than taking
+   * the launch one. `undefined` when no page has named one.
+   */
+  claimOf(threadId: string): string | undefined
   /** The project a thread with no session yet belongs to: its claim's, else the launch one; `undefined` when the claimed one is gone. */
   projectOfNewThread(threadId: string): EnsoProject | undefined
   /** Where a thread with no session yet is built — `projectOfNewThread`'s directory; throws `ProjectUnavailable` when there is none. */
@@ -484,13 +490,18 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
 
   function claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined {
     if (projectId === undefined) return undefined
+    const named = claims.get(threadId)
+    // The same name again is no news, even for a project removed since (#897): the thread can be
+    // built nowhere else, and its build says why (`directoryForNewThread`). A reloaded page names it
+    // to show the draft is in a project that is gone; refusing each of its reads would say it again
+    // as a failed follow and a failed catalogue over the launch panel's own words.
+    if (named === projectId) return undefined
     if (get(projectId) === undefined) {
       // Said for the reader of a thread whose project was removed (the live check of #395 slice 3):
       // the id alone says nothing to them.
       return { status: 400, reason: `project ${projectId} is not registered here — it was removed, or never added` }
     }
-    const named = claims.get(threadId)
-    if (named !== undefined && named !== projectId) {
+    if (named !== undefined) {
       return {
         status: 409,
         reason: `thread ${threadId} was already named for project ${named}; a thread's project is chosen once`,
@@ -502,6 +513,10 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
 
   function dropClaim(threadId: string): void {
     claims.delete(threadId)
+  }
+
+  function claimOf(threadId: string): string | undefined {
+    return claims.get(threadId)
   }
 
   function projectOfNewThread(threadId: string): EnsoProject | undefined {
@@ -527,6 +542,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     remove,
     claim,
     dropClaim,
+    claimOf,
     projectOfNewThread,
     directoryForNewThread,
   }

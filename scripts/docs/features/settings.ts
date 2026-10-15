@@ -56,20 +56,21 @@ const [FIRST_ROLE = ''] = ROLE_LABELS
 const PAGE: MarkTarget = { role: 'region', name: 'Settings' }
 const SECTIONS: MarkTarget = { role: 'navigation', name: 'Settings sections' }
 
-/** Settings (#407, #869): the look of the page, (#474) the permission rules pi runs under, and (#578) what trees take on disk. */
+/** Settings (#407, #869): the look of the page, (#474) the permission rules pi runs under, (#933) incidents and the command judge, and (#578) what trees take on disk. */
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts · permissions · storage',
+  landingTagline: 'themes · fonts · permissions · security · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
-    "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
+    "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, set the file's other keys under **Behaviour**, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
+    "**Security**: `config.json`'s `security` section, which only your own file may set. **Incidents**: whether an incident stops tools, and the four risk thresholds. **Command judge**: off, Jev or a local model server, the local server's address and model, and the TypeSafe key Jev needs. Each key is its own control, named by its file, key and default and checked when you leave it; one **Save** writes the file, keeping every key the page does not show. A save that finds a problem saves nothing and lists what to fix, each a link to its field. One that protects less (halting off, a looser threshold, the judge off) says so plainly and asks before it saves. Choosing Jev with no key stored is said the same way, as a choice that will not work yet, and a local model server's address must be on this machine (`127.0.0.1`, `[::1]` or `localhost`). The key is stored on its own line in `ENSO_HOME/secrets.env`; the page only ever says whether it is set. See [Incidents](./incidents.md).",
     '**Storage**: the totals across every project (trees, what they take, and what the snapshot stores take), then each project with what it takes on disk (its trees plus its snapshot store, the number its card on the Projects page says), every thread tree with what it takes, and a Delete for each. See [Thread trees](./thread-trees.md).',
     "A project's own settings are on the project's page, not here: **Project settings…** in its menu on the rail. See [Thread trees](./thread-trees.md).",
   ],
   opens: [
     '{steps}, at the foot of the rail. Settings opens as a page in place of the thread, which keeps running behind it; opening a thread from the rail leaves the page.',
-    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
+    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions`, `security` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
   ],
   shots: [
     {
@@ -85,7 +86,7 @@ export const SETTINGS: FeatureSpec = {
       marks: [
         {
           target: SECTIONS,
-          says: 'The sections: **Appearance**, **Permissions** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
+          says: 'The sections: **Appearance**, **Permissions**, **Security** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
         },
         {
           // A card's name is its label then its scheme (`Tokyo Dark, dark`).
@@ -137,7 +138,8 @@ export const SETTINGS: FeatureSpec = {
       ],
       after: [
         "Between the modes and the rules: three **Rule groups** (publishing, remote writes, and secrets on the path gate). Turning a group's switch on adds only its rules not already in force; once on, it stays on, and its rules leave from the table one by one. Below the rules: **Add rule**, **Try a command**, and **Reset to Enso's policy…**, which shows what it would change before it asks and keeps the replaced file as `permissions.json.bak`. The save bar comes last.",
-        'A **Behaviour** row says when `yoloMode` is on, since it makes every ask an allow, and while it is on a callout under the lede says so too, with **See Behaviour** to go to the row. When the review log is on, the page names where it is written.',
+        "Below the check, **Behaviour**: every other key in `permissions.json`, one control each, saved with the rules in the same **Save**. Switches for `yoloMode`, the review log and the debug log; numbers with their unit for the forwarding timeout and the prompt and review-log widths (empty is the engine's default); the authorizer chain as an ordered list and the infrastructure read paths as a list. **Remove from the file — use the default** takes a key off. `shellTools` is shown and edited in the file; the terminal-only and deprecated keys sit read-only in closed **Terminal only** and **Deprecated** disclosures.",
+        'Turning `yoloMode` on asks first, saying every Ask becomes Allow in every thread and every subagent; while it is on, a callout under the lede says so, with **See Behaviour** to go to the row. A run already going keeps auto-approving until its next prompt after it is turned off. When the review log is on, the page names where it is written.',
         "An unsaved change is kept while the browser page is open: leaving Settings for a thread, or moving to another section, doesn't lose it. A reload does.",
       ],
     },
@@ -146,11 +148,13 @@ export const SETTINGS: FeatureSpec = {
     'Pick the code font with the tool rows in mind. Commands, paths, tool input and output, and the debug drawer all use it, so it is the font you read most of a run in.',
     "A font is loaded the first time something uses it. Choosing a font you haven't used yet can take a moment to show.",
     "A saved rule is in force at a running thread's next tool call, with no restart. The settings beside the rules, such as `yoloMode`, are read when a prompt starts.",
+    "Security's settings apply from the next session: a running thread keeps the halting and judge it started with. The TypeSafe key is read at the judge's next call.",
     "A rule a run needs to keep is safer as **deny** than as **ask**: bypassPermissions makes Enso's asks allows, but not a deny of yours.",
   ],
   limits: [
     'Appearance is not stored on the server or in `ENSO_HOME`. Another browser, or a private window, starts from the default.',
     "Permissions shows only your file. A project's own policy, which the engine reads only for a trusted project, is not shown or edited here.",
+    'Security will not save over a `config.json` that cannot be read: everything that reads it already fails closed, so fix it by hand first.',
     "**Try a command** answers for the policy as saved. It asks the open thread, in its current mode: its guards first, which refuse a call in every mode (a refusal is the answer, and the engine's verdict after it is moot), then its engine. It says so when no engine has loaded there, rather than guessing. The guards are asked only for a command (`bash`) or a path gate's path, as the `bash`, `read` or `write` call it stands for; a `path` check asks both the read and the write, as the engine answers it with the stricter of the two. On any other surface the answer says they were not asked.",
     "The terminal is not affected by Appearance. It uses pi's own theme. It does run under the same permission rules.",
   ],

@@ -15,7 +15,8 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
-import { openSnapshotStore, readCopyChanges, type SnapshotTaken } from '../snapshot-store.ts'
+import type { ChangedFileTexts } from '../git.ts'
+import { openSnapshotStore, readCopyChanges, readCopyFileTexts, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
   diskUsageOf,
@@ -388,6 +389,26 @@ test("⚠ a copy's changes since `base` are read from its store — modified, de
   expect(patchOf('b.txt')).toContain('-b')
   expect(patchOf('snapped.txt')).toContain('+in the last snapshot')
   expect(patchOf('late.txt')).toContain('+after it')
+  // #461: one of them whole, both sides, from the store and the copy — and what the project ignores
+  // is never read, though it sits in the copy.
+  const textsOf = (path: string): Promise<ChangedFileTexts> =>
+    readCopyFileTexts({
+      directory: where.store('copy'),
+      tree: record.path,
+      base: record.base,
+      environment,
+      paths: { path, oldPath: null },
+    })
+  expect(await textsOf('a.txt')).toEqual({
+    oldText: { kind: 'text', text: 'a\n' },
+    newText: { kind: 'text', text: 'a\nmore\n' },
+  })
+  expect(await textsOf('b.txt')).toEqual({ oldText: { kind: 'text', text: 'b\n' }, newText: { kind: 'none' } })
+  expect(await textsOf('late.txt')).toEqual({
+    oldText: { kind: 'none' },
+    newText: { kind: 'text', text: 'after it\n' },
+  })
+  expect((await textsOf('secret.txt')).newText.kind).toBe('unavailable')
   // Nothing written: the store's index, its HEAD, its refs and objects, no lock or scratch left.
   expect(bytesUnder(dirname(where.store('copy')))).toEqual(storesBefore)
 })

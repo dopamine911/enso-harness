@@ -65,6 +65,7 @@ export const EnsoPromptStats = Type.Object(
     /** Its turns' cost plus any summarised tool result's. */
     cost: Type.Number({ minimum: 0 }),
     toolCalls: Type.Integer({ minimum: 0 }),
+    /** Error results that were not a command's non-zero exit (#928). A refusal is one: only the reader knows who refused. */
     failedToolCalls: Type.Integer({ minimum: 0 }),
     /**
      * The prompt's entry → the last message entry answering it (a reply or a tool result), from
@@ -94,8 +95,14 @@ export const EnsoToolCallStats = Type.Object(
     prompt: Type.Integer({ minimum: 0 }),
     inputChars: Type.Integer({ minimum: 0 }),
     outputChars: Type.Integer({ minimum: 0 }),
-    /** pi marked the result `isError` — a guard's refusal is one (map-events.ts says why). */
+    /** pi marked the result `isError` — a guard's refusal is one (map-events.ts says why), and so is a non-zero exit. */
     isError: Type.Boolean(),
+    /**
+     * A shell command (`bash`, `powershell`) that ran and exited non-zero (#928): its exit code, read by
+     * `shellExitCodeOf`. Still `isError`, but the command answered — never a failure. Absent for
+     * every other result.
+     */
+    exitCode: Type.Optional(Type.Integer()),
     /** No result on the branch yet: running now, or a run that stopped under it. */
     pending: Type.Boolean(),
     /** Call → result, from the log — absent when the log never saw it or has pruned the day. */

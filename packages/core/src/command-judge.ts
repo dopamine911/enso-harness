@@ -50,6 +50,37 @@ export const ENSO_JUDGE_BACKENDS = ['off', 'jev', 'local'] as const
 export type EnsoJudgeBackend = (typeof ENSO_JUDGE_BACKENDS)[number]
 
 /**
+ * The secrets-file name the `jev` backend's key is read under (`ENSO_HOME/secrets.env`), per call.
+ * Settings › Security stores it there and only ever says whether it is set (#933).
+ *
+ * @group Command judge
+ */
+export const ENSO_JUDGE_KEY_NAME = 'TYPESAFE_API_KEY'
+
+/** Hosts that are this machine, as `URL` spells them: a `local` judge sends nothing anywhere else. */
+const LOCAL_JUDGE_HOSTS: Readonly<Record<string, true>> = { '127.0.0.1': true, localhost: true, '[::1]': true }
+
+/**
+ * Why `baseUrl` cannot be the `local` judge's address, or `undefined` when it can: an http(s) URL
+ * on a loopback host. The one test both the guard (which judges nothing at any other address) and
+ * Settings › Security (which refuses to save one, #933) apply, so the page cannot accept an
+ * address the judge then ignores.
+ *
+ * @group Command judge
+ */
+export function localJudgeUrlProblem(baseUrl: string): string | undefined {
+  if (!URL.canParse(baseUrl)) return `the local judge's URL is not a URL: ${baseUrl}`
+  const url = new URL(baseUrl)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return `the local judge's URL must be http(s), not ${url.protocol}`
+  }
+  if (!Object.hasOwn(LOCAL_JUDGE_HOSTS, url.hostname)) {
+    return `the local judge must run on this machine (a loopback address), not ${url.hostname}`
+  }
+  return undefined
+}
+
+/**
  * `config.json`'s `security.judge` (#469), user-only as the rest of `security` is: a project cannot
  * switch a judge on, or off, for the user. Scope 1 (around a guard) is the only scope until #469's
  * escalation lands. `local` names the llama.cpp router (a loopback URL) and the model the `local`

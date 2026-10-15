@@ -5,7 +5,15 @@
     "rootDir": ".",
     "types": ["bun"]
   },
-  "include": ["*.ts", "docs/*.ts", "docs/features/*.ts", "docs/inventory/*.ts", "lint/*.ts", "__tests__/*.ts"],
+  "include": [
+    "*.ts",
+    "docs/*.ts",
+    "docs/features/*.ts",
+    "docs/inventory/*.ts",
+    "lint/*.ts",
+    "review/*.ts",
+    "__tests__/*.ts"
+  ],
   "references": [
     { "path": "../packages/core" },
     { "path": "../packages/harness" },
