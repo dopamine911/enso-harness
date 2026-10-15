@@ -196,6 +196,7 @@ export {
   EnsoProviderRetryEnded,
   EnsoProviderRetrying,
   EnsoQueue,
+  EnsoQueuedPrompts,
   EnsoRunEnded,
   EnsoSessionUsageObservation,
   EnsoSettled,

@@ -167,12 +167,7 @@ export const EnsoFollowSnapshot = Type.Object(
      * lists a later `queue` observation carries whole. Absent when nothing waits or the thread is
      * not live. So a page that opens mid-run lists what an earlier page queued.
      */
-    queue: Type.Optional(
-      Type.Object(
-        { interrupting: Type.Array(Type.String()), enqueued: Type.Array(Type.String()) },
-        { additionalProperties: false },
-      ),
-    ),
+    queue: Type.Optional(EnsoQueuedPrompts),
     interrupted: Type.Optional(EnsoInterruptedTail),
     /** Where the branch's runs were stopped (#766), oldest first; absent when none was — see `EnsoStoppedAfter`. */
     stoppedAfter: Type.Optional(EnsoStoppedAfter),

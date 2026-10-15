@@ -21,6 +21,7 @@ import {
   type EnsoOpenDialog,
   type EnsoPermissionCheckRequest,
   type EnsoPromptAdmission,
+  type EnsoQueuedPrompts,
   type EnsoSystemPromptChoice,
   ensoLogger,
   incidentResolutionRefusal,
@@ -687,13 +688,13 @@ export async function buildHostedThread(
         },
       )
     },
-    clearQueue(): { interrupting: string[]; enqueued: string[] } {
+    clearQueue(): EnsoQueuedPrompts {
       // The runtime's two lists under Enso's words (#216) — the only place either spelling is
       // translated on this side, as `map-events.ts` is on the observation side.
       const cleared = session.clearQueue()
       return { interrupting: cleared.steering, enqueued: cleared.followUp }
     },
-    queued(): { interrupting: string[]; enqueued: string[] } {
+    queued(): EnsoQueuedPrompts {
       return { interrupting: [...session.getSteeringMessages()], enqueued: [...session.getFollowUpMessages()] }
     },
     dispose(): void {
