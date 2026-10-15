@@ -21,6 +21,7 @@ const ROUTE_GROUP_PATHS: readonly string[] = [
   'packages/web/src/server/permission-routes.ts',
   'packages/web/src/server/settings-routes.ts',
   'packages/web/src/server/literal-routes.ts',
+  'packages/web/src/server/models-routes.ts',
 ]
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
 const BUNDLE_PATH = 'packages/web/src/server/bundle-route.ts'
@@ -307,7 +308,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_CONFIGURE_ROUTE: threadControl(
     'respondToConfigure → configureThread',
-    "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a prompt reference — a user prompt's id, or `project:<id>` for the project's own, #470 — `system` or `append`, or `null` for pi's default; absent leaves the session's as it is), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone",
+    "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a prompt reference — a user prompt's id, or `project:<id>` for the project's own, #470 — `system` or `append`, or `null` for pi's default; absent leaves the session's as it is), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; or `role` (#904) in place of `model` and `thinking` — resolved from the user's `models` section against the models on offer, applied as the model step, then recorded as an `enso-model-role` entry; applied in that order under one lease, a value equal to the current one left alone",
     [
       '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
       `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`systemPrompt\`, \`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied — a system prompt is refused by name when its reference names no library prompt, a project prompt's project is not trusted by the thread, its file is missing, unreadable or unparseable, a session prompt, or empty, or the session already sent a request (before it, a new choice — pi's default included — replaces the last); 500 handler failure`,
@@ -679,6 +680,72 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
       "200 `EnsoDefaultProjectTrustState` JSON, the value read back — pi's `defaultProjectTrust` in the agent dir's `settings.json`, written by pi's own settings writer with every other key kept; read at each new thread and project page",
     errors: sideWriteErrors("pi's settings file unreadable or not written"),
   }),
+  'GET /api/models/settings': literalRead({
+    handler: 'answerSection → readSection',
+    success:
+      "200 `EnsoModelsSettings` JSON (#904) — the `models` section of the user's `config.json` (favorites, hidden providers, roles, default effort, presets; `{}` when absent) and the file's path; read fresh, user-only",
+    errors: "403 untrusted origin; 422 the user's config is unreadable, or the server reads none",
+  }),
+  'PUT /api/models/settings': {
+    handler: 'respondToSectionWrite → writeSection',
+    input: 'body: `EnsoModelsConfig` — the whole section',
+    success:
+      "200 `EnsoModelsSettings` JSON — the section as read back from the user's `config.json`, every other section kept, the whole file validated with `parseEnsoConfig` and written to a temporary file renamed over, in the file's own mode (`0600` when there was none)",
+    errors:
+      '400 malformed body (a role named other than lower-case letters, digits and -); 403 untrusted origin; 413 body too large; 422 the file is unreadable and is never overwritten, or the server reads no config; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  'GET /api/providers': literalRead({
+    handler: 'listing → HostProviders.list',
+    success:
+      '200 `EnsoProvidersListing` JSON (#904) — the providers set up or registered by an extension (logged in or not, how — never with what — their models, hidden or not), the ones that can be added, and the Settings login running',
+    errors: '403 untrusted origin; 500 handler failure',
+  }),
+  'POST /api/providers/login': {
+    handler: 'respondToLogin → HostProviders.logIn',
+    input: 'body: `EnsoProviderLoginRequest` — `provider`, `authType`, and for an API key the `apiKey`, said once',
+    success:
+      '200 `EnsoProviderLogin` JSON once the login settles or asks its first question; an API key goes to pi’s credential store and is repeated by no answer, refusal or log record',
+    errors:
+      '400 malformed body, refused in our words (never the parser’s); 403 untrusted origin; 409 a Settings login is running; 422 unknown provider or way in, or a key no key looks like (not stored); 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  'GET /api/providers/login': literalRead({
+    handler: 'dispatchModelsRoute',
+    success: '200 `EnsoProviderLogin` JSON — the latest Settings login; 204 when there has been none',
+  }),
+  'POST /api/providers/login/answer': {
+    handler: 'respondToAnswer',
+    input: 'body: `EnsoProviderLoginAnswer` — `questionId`, `value`',
+    success: '200 `EnsoProviderLogin` JSON once the login settles or asks again',
+    errors: '400 malformed body; 403 untrusted origin; 409 no login asks that question; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  'POST /api/providers/login/cancel': {
+    handler: 'dispatchModelsRoute',
+    input: 'none',
+    success: '200 `EnsoProviderLogin` JSON once the login has ended',
+    errors: '403 untrusted origin; 409 no login; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  'POST /api/providers/logout': {
+    handler: 'respondToLogout → HostProviders.logOut',
+    input: 'body: `EnsoProviderLogoutRequest` — `provider`',
+    success: '200 `EnsoProvidersListing` JSON after pi removed the stored credential',
+    errors:
+      '400 malformed body; 403 untrusted origin; 422 pi stores no credential for it (the environment’s is not pi’s to remove); 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   'GET /api/projects': literalRead({
     handler: 'respondWithProjects',
     success: '200 `EnsoProject[]` JSON — the launch project first, then the registered ones',

@@ -12,8 +12,8 @@
  * Measured in the arena (#688): the bare list offered gpt-5.5 and gpt-5.3-codex-spark, the
  * session's had neither, and `…/configure` refused the dialog's own default with a 422.
  *
- * So the list is a bound session's runtime. The latest thread bound, once there is one — its
- * extensions keep it current. Before that, a PROBE: one pi session per process, built on the
+ * So the list is a bound session's runtime: the latest bound that is still live, once there is
+ * one — its extensions keep it current. Otherwise, a PROBE: one pi session per process, built on the
  * first read and released as soon as `session_start` has run. It is not a thread: an in-memory
  * session manager (no session file), in-memory settings (pi writes no default model), no UI.
  * Every harness extension loads, as for a thread, but its `session_start` reaches only the ones
@@ -21,8 +21,14 @@
  * — the logging, guard and permission extensions never start in it.
  * pi-multi-account's own start writes what any session's start writes (its catalog snapshot,
  * its cooldown and continuation state) and remembers no model: the session manager has a
- * branch, so the host owns the model (`rememberUserModel`). The probe only runs while no
- * session has been bound in this process, so it is that first session's start, earlier.
+ * branch, so the host owns the model (`rememberUserModel`). The probe is built only while no
+ * session is live, so it is a session's start, earlier — and once every thread has been
+ * disposed, the list is the probe's again. ⚠ The probe is not a live session either: its
+ * extensions have had `session_shutdown` as soon as `session_start` ran (`probeRuntime`), as a
+ * disposed thread's have. What it offers is what they registered while loading and starting; a
+ * login from Settings through it runs the provider's own `login`, which for pi-multi-account's
+ * account slots hands straight to pi-ai's OAuth flow and reads no session state (read in its
+ * source, not measured). An extension whose login needed its session started would work through neither.
  *
  * Every read refreshes the runtime from the agent dir without the network — the work
  * `ModelRuntime.create` did per read before — so a login through any thread shows at once. What
@@ -55,12 +61,35 @@ import type { ChoiceBeforeFirstMessage } from './thread-log.ts'
 
 const log = ensoLogger('host')
 
+/**
+ * How long a call into pi's credential store — listing what it holds, a logout — may take before it
+ * is given up: the catalogue's, Settings' listing and a logout from Settings wait the same.
+ */
+export const CREDENTIALS_TIMEOUT_MS = 15_000
+
 /** The models a thread with no session is offered (#688): each bound session's list, else a probe's. */
 export interface SessionModels {
   /** A thread's session was bound: its runtime is the list from now on. */
   adopt(runtime: ModelRuntime): void
+  /**
+   * A thread's session was disposed: its runtime is refreshed no more (`refreshAll`), no longer held,
+   * and not the list — the latest bound session still live is, its extensions keeping it current,
+   * else the probe, whose extensions are no more started than a disposed session's (see the header).
+   */
+  release(runtime: ModelRuntime): void
   /** What a session offers now — undefined only when no session could be had. */
   offer(): Promise<ModelOffer<Model<Api>> | undefined>
+  /**
+   * The runtime the list is read from — the latest bound live session's, else the probe's — for
+   * Settings' providers (#904): its extensions' account slots are among them, and a login there
+   * runs their own flow. Undefined only when no session could be had.
+   */
+  runtime(): Promise<ModelRuntime | undefined>
+  /**
+   * Every live session's runtime re-read from the agent dir, without the network (#904): a login
+   * or logout from Settings changes what each thread's `/model` offers at once, not at its next build.
+   */
+  refreshAll(): Promise<void>
 }
 
 interface SessionModelsOptions {
@@ -73,19 +102,32 @@ interface SessionModelsOptions {
 }
 
 export function sessionModels(options: SessionModelsOptions): SessionModels {
-  let bound: ModelRuntime | undefined
   let probe: Promise<ModelRuntime | undefined> | undefined
+  /** The live sessions' runtimes, the latest bound last: it is the list. */
+  const live = new Set<ModelRuntime>()
+  const current = async (): Promise<ModelRuntime | undefined> => {
+    const probed = live.size === 0 ? await (probe ??= probeRuntime(options)) : undefined
+    // Read `live` again: a thread bound while the probe was starting is the newer list.
+    return [...live].at(-1) ?? probed
+  }
   return {
     adopt(runtime: ModelRuntime): void {
-      bound = runtime
+      // Bound again, it is the latest again: moved to the end.
+      live.delete(runtime)
+      live.add(runtime)
+    },
+    release(runtime: ModelRuntime): void {
+      live.delete(runtime)
     },
     async offer(): Promise<ModelOffer<Model<Api>> | undefined> {
-      const probed = bound === undefined ? await (probe ??= probeRuntime(options)) : undefined
-      // Read `bound` again: a thread bound while the probe was starting is the newer list.
-      const runtime = bound ?? probed
+      const runtime = await current()
       if (runtime === undefined) return undefined
       await runtime.refresh({ allowNetwork: false })
       return modelOfferOf(runtime)
+    },
+    runtime: current,
+    async refreshAll(): Promise<void> {
+      await Promise.all([...live].map((runtime) => runtime.refresh({ allowNetwork: false })))
     },
   }
 }
@@ -176,18 +218,23 @@ export function loginFactsOf(modelRuntime: ModelRuntime): LoginProviderFacts[] {
   })
 }
 
+/** pi's model runtime, named for the modules beside this one that read it without importing the vendor (#558). */
+export type HostModelRuntime = ModelRuntime
+
+/** pi's model runtime over the agent dir's own auth and models files alone (`sdk.js`), no session. */
+export function agentDirModelRuntime(agentDir: string): Promise<ModelRuntime> {
+  return ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') })
+}
+
 /**
  * The catalogue's rows (#484). The logins and stored credentials are read from pi's runtime over
  * the agent dir alone (`sdk.js`: `ModelRuntime.create({ authPath, modelsPath })`); the MODELS are
  * a bound session's (#688), the agent dir's alone only when no session could be had.
  */
 export async function catalogueOf(agentDir: string, models: SessionModels): Promise<RuntimeCommand[]> {
-  const modelRuntime = await ModelRuntime.create({
-    authPath: join(agentDir, 'auth.json'),
-    modelsPath: join(agentDir, 'models.json'),
-  })
+  const modelRuntime = await agentDirModelRuntime(agentDir)
   const providerNameOf = (providerId: string): string => modelRuntime.getProvider(providerId)?.name ?? providerId
-  const credentials = await modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) })
+  const credentials = await modelRuntime.listCredentials({ signal: AbortSignal.timeout(CREDENTIALS_TIMEOUT_MS) })
   const login = loginOptions(loginFactsOf(modelRuntime))
   const logout = logoutOptions(
     credentials.map((credential) => ({

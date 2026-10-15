@@ -1,14 +1,17 @@
 import { type EnsoConfig, type EnsoConfigParseResult, parseEnsoConfig } from '@enso/core'
-import { ensoConfigPath, replaceFileText } from '@enso/core/paths'
+import { ensoConfigPath } from '@enso/core/paths'
+import { editConfigFile } from '@enso/core/web-fetch-allowlist'
 import { bytesOf, conflictOf, etagOf, type WriteCondition } from './atomic-file.ts'
 
 /**
  * The user's `config.json` as Settings' sections read and save it (Security #933, Projects & threads
- * #934). ⚠ IT IS A POLICY FILE THAT FAILS CLOSED: every consumer refuses an unreadable one, so a
- * section's save is the whole file, every key the section does not own kept as it is on disk,
- * validated with `parseEnsoConfig` before it replaces the file atomically; a file that is already
- * unreadable is never written over (its owner fixes it by hand: the page cannot know what they
- * meant). Under the `ETag` the page read, so a hand edit made meanwhile is never overwritten unseen.
+ * #934, the `models` section of Providers and Roles #904). ⚠ IT IS A POLICY FILE THAT FAILS CLOSED:
+ * every consumer refuses an unreadable one, so a section's save is the whole file, every key the
+ * section does not own kept as it is on disk, written by the one `config.json` writer, shared with
+ * Web tools (`editConfigFile`: validated before it replaces the file atomically, in the mode the
+ * file had, 0600 when there was none; a file that is already unreadable is never written over — its
+ * owner fixes it by hand: the page cannot know what they meant). Under the `ETag` the page read, so
+ * a hand edit made meanwhile is never overwritten unseen.
  */
 
 /** The file's path, its `ETag` when there is one, and what it parses to. */
@@ -55,16 +58,17 @@ export function writeConfigSections<Read>(
   const configPath = ensoConfigPath(home)
   const conflict = conflictOf(configPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
-  const current = parseEnsoConfig(bytesOf(configPath)?.toString('utf8'))
-  if (current.kind === 'unreadable') {
+  const written = editConfigFile(configPath, (_text, config) => ({
+    kind: 'edited',
+    text: `${JSON.stringify(replace(config), null, 2)}\n`,
+  }))
+  if (written.kind === 'unreadable') {
     return {
       kind: 'refused',
-      reason: `${configPath} is unreadable, so nothing was saved: fix it by hand first (${current.reason})`,
+      reason: `${configPath} is unreadable, so nothing was saved: fix it by hand first (${written.reason})`,
     }
   }
-  const text = `${JSON.stringify(replace(current.config), null, 2)}\n`
-  const checked = parseEnsoConfig(text)
-  if (checked.kind === 'unreadable') return { kind: 'refused', reason: `nothing was saved: ${checked.reason}` }
-  replaceFileText(configPath, text)
+  if (written.kind === 'invalid' || written.kind === 'refused')
+    return { kind: 'refused', reason: `nothing was saved: ${written.reason}` }
   return { kind: 'written', read: reread() }
 }

@@ -56,13 +56,20 @@ const [FIRST_ROLE = ''] = ROLE_LABELS
 const PAGE: MarkTarget = { role: 'region', name: 'Settings' }
 const SECTIONS: MarkTarget = { role: 'navigation', name: 'Settings sections' }
 
-/** Settings (#407, #869): the look of the page, (#474) the permission rules pi runs under, (#933) incidents and the command judge, (#924) what web_fetch may reach, (#934) projects and a new thread's tree, and (#578) what trees take on disk. */
+/**
+ * Settings (#407, #869): the look of the page, (#904) the providers pi knows and the model roles,
+ * (#474) the permission rules pi runs under, (#933) incidents and the command judge, (#924) what
+ * web_fetch may reach, (#934) projects and a new thread's tree, and (#578) what trees take on disk.
+ */
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts · permissions · security · web tools · projects & threads · storage',
+  landingTagline:
+    'themes · fonts · providers · roles · permissions · security · web tools · projects & threads · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
+    "**Providers**: every provider pi knows that you have set up or that an extension registered (an account slot), logged in or not, and how: a subscription, from the environment, or \"a key is set\" — a key is never shown. **Log in** runs pi's own login, the one `/login` runs: a subscription login says its page and asks for the code; an API key goes in a password field, once, straight to pi's credential store. **Log out** removes what pi stored. **Hide from picker** keeps a provider logged in but out of the picker. Each model has a star: starred models lead the picker as **Favorites**, in your order, and one that becomes unavailable stays there, marked. **Add a provider** reaches pi's built-ins nobody has set up.",
+    "**Roles**: a role names a model and an effort, with fallbacks in order — `default` is what a new thread starts on; `quick` and `deep` are suggestions. The picker lists them first, and choosing one sets the model and the effort together; the effort is clamped to the model's levels, and a role whose model is unavailable runs its first available fallback and says so, or is refused with the reason. A thread records the role's name with what it ran, so a reload or a fork still says it after the role is edited. **Presets** save every role and the default effort under a name; switching to one replaces them all. Roles, favorites, hidden providers and presets are kept in the `models` section of `ENSO_HOME/config.json`, yours alone: a project's own config is never read for them.",
     "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, switch it off and back on, add rules and switch drafted groups of rules on and off, set the file's other keys under **Behaviour**, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
     "**Security**: `config.json`'s `security` section, which only your own file may set. **Incidents**: whether an incident stops tools, and the four risk thresholds. **Command judge**: off, Jev or a local model server, the local server's address and model, and the TypeSafe key Jev needs. Each key is its own control, named by its file, key and default and checked when you leave it; one **Save** writes the file, keeping every key the page does not show. A save that finds a problem saves nothing and lists what to fix, each a link to its field. One that protects less (halting off, a looser threshold, the judge off) says so plainly and asks before it saves. Choosing Jev with no key stored is said the same way: as a loosening when a local judge was judging, otherwise as a choice that will not work yet, and a local model server's address must be on this machine (`127.0.0.1`, `[::1]` or `localhost`). The key is stored on its own line in `ENSO_HOME/secrets.env`; the page only ever says whether it is set. See [Incidents](./incidents.md).",
     "**Web tools**: what `web_fetch` may reach, for every project. **Fetching pages** lists the hosts on your allowlist (`webFetch.allowedHosts` in `ENSO_HOME/config.json`), with **Add**, **Check** and **Remove**, and below them the hosts each trusted project adds in its own `.enso/config.json` as you approved it, read only, under the project's name. See [Web access](./web-access.md).",
@@ -72,7 +79,7 @@ export const SETTINGS: FeatureSpec = {
   ],
   opens: [
     '{steps}, at the foot of the rail. Settings opens as a page in place of the thread, which keeps running behind it; opening a thread from the rail leaves the page.',
-    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions`, `security`, `web-tools`, `projects` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
+    "Each section has an address of its own, `?page=settings&section=appearance`, `providers`, `roles`, `permissions`, `security`, `web-tools`, `projects` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
   ],
   shots: [
     {
@@ -88,7 +95,7 @@ export const SETTINGS: FeatureSpec = {
       marks: [
         {
           target: SECTIONS,
-          says: 'The sections: **Appearance**, **Permissions**, **Security**, **Web tools**, **Projects & threads** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
+          says: 'The sections: **Appearance**, **Providers**, **Roles**, **Permissions**, **Security**, **Web tools**, **Projects & threads** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
         },
         {
           // A card's name is its label then its scheme (`Tokyo Dark, dark`).

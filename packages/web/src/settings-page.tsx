@@ -5,9 +5,11 @@ import {
   FolderIcon,
   FolderTreeIcon,
   GlobeIcon,
+  KeyRoundIcon,
   LayersIcon,
   LockIcon,
   ShieldAlertIcon,
+  TagsIcon,
 } from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
@@ -24,9 +26,12 @@ import {
   saveFonts,
 } from './fonts.ts'
 import { cn } from './lib/utils.ts'
+import { type ModelsSettingsState, useModelsSettings } from './models-settings.ts'
 import { SUB_TITLE } from './page-styles.ts'
 import { PermissionsSection, type PolicyEditor } from './permissions-settings.tsx'
 import { ProjectsSection } from './projects-settings.tsx'
+import { ProvidersSection } from './providers-settings.tsx'
+import { RolesSection } from './roles-settings.tsx'
 import { SecuritySection } from './security-settings.tsx'
 import { applyTheme, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
 import { SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
@@ -34,18 +39,20 @@ import { TreesSection } from './trees-settings.tsx'
 import { WebToolsSection } from './web-tools-settings.tsx'
 
 /**
- * Settings, a page (#869; the header's dialog before it), in six sections, each its own route.
+ * Settings, a page (#869; the header's dialog before it), in sections, each its own route.
  * Appearance: the page's colour theme, and a font per role (#407) — a choice applies at once and is
  * kept in this browser (`theme.ts`, `fonts.ts`). Each option draws itself — a theme's card preview
  * wears `data-theme`, so its colours are that theme's variables, and a font's name is set in that font —
  * so nothing here restates a value the page already holds. Permissions (#474): the rules pi runs
  * under, saved on the server (`permissions-settings.tsx`); its draft is held beneath the page
- * (`routed-page.tsx`), so leaving Settings keeps it. Security (#933): `config.json`'s `security`
- * section and the judge's key (`security-settings.tsx`). Web tools (#924): the hosts `web_fetch` may
- * read, saved on the server in `ENSO_HOME/config.json` (`web-tools-settings.tsx`). Projects & threads
- * (#934): your defaults for every project (`projects-settings.tsx`). Storage (#578):
- * what each thread tree and snapshot store costs on disk, measured when the section opens, with each
- * tree's Delete (`trees-settings.tsx`).
+ * (`routed-page.tsx`), so leaving Settings keeps it. Providers and Roles (#904): logging in to
+ * providers, favorite models and hidden providers (`providers-settings.tsx`); named model + effort
+ * roles and their presets (`roles-settings.tsx`), all kept in the server's `models` section. Security
+ * (#933): `config.json`'s `security` section and the judge's key (`security-settings.tsx`). Web tools
+ * (#924): the hosts `web_fetch` may read, saved on the server in `ENSO_HOME/config.json`
+ * (`web-tools-settings.tsx`). Projects & threads (#934): your defaults for every project
+ * (`projects-settings.tsx`). Storage (#578): what each thread tree and snapshot store costs on disk,
+ * measured when the section opens, with each tree's Delete (`trees-settings.tsx`).
  */
 
 /**
@@ -231,6 +238,8 @@ function AppearanceFields(): React.ReactNode {
 /** Each section's link: its label and icon. */
 const SECTION_LINKS: Readonly<Record<SettingsSection, { readonly label: string; readonly icon: React.ReactNode }>> = {
   appearance: { label: 'Appearance', icon: <LayersIcon /> },
+  providers: { label: 'Providers', icon: <KeyRoundIcon /> },
+  roles: { label: 'Roles', icon: <TagsIcon /> },
   permissions: { label: 'Permissions', icon: <LockIcon /> },
   security: { label: 'Security', icon: <ShieldAlertIcon /> },
   'web-tools': { label: 'Web tools', icon: <GlobeIcon /> },
@@ -324,6 +333,8 @@ function SectionBody({
   if (section === 'appearance') return <AppearanceFields />
   if (section === 'permissions') return <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
   if (section === 'web-tools') return <WebToolsSection fetch={fetch} stored={stored} onOpenProject={onOpenProject} />
+  if (section === 'providers') return <ProvidersSection fetch={fetch} />
+  if (section === 'roles') return <RolesSection fetch={fetch} />
   if (section === 'security') return <SecuritySection fetch={fetch} />
   if (section === 'projects') return <ProjectsSection fetch={fetch} projects={projects} />
   return (
@@ -339,14 +350,16 @@ function SectionBody({
 
 /**
  * Where a section is kept, beside its title (the prototype's pill): this browser for Appearance, the
- * server's file for Permissions — its real path once read — for Security and Projects & threads
- * (`config.json`, by name: each section reads its file itself, so its real path is beside each
- * field) and for Web tools, and Storage measured on the server.
+ * server's file for Permissions and for Providers' and Roles' `models` section — its real path once
+ * read — for Security and Projects & threads (`config.json`, by name: each section reads its file
+ * itself, so its real path is beside each field) and for Web tools, and Storage measured on the server.
  */
-function savedWhere(section: SettingsSection, permissions: PolicyEditor): string {
+function savedWhere(section: SettingsSection, permissions: PolicyEditor, models: ModelsSettingsState): string {
   if (section === 'appearance') return 'Saved in this browser'
   if (section === 'storage') return 'Measured on the server when you open this'
   if (section === 'web-tools') return 'Saved on the server · ENSO_HOME/config.json'
+  if (section === 'providers' || section === 'roles')
+    return models.kind === 'loaded' ? `Saved on the server · ${models.settings.path}` : 'Saved on the server'
   if (section === 'security' || section === 'projects') return 'Saved on the server · config.json'
   const { state } = permissions
   return state.kind === 'loaded' ? `Saved on the server · ${state.policy.path}` : 'Saved on the server'
@@ -354,6 +367,7 @@ function savedWhere(section: SettingsSection, permissions: PolicyEditor): string
 
 export function SettingsPage(props: SettingsPageProps): React.ReactNode {
   const { section, onSection, onOpenProjects, permissions } = props
+  const models = useModelsSettings()
   return (
     <div className="mx-auto flex w-full max-w-settings flex-col gap-4 px-4 pt-4 pb-12 md:flex-row md:items-start md:gap-6 md:px-6 md:pt-6 md:pb-16 lg:gap-8">
       <SectionNav section={section} onSection={onSection} onOpenProjects={onOpenProjects} />
@@ -364,7 +378,7 @@ export function SettingsPage(props: SettingsPageProps): React.ReactNode {
           </h2>
           <span className="inline-flex min-w-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-meta text-muted-foreground">
             <CheckIcon aria-hidden="true" className="size-2.5 shrink-0" />
-            <span className="truncate">{savedWhere(section, permissions)}</span>
+            <span className="truncate">{savedWhere(section, permissions, models)}</span>
           </span>
         </div>
         <SectionBody {...props} />

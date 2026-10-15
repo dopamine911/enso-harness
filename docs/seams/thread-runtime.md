@@ -61,10 +61,12 @@ export const ThreadRuntime = Type.Object({
    * `thinking` with a level. Resolves when applied; the change itself arrives on the feed as a
    * `model` observation, for every follower. REJECTS with a reason a reader can act on — an
    * unknown model, a level this model does not offer, a provider with no credentials (pi's
-   * `setModel` refuses that) — and the route says it as 422.
+   * `setModel` refuses that) — and the route says it as 422. A change made by hand ends the role
+   * the session runs under (#904); `byRole` marks a role's own step, which leaves the record to
+   * the caller's `setModelRole` — so a switch from one role to another never says the first ended.
    */
-  runHostCommand: Type.Unsafe<(run: EnsoHostCommandRun) => Promise<void>>(
-    Type.Function([Type.Unknown()], Type.Unknown()),
+  runHostCommand: Type.Unsafe<(run: EnsoHostCommandRun, options?: { readonly byRole?: boolean }) => Promise<void>>(
+    Type.Function([Type.Unknown(), Type.Unknown()], Type.Unknown()),
   ),
   /**
    * Start a `flow` host command (#338 slice 3): `login` with a `provider/authType` option,
@@ -129,6 +131,14 @@ export const ThreadRuntime = Type.Object({
   setSystemPrompt: Type.Unsafe<(choice: EnsoSystemPromptChoice | null) => string | undefined>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
+  /**
+   * Record the role the session now runs under (#904 decision 5): its name and the model and effort
+   * it resolved to, as an `enso-model-role` entry appended through pi — the file and every follower
+   * get it — or `null`, ending it. A record equal to the current one appends nothing, so a role
+   * chosen again says nothing on the feed. A change of model or effort by hand ends a role by itself
+   * (`runHostCommand`). Synchronous; the caller has already applied the role's model and effort.
+   */
+  setModelRole: Type.Unsafe<(record: EnsoThreadModelRole | null) => void>(Type.Function([Type.Unknown()], Type.Void())),
   /**
    * Record a human's resolution of the thread's incident (#466): refused — the reason returned —
    * when `incidentResolutionRefusal` refuses it against the live branch; else its

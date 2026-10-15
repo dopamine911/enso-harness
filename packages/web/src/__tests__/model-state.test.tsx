@@ -141,6 +141,18 @@ test('a cold thread with a recorded model: the chip says it, marked recorded; th
   await mounted.unmount()
 })
 
+test('a thread under a role names it first on the chip, live and recorded alike (#904)', async () => {
+  const recorded = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' }
+  const mounted = await mount(<ModelChip state={null} recorded={recorded} roleName="review" onOpen={noop} />)
+  const named = (): string | null => modelChip(mounted.container).getAttribute('aria-label')
+  expect(named()).toBe('Model (recorded): review · claude-sonnet-5 · anthropic · medium')
+  await mounted.render(<ModelChip state={LIVE_MODEL} recorded={null} roleName="review" onOpen={noop} />)
+  expect(named()).toBe('Model: review · Fake One · fake')
+  await mounted.render(<ModelChip state={LIVE_MODEL} recorded={null} roleName={null} onOpen={noop} />)
+  expect(named()).toBe('Model: Fake One · fake')
+  await mounted.unmount()
+})
+
 test('the Effort chip renders nothing while not live, and the current level once it is', async () => {
   const mounted = await mount(<EffortChip state={null} onSelect={noop} />)
   expect(mounted.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
@@ -244,6 +256,69 @@ test('a failed read, or a list without the command, is said inside the dialog', 
     expect(missing.dialog().querySelector('[role="alert"]')?.textContent).toBe('the host offers no /model command'),
   )
   await missing.unmount()
+  // A flow's dialog says it the same way.
+  const flow = await mountDialog(() => Response.json(COMMANDS), 'logout')
+  await eventually(() =>
+    expect(flow.dialog().querySelector('[role="alert"]')?.textContent).toBe('the host offers no /logout command'),
+  )
+  await flow.unmount()
+})
+
+// `/login` and `/logout` are flows, not the model picker: their options list flat in the selector,
+// the current one marked, and a pick hands `(command, optionId)` on — the flow's own command, never `model`.
+test('a flow row lists its options flat — loading, then each option, the current one marked — and a pick names the flow', async () => {
+  const login = {
+    name: 'login',
+    source: 'host',
+    kind: 'flow',
+    description: 'log in to a provider',
+    value: 'anthropic/oauth',
+    options: [
+      { id: 'anthropic/oauth', label: 'Anthropic · subscription', detail: 'logged in' },
+      { id: 'openai/api-key', label: 'OpenAI · API key', detail: 'not configured' },
+    ],
+  } as const
+  const { promise: answered, resolve: answer } = Promise.withResolvers<void>()
+  const asked: string[] = []
+  const picks: Array<[string, string]> = []
+  const mounted = await mount(
+    <ModelChoiceDialog
+      recent={[]}
+      anchor={{ current: null }}
+      threadId="thread 1"
+      command="login"
+      fetch={async (input: string): Promise<Response> => {
+        asked.push(input)
+        await answered
+        return Response.json({ ...COMMANDS, commands: [...COMMANDS.commands, login] })
+      }}
+      onClose={noop}
+      returnFocus={noop}
+      onPick={(chosenCommand: string, optionId: string): void => void picks.push([chosenCommand, optionId])}
+    />,
+  )
+  const dialog = (): HTMLElement => {
+    const found = document.querySelector<HTMLElement>('[role="dialog"]')
+    if (found === null) throw new Error('expected the flow dialog to be open')
+    return found
+  }
+  await eventually(() => expect(dialog().querySelector('[role="status"]')?.textContent).toBe('loading models…'))
+  await flush(async () => answer())
+  const rows = (): HTMLElement[] => [...dialog().querySelectorAll<HTMLElement>('[cmdk-item]')]
+  await eventually(() =>
+    expect(rows().map((row) => row.getAttribute('data-value'))).toEqual(['anthropic/oauth', 'openai/api-key']),
+  )
+  expect(dialog().querySelector('[cmdk-group-heading]')?.textContent).toBe('log in to a provider')
+  expect(rows().map((row) => row.getAttribute('data-checked'))).toEqual(['true', 'false'])
+  const second = rows()[1]
+  if (second === undefined) throw new Error('expected the second option')
+  await flush(async () => {
+    second.click()
+    await tick()
+  })
+  expect(picks).toEqual([['login', 'openai/api-key']])
+  expect(asked).toEqual(['/api/threads/thread%201/commands'])
+  await mounted.unmount()
 })
 
 test('closed, the dialog renders nothing and reads nothing', async () => {
