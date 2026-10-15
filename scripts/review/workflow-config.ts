@@ -23,9 +23,6 @@ const LIST_STEP_NAME = 'List the comments this run puts at risk'
 
 /** `--allowedTools "A,B(c:*)"` inside the step's `claude_args`: the quoted list. */
 const ALLOWED_TOOLS_ARGUMENT = /--allowedTools\s+"([^"]+)"/
-/** `--model <id>` and `--effort <level>` inside `claude_args`: the model and effort both reviewers run at. */
-const MODEL_ARGUMENT = /--model\s+(\S+)/
-const EFFORT_ARGUMENT = /--effort\s+(\S+)/
 /**
  * The prompt's shell variable for the pull request's number, as written in its commands
  * (`gh pr diff $PR_NUMBER`). ⚠ Filled with the number here: the reviewer's shell has no such
@@ -65,13 +62,6 @@ export interface ReviewWorkflowConfig {
   readonly listCommand: string
   /** The review job's `if:`, kept so the skip rule (drafts, bot authors) is visible beside the local one. */
   readonly reviewCondition: string
-  /**
-   * `--model` and `--effort` from `claude_args`, `undefined` when the workflow names none. ⚠ Unset, the
-   * local reviewer's `claude` falls back to the OWNER's Claude Code settings, so reviews would follow
-   * whatever model and effort the owner last chose for interactive work.
-   */
-  readonly model: string | undefined
-  readonly effort: string | undefined
 }
 
 /** A workflow that no longer has a piece the local review reads. */
@@ -134,8 +124,7 @@ export function readReviewWorkflow(workflowText: string): ReviewWorkflowConfig {
   const claudeStep = reviewJob.steps?.find((step) => step.id === REVIEW_STEP_ID)
   if (claudeStep === undefined)
     throw new ReviewWorkflowShapeError(`no step \`id: ${REVIEW_STEP_ID}\` in the review job`)
-  const claudeArguments = stringInput(claudeStep, 'claude_args')
-  const allowed = ALLOWED_TOOLS_ARGUMENT.exec(claudeArguments)?.[1]
+  const allowed = ALLOWED_TOOLS_ARGUMENT.exec(stringInput(claudeStep, 'claude_args'))?.[1]
   if (allowed === undefined) throw new ReviewWorkflowShapeError('the `claude_args` input names no `--allowedTools "…"`')
   const listJob = jobOf(workflow, LIST_JOB)
   // The scope step is looked up so a rename fails here; its rule is restated in `review-pr.ts#planReview`.
@@ -149,8 +138,6 @@ export function readReviewWorkflow(workflowText: string): ReviewWorkflowConfig {
     allowedTools: splitAllowedTools(allowed),
     listCommand,
     reviewCondition: (reviewJob.if ?? '').trim(),
-    model: MODEL_ARGUMENT.exec(claudeArguments)?.[1],
-    effort: EFFORT_ARGUMENT.exec(claudeArguments)?.[1],
   }
 }
 

@@ -60,6 +60,15 @@ const CAPTURE_REPLY =
   'Recorded: the review comment will be posted to the pull request by the runner. The review is complete; stop here.'
 /** The docker-agent configuration each run writes into its folder. */
 const REVIEWER_CONFIGURATION_FILE = 'reviewer.yaml'
+/**
+ * ⚠ The local reviewer's model and effort are PINNED HERE, in the runner's own code (#981). Unpinned, the
+ * harness's `claude` falls back to the owner's Claude Code settings (measured: Opus 5.5 1M at `xhigh`).
+ * They are not read from the workflow: the review reads the workflow at each pull request's own base
+ * commit, so a pin there reached no pull request opened before it (measured after #1000: every open
+ * pull request's `reviewer.yaml` named no model).
+ */
+const REVIEWER_MODEL = 'claude-sonnet-5-5'
+const REVIEWER_EFFORT = 'medium'
 /** A short SHA, as the workflow's comments print one. */
 const SHORT_SHA_LENGTH = 7
 /** The system directories the credential-less steps need beside bun's own: git, sh, coreutils. */
@@ -182,11 +191,8 @@ export function claudeSessionFolder(directory: string, home: string = homedir())
   return join(home, '.claude', 'projects', directory.replace(/[^A-Za-z0-9]/g, '-'))
 }
 
-/** The docker-agent configuration for one review: Claude Code on the user's login, at the model and effort the workflow names. */
-export function agentConfiguration(harness: {
-  readonly model: string | undefined
-  readonly effort: string | undefined
-}): string {
+/** The docker-agent configuration for one review: Claude Code on the user's login, at `REVIEWER_MODEL` and `REVIEWER_EFFORT`. */
+export function agentConfiguration(): string {
   return [
     'agents:',
     '  root:',
@@ -194,8 +200,8 @@ export function agentConfiguration(harness: {
     '    harness:',
     '      type: claude-code',
     // docker-agent passes these to `claude` as `--model` / `--effort` (measured: its argv, logged).
-    ...(harness.model === undefined ? [] : [`      model: ${harness.model}`]),
-    ...(harness.effort === undefined ? [] : [`      effort: ${harness.effort}`]),
+    `      model: ${REVIEWER_MODEL}`,
+    `      effort: ${REVIEWER_EFFORT}`,
     '',
   ].join('\n')
 }
@@ -463,7 +469,7 @@ function reviewInWorktree(review: ReviewRun): ReviewResult {
     scope: plan.scope,
     headSha: pullRequest.headRefOid,
   }
-  writeFileSync(join(runDirectory, REVIEWER_CONFIGURATION_FILE), agentConfiguration(config))
+  writeFileSync(join(runDirectory, REVIEWER_CONFIGURATION_FILE), agentConfiguration())
   const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values), poster)
   const posted = options.dryRun ? existsSync(capture) : postCapturedReview(repository, options.number, capture, poster)
   if (!options.dryRun) {

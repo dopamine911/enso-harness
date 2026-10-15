@@ -188,14 +188,17 @@ test('⚠ a failed status keeps the previously reviewed head, so the retry is ne
   ).toBeUndefined()
 })
 
-test('the reviewer configuration passes the workflow model and effort to the claude-code harness, and omits what is unset', () => {
-  const pinned = agentConfiguration({ model: 'claude-sonnet-5-5', effort: 'medium' })
-  expect(pinned).toContain('      type: claude-code\n      model: claude-sonnet-5-5\n      effort: medium\n')
-  const harness = (Bun.YAML.parse(pinned) as { agents: { root: { harness: Record<string, string> } } }).agents.root
-    .harness
-  expect(harness).toEqual({ type: 'claude-code', model: 'claude-sonnet-5-5', effort: 'medium' })
-  const unpinned = Bun.YAML.parse(agentConfiguration({ model: undefined, effort: undefined })) as {
+/**
+ * ⚠ THE LOCAL REVIEWER RUNS SONNET 5.5 AT MEDIUM EFFORT, whatever the workflow or the owner's settings say
+ * (#981). Unpinned, the harness's `claude` ran on the owner's Claude Code settings (Opus 5.5 1M at `xhigh`).
+ */
+test('⚠ the reviewer configuration pins the claude-code harness to Sonnet 5.5 at medium effort', () => {
+  const configuration = Bun.YAML.parse(agentConfiguration()) as {
     agents: { root: { harness: Record<string, string> } }
   }
-  expect(unpinned.agents.root.harness).toEqual({ type: 'claude-code' })
+  expect(configuration.agents.root.harness).toEqual({
+    type: 'claude-code',
+    model: 'claude-sonnet-5-5',
+    effort: 'medium',
+  })
 })
