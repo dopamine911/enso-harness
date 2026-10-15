@@ -90,9 +90,10 @@ const { listening } = startEnsoServer({
   promptsDir: ensoPromptsDir(home),
   projectsDir: ensoProjectsDir(home),
   // Each new thread in its own tree (#551), prepared by its project's settings (#754): the user's
-  // `threads` is their lowest tier, a trusted project's own files override it. Read afresh each
-  // time (#934: Settings saves it); a file made unreadable since launch is no user tier at all —
-  // Enso's defaults, no setup commands — and said.
+  // `threads` is their lowest tier, a trusted project's own files override it as approved (#753),
+  // the approvals kept in its project folder. Read afresh each time (#934: Settings saves it); a
+  // file made unreadable since launch is no user tier at all — Enso's defaults, no setup commands —
+  // and said.
   threadSettings: {
     readUser: () => {
       // A file there that cannot be read at all (EACCES, EISDIR) is unreadable too, never a throw.
@@ -111,6 +112,7 @@ const { listening } = startEnsoServer({
     },
     userPath: configPath,
     canonical: (key) => canonicalConfigPath(key),
+    projectsDir: ensoProjectsDir(home),
   },
   harnessPackageDir: harnessDir,
   agentDir,
