@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { truncateHead, truncateTail } from '@earendil-works/pi-coding-agent'
-import { ENSO_TOOL_RESULT_KEY, type EnsoObservation } from '@enso/core'
+import { ENSO_IMAGES_KIND, ENSO_TOOL_RESULT_KEY, ENSO_WRITE_RECEIPT_KIND, type EnsoObservation } from '@enso/core'
 import { Check } from 'typebox/value'
 import { mapPiEvent, toolResultMetadata } from '../map-events.ts'
 import { RuntimeEventSchema } from '../runtime-event.ts'
@@ -139,6 +139,49 @@ test('an untruncated, absent, or null truncation yields no descriptor', () => {
   expect(ended('bash', { truncation: truncateTail(numbered(3)) })).not.toHaveProperty('descriptor')
   expect(ended('bash', { truncation: null })).not.toHaveProperty('descriptor')
   expect(ended('bash', undefined)).not.toHaveProperty('descriptor')
+})
+
+// #920: a tool that describes its own result (ask_user's answers, the write receipt) is taken as it
+// stands, truncation beside it; an image the tool returned rides as bytes, which the text names only.
+test("a tool's own descriptor in its details is carried as it stands; a malformed one is not", () => {
+  const own = { kind: ENSO_WRITE_RECEIPT_KIND, props: { existed: true } }
+  expect(ended('write', { [ENSO_TOOL_RESULT_KEY]: own })).toMatchObject({ descriptor: own })
+  expect(ended('write', { [ENSO_TOOL_RESULT_KEY]: { kind: '' } })).not.toHaveProperty('descriptor')
+})
+
+test('⚠ an image the tool returned becomes an images descriptor of its bytes', () =>
+  expect(
+    mapPiEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'c1',
+      toolName: 'read',
+      result: {
+        content: [
+          { type: 'text', text: 'Read image file [image/png]' },
+          { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+        ],
+      },
+      isError: false,
+    }),
+  ).toMatchObject({
+    text: 'Read image file [image/png][image content]',
+    descriptor: { kind: ENSO_IMAGES_KIND, props: { images: [{ mimeType: 'image/png', data: 'iVBORw0KGgo=' }] } },
+  }))
+
+test("a tool's own descriptor stands over an image it also returned: the image is not drawn", () => {
+  const own = { kind: ENSO_WRITE_RECEIPT_KIND, props: { existed: false } }
+  expect(
+    mapPiEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'c1',
+      toolName: 'write',
+      result: {
+        content: [{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+        details: { [ENSO_TOOL_RESULT_KEY]: own },
+      },
+      isError: false,
+    }),
+  ).toMatchObject({ descriptor: own })
 })
 
 test('the descriptor is wrapped under the namespaced metadata key', () => {
