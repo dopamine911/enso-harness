@@ -1,5 +1,14 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { CheckIcon, ChevronRightIcon, FolderIcon, GlobeIcon, LayersIcon, LockIcon, ShieldAlertIcon } from 'lucide-react'
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  FolderIcon,
+  FolderTreeIcon,
+  GlobeIcon,
+  LayersIcon,
+  LockIcon,
+  ShieldAlertIcon,
+} from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
@@ -17,6 +26,7 @@ import {
 import { cn } from './lib/utils.ts'
 import { SUB_TITLE } from './page-styles.ts'
 import { PermissionsSection, type PolicyEditor } from './permissions-settings.tsx'
+import { ProjectsSection } from './projects-settings.tsx'
 import { SecuritySection } from './security-settings.tsx'
 import { applyTheme, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
 import { SETTINGS_SECTIONS, type SettingsSection } from './thread-url.ts'
@@ -24,7 +34,7 @@ import { TreesSection } from './trees-settings.tsx'
 import { WebToolsSection } from './web-tools-settings.tsx'
 
 /**
- * Settings, a page (#869; the header's dialog before it), in five sections, each its own route.
+ * Settings, a page (#869; the header's dialog before it), in six sections, each its own route.
  * Appearance: the page's colour theme, and a font per role (#407) — a choice applies at once and is
  * kept in this browser (`theme.ts`, `fonts.ts`). Each option draws itself — a theme's card preview
  * wears `data-theme`, so its colours are that theme's variables, and a font's name is set in that font —
@@ -33,7 +43,8 @@ import { WebToolsSection } from './web-tools-settings.tsx'
  * (`routed-page.tsx`), so leaving Settings keeps it. Security (#933): `config.json`'s `security`
  * section and the judge's key (`security-settings.tsx`). Web tools (#924, #932): the hosts
  * `web_fetch` may read, and `web_search`'s backend, Tavily domains and key, saved on the server in
- * `ENSO_HOME/config.json` and `secrets.env` (`web-tools-settings.tsx`). Storage (#578):
+ * `ENSO_HOME/config.json` and `secrets.env` (`web-tools-settings.tsx`). Projects & threads (#934):
+ * your defaults for every project (`projects-settings.tsx`). Storage (#578):
  * what each thread tree and snapshot store costs on disk, measured when the section opens, with each
  * tree's Delete (`trees-settings.tsx`).
  */
@@ -224,6 +235,7 @@ const SECTION_LINKS: Readonly<Record<SettingsSection, { readonly label: string; 
   permissions: { label: 'Permissions', icon: <LockIcon /> },
   security: { label: 'Security', icon: <ShieldAlertIcon /> },
   'web-tools': { label: 'Web tools', icon: <GlobeIcon /> },
+  projects: { label: 'Projects & threads', icon: <FolderTreeIcon /> },
   storage: { label: 'Storage', icon: <FolderIcon /> },
 }
 
@@ -314,6 +326,7 @@ function SectionBody({
   if (section === 'permissions') return <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
   if (section === 'web-tools') return <WebToolsSection fetch={fetch} stored={stored} onOpenProject={onOpenProject} />
   if (section === 'security') return <SecuritySection fetch={fetch} />
+  if (section === 'projects') return <ProjectsSection fetch={fetch} projects={projects} />
   return (
     <TreesSection
       fetch={fetch}
@@ -327,15 +340,15 @@ function SectionBody({
 
 /**
  * Where a section is kept, beside its title (the prototype's pill): this browser for Appearance, the
- * server's file for Permissions — its real path once read — for Security (`config.json`, by name:
- * the section reads its file itself, so its real path is beside each field) and for Web tools, and
- * Storage measured on the server.
+ * server's file for Permissions — its real path once read — for Security and Projects & threads
+ * (`config.json`, by name: each section reads its file itself, so its real path is beside each
+ * field) and for Web tools, and Storage measured on the server.
  */
 function savedWhere(section: SettingsSection, permissions: PolicyEditor): string {
   if (section === 'appearance') return 'Saved in this browser'
   if (section === 'storage') return 'Measured on the server when you open this'
   if (section === 'web-tools') return 'Saved on the server · ENSO_HOME/config.json'
-  if (section === 'security') return 'Saved on the server · config.json'
+  if (section === 'security' || section === 'projects') return 'Saved on the server · config.json'
   const { state } = permissions
   return state.kind === 'loaded' ? `Saved on the server · ${state.policy.path}` : 'Saved on the server'
 }

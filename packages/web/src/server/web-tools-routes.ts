@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   type EnsoConfig,
   ensoLogger,
+  parseEnsoConfig,
   readWebFetchHostInput,
   TAVILY_API_KEY_VARIABLE,
   TavilyKeyChange,
@@ -18,7 +19,8 @@ import {
   type WebSearchSettings,
   WebSearchSettingsChange,
 } from '@enso/core'
-import { projectConfigPath } from '@enso/core/paths'
+import { projectConfigApprovalsPath, projectIdOf } from '@enso/core/paths'
+import { projectTierStanding } from '@enso/core/project-config'
 import { readDotenvFile, writeSecret } from '@enso/core/secrets'
 import { readEnsoConfigFile } from '@enso/core/user-config-write'
 import { changeUserAllowedHosts, nonPublicAddressReason } from '@enso/core/web-fetch-allowlist'
@@ -84,6 +86,8 @@ export interface WebToolsRoutesState extends HostCheckNetwork {
   readonly threads: Pick<ThreadRegistry, 'list'>
   /** pi's agent dir, whose `trust.json` decides whether a project's own hosts are read. */
   readonly agentDir: string
+  /** The project folders (`ENSO_HOME/projects`), where each project's approved tiers are kept (#753); absent, none is approved. */
+  readonly projectsDir: string | undefined
 }
 
 export interface WebToolsRoutes {
@@ -139,7 +143,7 @@ async function checkWebFetchHost(host: string, network: Required<HostCheckNetwor
 }
 
 export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes {
-  const { userConfigPath, userSecretsPath, projects, threads, agentDir } = state
+  const { userConfigPath, userSecretsPath, projects, threads, agentDir, projectsDir } = state
   const network: Required<HostCheckNetwork> = {
     checkFetch:
       state.checkFetch ??
@@ -155,13 +159,19 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
   /** The same, for the last Searching change: the backend and domains are read at session start too. */
   let onOldSearch = new Map<string, HostedThread>()
 
-  /** Each trusted project's own config, read as a new session there would read it (#421). */
+  /**
+   * Each trusted project's own config, read as a new session there would read it (#421): its shared
+   * tier as the operator approved it (#753) — a file changed since applies its approved text, one
+   * never approved applies nothing.
+   */
   function trustedProjectConfigs(): (WebToolsProject & { readonly config: EnsoConfig })[] {
     const found: (WebToolsProject & { readonly config: EnsoConfig })[] = []
+    if (projectsDir === undefined) return found
     for (const project of projects.list()) {
       if (project.status === 'missing-dir' || !projectTrusted(project.path, agentDir)) continue
-      const path = projectConfigPath(project.path)
-      const parsed = readEnsoConfigFile(path)
+      const approvals = projectConfigApprovalsPath(projectsDir, projectIdOf(project.path))
+      const { path, applied } = projectTierStanding(project.path, 'shared', approvals)
+      const parsed = parseEnsoConfig(applied)
       if (parsed.kind === 'ok')
         found.push({ projectId: project.projectId, title: project.title, path, config: parsed.config })
     }

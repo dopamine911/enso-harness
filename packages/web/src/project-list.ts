@@ -1,8 +1,11 @@
 import {
   EnsoDirectoryListing,
   EnsoProject,
+  type EnsoProjectConfigApproval,
+  EnsoProjectConfigReview,
   EnsoProjectSettings,
   type EnsoProjectSettingsUpdate,
+  type EnsoProjectTitleUpdate,
   EnsoProjectTrust,
   type EnsoProjectTrustUpdate,
   type EnsoStoredThread,
@@ -200,11 +203,19 @@ export async function removeProject(
 }
 
 /**
- * One of a project's own resources — its `settings` (#754) or its `trust` (#873) — read, or with
- * `update` written by a PUT, and the answer checked against `schema`.
+ * One of a project's own resources — its `settings` (#754), its `trust` (#873), its
+ * `config-approval` (#753) or its `title` (#939) — read, or with `update` written by a PUT, and the
+ * answer checked against `schema`. The title is write-only (no GET route), so it always carries its
+ * `update`.
  */
 async function projectResource<Schema extends TSchema>(
-  request: { readonly projectId: string; readonly resource: 'settings' | 'trust'; readonly update?: unknown },
+  request:
+    | {
+        readonly projectId: string
+        readonly resource: 'settings' | 'trust' | 'config-approval'
+        readonly update?: unknown
+      }
+    | { readonly projectId: string; readonly resource: 'title'; readonly update: unknown },
   schema: Schema,
   fetchImpl: FetchLike,
 ): Promise<ProjectRequestOutcome<Static<Schema>>> {
@@ -238,6 +249,19 @@ export function saveProjectSettings(
 }
 
 /**
+ * `PUT /api/projects/:id/title` (#939): the name the project is shown by — the folder keeps its own;
+ * the project as it is now listed.
+ */
+export function renameProject(
+  projectId: string,
+  title: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectRequestOutcome<EnsoProject>> {
+  const update: EnsoProjectTitleUpdate = { title }
+  return projectResource({ projectId, resource: 'title', update }, EnsoProject, fetchImpl)
+}
+
+/**
  * `GET /api/projects/:id/trust` (#873) with no `change`: whether the project is trusted, and the
  * files and setup commands trust turns on. With one, `PUT`: trust it (`true`) or revoke it
  * (`false`). Either way the trust as it now stands; a request that never reached the server is a
@@ -252,4 +276,24 @@ export function requestProjectTrust(
   return projectResource({ projectId, resource: 'trust', update }, EnsoProjectTrust, fetchImpl).catch(
     (error: unknown) => ({ kind: 'refused', reason: `the trust request did not reach the server: ${String(error)}` }),
   )
+}
+
+/**
+ * `GET /api/projects/:id/config-approval` (#753) with no `approval`: each of the project's own config
+ * files against the version approved, with its diff. With one, `PUT`: approve that file as reviewed.
+ * Either way the review as it now stands; a request that never reached the server is a refusal.
+ */
+export function requestProjectConfigReview(
+  projectId: string,
+  approval: EnsoProjectConfigApproval | undefined,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectRequestOutcome<EnsoProjectConfigReview>> {
+  return projectResource(
+    { projectId, resource: 'config-approval', update: approval },
+    EnsoProjectConfigReview,
+    fetchImpl,
+  ).catch((error: unknown) => ({
+    kind: 'refused',
+    reason: `the approval request did not reach the server: ${String(error)}`,
+  }))
 }

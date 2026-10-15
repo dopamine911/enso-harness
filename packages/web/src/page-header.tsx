@@ -1,10 +1,17 @@
-import { ENSO_NOTICE_SOURCE, type EnsoModelState, type EnsoRecordedModel, type EnsoStoredThread } from '@enso/core'
+import {
+  ENSO_NOTICE_SOURCE,
+  type EnsoModelState,
+  type EnsoRecordedModel,
+  type EnsoStoredThread,
+  THREAD_NAME_MAX_LENGTH,
+} from '@enso/core'
 import {
   BugIcon,
   ChartColumnIcon,
   EllipsisIcon,
   FileDiffIcon,
   GitForkIcon,
+  HistoryIcon,
   LayersIcon,
   MenuIcon,
   MessagesSquareIcon,
@@ -23,13 +30,13 @@ import {
 } from './components/ui/dropdown-menu.tsx'
 import { DeleteThread } from './delete-thread-dialog.tsx'
 import { paneForkOf } from './fork-thread.ts'
+import { InlineRename, renameThread } from './inline-rename.tsx'
 import { cn } from './lib/utils.ts'
 import { MENU_CONTENT, MENU_ITEM } from './menu-chrome.ts'
 import { storedThreads, useThreadProject } from './page-listings.ts'
 import { isFixtureMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
-import { InlineRename } from './rename-thread.tsx'
 import { useStore } from './store.ts'
 import { getThreadStores, nameThreadSummary, type ThreadSummary, threadStarted } from './thread-stores.ts'
 import { UNTITLED_THREAD } from './threads-rail.tsx'
@@ -47,6 +54,7 @@ const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = {
   context: 'context',
   stats: 'stats',
   changes: 'changes',
+  'prompt-runs': 'prompt-runs',
 }
 
 /**
@@ -175,11 +183,17 @@ function ThreadTitle({
   if (rename.on)
     return (
       <InlineRename
-        target={getThreadStores(active.threadId)}
+        label="thread name"
+        hint="Enter to save · Escape to cancel"
+        maxLength={THREAD_NAME_MAX_LENGTH}
         current={active.name ?? active.title}
-        onRenamed={(name): void => {
-          nameThreadSummary(active.threadId, name)
-          void storedThreads.refresh()
+        save={async (name) => {
+          const outcome = await renameThread(getThreadStores(active.threadId), name)
+          if (outcome.kind === 'renamed') {
+            nameThreadSummary(active.threadId, outcome.name)
+            void storedThreads.refresh()
+          }
+          return outcome
         }}
         onDone={rename.done}
       />
@@ -193,10 +207,7 @@ function ThreadTitle({
         onClick={rename.start}
       >
         <span className={TITLE}>{title}</span>
-        <PencilIcon
-          aria-hidden="true"
-          className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-        />
+        <PencilIcon aria-hidden="true" className={TITLE_PENCIL} />
         <span className="sr-only">, rename</span>
       </button>
       <ThreadSubtitle threadId={active.threadId} />
@@ -205,6 +216,10 @@ function ThreadTitle({
 }
 
 const TITLE = 'truncate font-heading text-base leading-snug font-semibold'
+
+/** The pencil a renameable title shows on hover and keyboard focus (#879, #939): its button is the `group`. */
+export const TITLE_PENCIL =
+  'size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
 
 /**
  * A thread header's, and a page header's (`routed-page.tsx`), box: the same height and padding, so
@@ -468,5 +483,11 @@ const RUN_VIEWS = [
     label: 'Diff',
     hover: 'every file that differs from the last push, and its diff side by side',
     Icon: FileDiffIcon,
+  },
+  {
+    view: 'prompt-runs',
+    label: 'Diff Viewer',
+    hover: "step through the thread's prompts: the files each one changed, snapshot to snapshot",
+    Icon: HistoryIcon,
   },
 ] as const satisfies readonly { view: ThreadView; label: string; hover: string; Icon: typeof LayersIcon }[]

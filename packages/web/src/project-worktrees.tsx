@@ -7,7 +7,7 @@ import type {
   EnsoThreadTreeMode,
 } from '@enso/core'
 import { TriangleAlertIcon } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { createContext, useContext, useEffect, useId, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import {
@@ -60,8 +60,14 @@ export function tierWords(tier: EnsoConfigTier, files: EnsoProjectSettings['file
   }
 }
 
+/**
+ * Open Settings › Projects & threads (#934), where the user tier is edited: a value from your
+ * settings links there. Absent (tests), it is plain words.
+ */
+const OpenUserSettings = createContext<(() => void) | undefined>(undefined)
+
 /** One path or command per line; blank lines and surrounding spaces are no entry. */
-function linesOf(text: string): string[] {
+export function linesOf(text: string): string[] {
   return text
     .split('\n')
     .map((line) => line.trim())
@@ -133,9 +139,24 @@ function TierLine({
   unsaved: boolean
   onReset: (field: ThreadKey, tier: EnsoProjectTier) => void
 }): React.ReactNode {
+  const openUserSettings = useContext(OpenUserSettings)
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-      <p>from {tierWords(tier, files)}</p>
+      <p>
+        from{' '}
+        {tier === 'user' && openUserSettings !== undefined ? (
+          <button
+            type="button"
+            className="text-xs text-primary underline underline-offset-3"
+            title="Change it in Settings › Projects & threads"
+            onClick={openUserSettings}
+          >
+            {tierWords(tier, files)}
+          </button>
+        ) : (
+          tierWords(tier, files)
+        )}
+      </p>
       {tier === 'shared' || tier === 'local' ? (
         <button
           type="button"
@@ -431,18 +452,24 @@ type Loading =
 
 /**
  * The tab for one project: its settings read when it opens, and every write's answer shown in their
- * place. Read again when `revision` moves — the page's trust changed (#873), and with it what the
- * settings resolve to; the form is remounted on the new answer, as after a save.
+ * place. Read again when `revision` moves — the page's trust or an approval changed (#873, #753), and
+ * with it what the settings resolve to; the form is remounted on the new answer, as after a save.
+ * `onSaved` says a save went through: it wrote a file and approved it as written (#753).
  */
 export function ProjectWorktrees({
   projectId,
   fetch: fetchImpl,
   revision = 0,
+  onOpenSettings,
+  onSaved,
 }: {
   projectId: string
   /** Injected by tests; the page's global by default. */
   fetch?: FetchLike | undefined
   revision?: number
+  /** Open Settings › Projects & threads: a value from your settings links there. */
+  onOpenSettings?: () => void
+  onSaved?: (() => void) | undefined
 }): React.ReactNode {
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
@@ -476,6 +503,7 @@ export function ProjectWorktrees({
         settings: outcome.value,
         version: was.kind === 'loaded' ? was.version + 1 : 0,
       }))
+      onSaved?.()
     } catch (error) {
       // A request that never reached the server: said, and the form answerable again.
       setRefusal(`the settings could not be sent: ${String(error)}`)
@@ -486,14 +514,16 @@ export function ProjectWorktrees({
   if (loading.kind === 'loading') return <p className="text-sm text-muted-foreground">reading its settings…</p>
   if (loading.kind === 'failed') return <FieldError>could not read its settings: {loading.reason}</FieldError>
   return (
-    <WorktreesForm
-      key={loading.version}
-      settings={loading.settings}
-      busy={busy}
-      refusal={refusal}
-      saveTo={saveTo}
-      onSaveTo={setSaveTo}
-      onSend={(update: EnsoProjectSettingsUpdate) => void send(update)}
-    />
+    <OpenUserSettings.Provider value={onOpenSettings}>
+      <WorktreesForm
+        key={loading.version}
+        settings={loading.settings}
+        busy={busy}
+        refusal={refusal}
+        saveTo={saveTo}
+        onSaveTo={setSaveTo}
+        onSend={(update: EnsoProjectSettingsUpdate) => void send(update)}
+      />
+    </OpenUserSettings.Provider>
   )
 }

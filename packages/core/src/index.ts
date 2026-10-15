@@ -33,6 +33,7 @@ export {
   ENSO_CONFIG_FILENAME,
   EnsoConfig,
   type EnsoConfigParseResult,
+  EnsoThreadsConfig,
   EnsoThreadTreeMode,
   mergeEnsoConfig,
   parseEnsoConfig,
@@ -83,15 +84,28 @@ export {
   EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'
+export {
+  EnsoPromptRun,
+  EnsoPromptRunBaseline,
+  EnsoPromptRunChanges,
+  EnsoPromptRunSnapshot,
+  EnsoThreadPromptRuns,
+} from './prompt-runs.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
+export { unifiedPatch } from './text-patch.ts'
 export {
   ENSO_TREE_SETUP_ENTRY,
   EnsoConfigTier,
+  EnsoProjectConfigApproval,
+  EnsoProjectConfigReview,
   EnsoProjectSettings,
   EnsoProjectSettingsUpdate,
   EnsoProjectThreadSettings,
   EnsoProjectTier,
+  EnsoProjectTierApprovalState,
   EnsoProjectTierFile,
+  EnsoProjectTierPending,
+  EnsoProjectTierReview,
   EnsoProjectTrust,
   EnsoProjectTrustUpdate,
   EnsoTreeSetupOutcome,
@@ -268,6 +282,7 @@ export {
   EnsoProjectRegistration,
   EnsoProjectsConfig,
   EnsoProjectsState,
+  EnsoProjectTitleUpdate,
   isEnsoProjectId,
   THREAD_PROJECT_TRUST,
   threadTrustsProject,
@@ -394,6 +409,7 @@ export {
   replayIncidents,
   sessionIncidentsOf,
   sessionIncidentsStep,
+  tightenIncidentPolicy,
   tippingCallOf,
   toolFamilyOf,
 } from './session-incident.ts'
@@ -403,6 +419,12 @@ export {
   EnsoSecuritySettingsRead,
   EnsoSecuritySettingsWrite,
 } from './security-settings.ts'
+export {
+  EnsoDefaultProjectTrust,
+  EnsoDefaultProjectTrustState,
+  EnsoProjectsSettingsRead,
+  EnsoProjectsSettingsWrite,
+} from './projects-settings.ts'
 export {
   type CommandJudge,
   commandJudgementOf,
@@ -535,9 +557,11 @@ export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thre
 export {
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  EnsoSnapshotHash,
   EnsoThreadTreeKind,
   EnsoThreadTreeRecord,
   EnsoTreeRestored,
+  isSnapshotHash,
   readEnsoThreadTree,
   readEnsoTreeRestored,
   type ThreadTreeKind,

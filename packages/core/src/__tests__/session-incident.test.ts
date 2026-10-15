@@ -15,10 +15,12 @@ import {
   ENSO_TOOL_FAMILIES,
   type EnsoIncidentOpened,
   type EnsoIncidentResolution,
+  incidentPolicyOf,
   incidentResolutionRefusal,
   incidentResolvedOf,
   reportOwedOf,
   sessionIncidentsOf,
+  tightenIncidentPolicy,
   toolFamilyOf,
 } from '../session-incident.ts'
 import { ENSO_INCIDENT_RESOLVED_ENTRY } from '../session-risk.ts'
@@ -215,4 +217,26 @@ test('a quote checks whitespace-normalised, and "what was denied" must cite one 
   expect(incidentReportProblems(offTarget)).toEqual([
     "denied: no verified quote cites one of this incident's refused calls",
   ])
+})
+
+// #753's fourth acceptance item: a project tier that loosens a security key is ignored, and named;
+// one that tightens it applies.
+test('⚠ a project tier may only tighten the incident policy: what loosens is ignored and named (#753)', () => {
+  const user = incidentPolicyOf({ incidents: { halt: true, windowCalls: 8, incidentAtSignals: 5 } })
+  const loosened = tightenIncidentPolicy(user, { halt: false, windowCalls: 4, incidentAtSignals: 9, highAtKinds: 9 })
+  expect(loosened.policy).toEqual(user)
+  expect(loosened.loosening).toEqual([
+    'security.incidents.halt',
+    'security.incidents.windowCalls',
+    'security.incidents.highAtKinds',
+    'security.incidents.incidentAtSignals',
+  ])
+
+  const alerting = incidentPolicyOf(undefined)
+  const tightened = tightenIncidentPolicy(alerting, { halt: true, windowCalls: 12, incidentAtSignals: 3 })
+  expect(tightened.loosening).toEqual([])
+  expect(tightened.policy).toEqual({
+    halt: true,
+    thresholds: { ...alerting.thresholds, windowCalls: 12, incidentAtSignals: 3 },
+  })
 })
