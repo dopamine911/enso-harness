@@ -1,0 +1,21 @@
+---
+/**
+ * A section's heading block, as the landing lays it out: the kicker in the left column, the title
+ * and its intro (the slot) in the right. `id` names the heading so the section can be
+ * `aria-labelledby` it.
+ */
+interface Props {
+  kicker: string
+  title: string
+  id?: string
+}
+const { kicker, title, id } = Astro.props
+---
+
+<div class="section-head">
+  <div class="kicker">{kicker}</div>
+  <div>
+    <h2 id={id}>{title}</h2>
+    <slot />
+  </div>
+</div>

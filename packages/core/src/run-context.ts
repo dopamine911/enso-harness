@@ -2,6 +2,7 @@ import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import { EnsoThreadSystemPrompt } from './prompt-library.ts'
 import { EnsoRecordedModel } from './thread-runtime.ts'
+import { EnsoSnapshotHash } from './thread-tree-record.ts'
 
 /**
  * The run conditions pi does not record (#435, Lineage #126 receipt steps 3 and 5), and the
@@ -94,13 +95,7 @@ export const EnsoRunContext = Type.Object(
      * the checkout's object format (sha1 or sha256), since its blobs are copied from the checkout's objects.
      */
     snapshot: Type.Optional(
-      Type.Union([
-        Type.Object(
-          { hash: Type.String({ pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$' }) },
-          { additionalProperties: false },
-        ),
-        Type.Null(),
-      ]),
+      Type.Union([Type.Object({ hash: EnsoSnapshotHash }, { additionalProperties: false }), Type.Null()]),
     ),
   },
   { additionalProperties: false },

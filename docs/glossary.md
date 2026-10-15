@@ -73,6 +73,7 @@ each: `thread` is the noun everywhere the id crosses; `session` is reserved for 
 | **run** | one acquisition of a thread: from a prompt's admission to *settled*. Not one prompt — prompts during a run queue into it, and steering, follow-ups and retries all land inside one run. The unit a receipt names and a log record belongs to | `generation` | `acquire()` | the lease; ended by the settle observer, never by a route or a click |
 | **generation** | the run's number: per thread, monotonic for the server's lifetime, kept across dispose, **reset when the server restarts** — which is what "lost session" means. The stale-lease fence, and the receipt the browser compares against | integer, memory only | the registry | — |
 | **turn** | one model request and the tool results it produced, as the runtime marks it (`turn-start` / `turn-end`). *Decision (6):* this is the only meaning; the status bar's "turns" (a count of user messages) is a **prompt** count and is renamed. Several turns make a run | — | the runtime | — |
+| **prompt run** | one of the thread's own prompts and everything that ran under it, up to the next prompt: what the Diff Viewer steps through (#553), its files compared snapshot to snapshot — the tree as its run began against the tree as the next prompt's run began. Not a *turn* (one model request; a prompt run holds several) and not a *run* (a prompt queued into a run in flight is a prompt run of its own) | `EnsoPromptRun.promptRun`, the thread's own prompts counted from 1; a fork's inherited ones are not counted | read off the branch on each request, never stored | — |
 | **step** | **not a word of ours.** The state layer's stream calls a turn a step; a tool call rendered in the transcript is a *tool call*, not a step (`ToolStep` is renamed). *Decision (6):* turn for one model request, run for the owned interval, nothing called a step | — | — | — |
 
 **States.** A thread has two while live, and a parked question is *busy* — there is no third.
@@ -262,9 +263,10 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   Only a resolution resets it.
 - **security signal** — one observed fact of the session risk, named for what was seen, never for
   intent: `denial-retry`, `command-obfuscation`, `alternate-execution-path`,
-  `tool-substitution-after-denial`, `policy-introspection`, `protected-record-touch`. Every one but the
-  last needs an earlier refusal in its window, so no single command is a signal on its own; a shell
-  command naming the session or log directory is one by itself (#466).
+  `tool-substitution-after-denial`, `policy-introspection`, `protected-record-touch`,
+  `config-tier-touch`. Every one but the last two needs an earlier refusal in its window, so no single
+  command is a signal on its own; a shell command naming the session or log directory is one by itself
+  (#466), and so is a write, edit or write-shaped shell command reaching a config tier file (#753).
 - **incident** — the record a session's risk reaching `incident` opens (#466, phase 3 of #189):
   `enso-incident-opened`, with the signals it rests on, whether it **halted**, and what it suspended.
   With `security.incidents.halt` off (the default) it is an alert. Open until a human **resolves** it —

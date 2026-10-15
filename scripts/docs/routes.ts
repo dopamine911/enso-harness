@@ -200,6 +200,30 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
         'path: `threadId`; query: `path` (the file now, from the repository root), optional `oldPath` (a rename or copy’s path at the baseline)',
     },
   ),
+  THREAD_PROMPT_RUNS_ROUTE: threadRead(
+    'respondWithThreadPromptRuns → AgentHost.threadPromptRuns',
+    "200 `EnsoThreadPromptRuns` JSON (#553) — the Diff Viewer's steps: the thread's own prompt runs (a prompt and everything that ran under it, up to the next prompt; a fork's inherited prompts are counted in `prompt`, not listed), each with the snapshot its run began with (`start`) and the one the next prompt's run began with (`end`) — `taken`, `failed`, `unrecorded` (before #551), `pending` (no later prompt yet) or `unavailable` (a commit the store lacks) — `idle` when both hold one tree, `restored` when a restore ran in its span; and `baseline`, the tree's base snapshot (a fork's inherited one, with its source) or a checkout thread's first snapshot. Off the branch and the store's objects; the live tree is never read. Read-only",
+    NO_SESSION_ERRORS,
+  ),
+  THREAD_PROMPT_RUN_CHANGES_ROUTE: threadRead(
+    'respondWithPromptRunChanges → AgentHost.readPromptRunChanges',
+    "200 `EnsoPromptRunChanges` JSON (#553) — every file that differs between two of the thread's snapshots, compared in its store (never the live tree), each with its unified diff unless binary or too large; `truncated` past 500 files. Read-only: nothing in the store, the tree or the session is written",
+    "400 malformed thread id, or `from`/`to` missing or not a snapshot hash (lowercase hex, 40 or 64 digits); 403 untrusted origin; 404 no session; 409 a snapshot the thread's prompt runs do not record, no snapshot store on this host, or two snapshots git cannot compare (git's words); 500 handler failure",
+    {
+      path: '/api/threads/:threadId/prompt-runs/changes',
+      input: "path: `threadId`; query: `from`, `to` — two snapshot commits the thread's prompt runs record",
+    },
+  ),
+  THREAD_PROMPT_RUN_FILE_ROUTE: threadRead(
+    'respondWithPromptRunFile → AgentHost.readPromptRunFileTexts',
+    "200 `EnsoThreadChangedFile` JSON (#553) — one file whole at two of the thread's snapshots: `oldText` at `from` (a rename's at `oldPath`), `newText` at `to`, both read from the store as stored; a side no file has at its snapshot is `none`, one git cannot read `unavailable` with git's words. What the Diff Viewer expands the unchanged lines between hunks from. Read-only",
+    "400 malformed thread id, `from`/`to` missing or not a snapshot hash, or a malformed path (either: empty, `..`, an empty segment, a NUL); 403 untrusted origin; 404 no session; 409 a snapshot the thread's prompt runs do not record, or no snapshot store on this host; 500 handler failure",
+    {
+      path: '/api/threads/:threadId/prompt-runs/file',
+      input:
+        "path: `threadId`; query: `from`, `to` — two snapshot commits the thread's prompt runs record; `path`; optional `oldPath` (a rename or copy’s path at `from`)",
+    },
+  ),
   THREAD_PAGES_ROUTE: threadRead(
     'respondWithThreadPages',
     "200 `EnsoThreadPages` JSON (#619) — the directory the thread works in (its tree, #551), the HTML files at its top two levels, at most 50 (`truncated` past them; `.git` and `node_modules` are not walked), and, once there is a page, `previewOrigin`: the thread's preview, an origin of its own (#713) — a loopback listener started on that first read, serving the tree at `/`, GET and HEAD only, to a loopback `Host` only, files at most 10 MiB, typed by extension, `nosniff`, `no-referrer`, `no-store`, nothing outside the tree (`..` or a symlink is a 404). Read-only",
@@ -431,7 +455,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     handler: 'respondWithProjectSettings → createProjectSettingsRoute.read → resolveProjectThreadSettings',
     input: 'path: `projectId` (sixteen hex digits)',
     success:
-      "200 `EnsoProjectSettings` JSON — each `threads` key (tree mode, files to copy, setup commands) with the tier it resolves from, whether the project is trusted (its own tiers are read only then), the file behind each tier, and the project's tier files that could not be read (#754)",
+      "200 `EnsoProjectSettings` JSON — each `threads` key (tree mode, files to copy, setup commands) with the tier it resolves from, as approved (#753), whether the project is trusted (its own tiers are read only then), the file behind each tier, and the project's tiers whose approved text no longer reads (#754)",
     errors:
       '403 untrusted origin; 404 no registered project with that id; 422 a server started without the user config; 500 handler failure',
     routeClass: 'observation',
@@ -445,9 +469,9 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     input:
       "path: `projectId`; body: `EnsoProjectSettingsUpdate` — the tier (`shared`, the project's committed `.enso/config.json`, or `local`, its gitignored `.enso/config.local.json`) and the `threads` keys to set, `null` removing one",
     success:
-      "200 `EnsoProjectSettings` JSON as the settings now resolve; the tier's file keeps every other key, written as 2-space JSON (#754)",
+      "200 `EnsoProjectSettings` JSON as the settings now resolve; the tier's file keeps every other key, written as 2-space JSON (#754), and is approved as written (#753)",
     errors:
-      "400 malformed body, or one that is not an update; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 422 the tier's file is there and unreadable (never overwritten), the project's directory is gone, or a server started without the user config; 500 handler failure",
+      "400 malformed body, or one that is not an update; 403 untrusted origin; 404 no registered project with that id; 409 the tier's file is not the version approved — changed, gone or never approved — so a save over it would approve it unseen (#753); 413 body too large; 422 the tier's file is there and unreadable (never overwritten), the project's directory is gone, or a server started without the user config; 500 handler failure",
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',
@@ -473,6 +497,33 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
       "200 `EnsoProjectTrust` JSON as it now stands — saved in pi's `trust.json` under the project's path, the store a thread's **Trust project** answer writes; a revoke is an explicit `false`, never a deletion, so no trusted ancestor shows through, and retires the project's live threads that are not running, so each is rebuilt under it at its next prompt. A grant reaches each thread when it is next built (#873)",
     errors:
       '400 malformed body, or one that is not exactly `{ trusted }`; 403 untrusted origin; 404 no registered project with that id; 409 a revoke while a thread in the project is running; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  PROJECT_CONFIG_APPROVAL_READ_ROUTE: {
+    method: 'GET',
+    path: '/api/projects/:projectId/config-approval',
+    handler: 'createProjectSettingsRoute.review → reviewProjectConfig',
+    input: 'path: `projectId` (sixteen hex digits)',
+    success:
+      "200 `EnsoProjectConfigReview` JSON — each of the project's own tier files that is there or approved, local first: its state against the version approved (`approved`, `changed`, `removed`, `unapproved`), its SHA-256 now, the unified diff from the approved version to it, and why it can't be approved as it is (#753); read whatever the trust, applying nothing",
+    errors:
+      '403 untrusted origin; 404 no registered project with that id; 422 a server started without the user config; 500 handler failure',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
+  PROJECT_CONFIG_APPROVAL_WRITE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/config-approval',
+    handler: 'respondToProjectConfigApproval → createProjectSettingsRoute.approve → approveProjectTier',
+    input:
+      'path: `projectId`; body: `EnsoProjectConfigApproval` — the tier and the file’s SHA-256 as reviewed, `null` approving its removal',
+    success:
+      '200 `EnsoProjectConfigReview` JSON as it now stands — the file as reviewed is the version that applies, kept in `ENSO_HOME/projects/<id>/config-approvals.json` (#753)',
+    errors:
+      "400 malformed body, or one that is not an approval; 403 untrusted origin; 404 no registered project with that id; 409 the file changed after it was reviewed — nothing approved; 413 body too large; 422 the file can't be approved as it is (a link, a FIFO, over 64 KiB, not a config Enso reads), the project's directory is gone, or a server started without the user config; 500 handler failure",
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',
