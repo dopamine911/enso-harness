@@ -108,7 +108,16 @@ const PAGE_PARAMETERS = [
 ] as const
 
 /** Settings' sections, in the order its navigation lists them; the first is where Settings opens. */
-export const SETTINGS_SECTIONS = ['appearance', 'permissions', 'security', 'web-tools', 'projects', 'storage'] as const
+export const SETTINGS_SECTIONS = [
+  'appearance',
+  'providers',
+  'roles',
+  'permissions',
+  'security',
+  'web-tools',
+  'projects',
+  'storage',
+] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 const isSettingsSection = (value: string): value is SettingsSection =>

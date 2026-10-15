@@ -76,29 +76,78 @@ function nested(path: readonly string[], value: unknown): unknown {
   return path.reduceRight<unknown>((inner, key) => ({ [key]: inner }), value)
 }
 
+/** What a save makes of a config file's text: the new text, nothing to write, or why not. */
+export type ConfigTextChange =
+  | { readonly kind: 'edited'; readonly text: string }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string }
+
 /**
- * Change one key of the user's file at `path`: `plan` reads the config as the file holds it and
- * names the edit. A missing file is written whole; an unreadable one is refused.
+ * What a save of a config file did: written or left as it was (`config`, as the file now holds it),
+ * or why not — the file is `unreadable` now, the change was `refused`, or its result is `invalid`
+ * (not a config Enso reads). Each caller words the reason for its page.
  *
  * @group Configuration
  */
-export function editUserConfig(path: string, plan: (config: EnsoConfig) => UserConfigEdit): UserConfigWrite {
+export type ConfigFileEdit =
+  | { readonly kind: 'written'; readonly config: EnsoConfig }
+  | { readonly kind: 'unchanged'; readonly config: EnsoConfig }
+  | { readonly kind: 'unreadable'; readonly reason: string }
+  | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'invalid'; readonly reason: string }
+
+/**
+ * The ONE writer of the user's `config.json` from Settings — Web tools (#924, #932), and every
+ * section `writeConfigSections` saves (Security #933, Projects & threads #934, Providers and Roles
+ * #904): `edit` makes the new text of the file as it is (`undefined`: none yet).
+ *
+ * ⚠ IT IS A POLICY FILE THAT FAILS CLOSED: one that is unreadable now is NEVER written over (its
+ * owner fixes it by hand), and a result `parseEnsoConfig` refuses writes nothing. The file is
+ * replaced in one step (`replaceFileText`: a symlinked file stays a link) in the mode it had, and a
+ * new one is made owner-only (0600) — never the umask's default, which would open the user's config.
+ *
+ * @group Configuration
+ */
+export function editConfigFile(
+  path: string,
+  edit: (text: string | undefined, config: EnsoConfig) => ConfigTextChange,
+): ConfigFileEdit {
   let text: string | undefined
   try {
     text = readTextIfPresent(path)
   } catch (error: unknown) {
-    return { kind: 'refused', reason: `${path} could not be read (${String(error)}); nothing was changed` }
+    return { kind: 'unreadable', reason: `could not be read: ${String(error)}` }
   }
   const read = parseEnsoConfig(text)
-  if (read.kind === 'unreadable')
+  if (read.kind === 'unreadable') return { kind: 'unreadable', reason: read.reason }
+  const changed = edit(text, read.config)
+  if (changed.kind === 'unchanged') return { kind: 'unchanged', config: read.config }
+  if (changed.kind === 'refused') return changed
+  const checked = parseEnsoConfig(changed.text)
+  if (checked.kind === 'unreadable') return { kind: 'invalid', reason: checked.reason }
+  replaceFileText(path, changed.text, text === undefined ? { mode: 0o600 } : {})
+  return { kind: 'written', config: checked.config }
+}
+
+/**
+ * Change one key of the user's file at `path` (`editConfigFile`): `plan` reads the config as the
+ * file holds it and names the edit. A missing file is written whole; an unreadable one is refused.
+ *
+ * @group Configuration
+ */
+export function editUserConfig(path: string, plan: (config: EnsoConfig) => UserConfigEdit): UserConfigWrite {
+  const written = editConfigFile(path, (text, config) => editConfigText(text, config, plan(config)))
+  if (written.kind === 'written' || written.kind === 'unchanged') return written
+  if (written.kind === 'refused') return written
+  if (written.kind === 'invalid')
     return {
       kind: 'refused',
-      reason: `${path} is unreadable (${read.reason}); fix it by hand — it is never overwritten`,
+      reason: `the change would not be a config Enso reads (${written.reason}); nothing was changed`,
     }
-  const edited = editConfigText(text, read.config, plan(read.config))
-  if (edited.kind !== 'edited') return edited
-  replaceFileText(path, edited.text)
-  return { kind: 'written', config: edited.config }
+  return {
+    kind: 'refused',
+    reason: `${path} is unreadable (${written.reason}); fix it by hand — it is never overwritten`,
+  }
 }
 
 /**
@@ -114,8 +163,8 @@ export type ConfigTextEdit =
 
 /**
  * `edit` made on `text` (`undefined`: no file yet), whose config is `config`, touching nothing else
- * (the module header). Writes nothing: the user's file (`editUserConfig`) and a project's own
- * (`changeProjectWebTools`, #937) each write it their own way.
+ * (the module header). Writes nothing: the user's file (`editConfigFile`, through `editUserConfig`) and a
+ * project's own (`changeProjectWebTools`, #937) each write it as that file is written.
  *
  * @group Configuration
  */

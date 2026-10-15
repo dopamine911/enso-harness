@@ -1,4 +1,5 @@
 import { type EnsoRunStatesFrame, EnsoStoredThread, EnsoThreadHistory } from '@enso/core'
+import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
 import { createListingStore, type ListingStore } from './listing-store.ts'
 
@@ -97,6 +98,18 @@ export async function describeFailedResponse(response: Response): Promise<string
   return detail.length === 0 ? String(response.status) : `${response.status} ${detail}`
 }
 
+/** A 2xx's JSON as `schema`; any other status, or a payload that misses it (`mismatch` says so), throws in words. */
+export async function checkedPayload<Schema extends TSchema>(
+  response: Response,
+  schema: Schema,
+  mismatch: string,
+): Promise<Static<Schema>> {
+  if (!response.ok) throw new Error(await describeFailedResponse(response))
+  const payload: unknown = await response.json()
+  if (!Check(schema, payload)) throw new Error(mismatch)
+  return payload
+}
+
 async function fetchStoredThreadList(): Promise<unknown> {
   const response = await fetch('/api/stored-threads')
   if (!response.ok) throw new Error(await describeFailedResponse(response))
@@ -122,10 +135,7 @@ export async function fetchThreadHistory(
 ): Promise<EnsoThreadHistory | undefined> {
   const response = await fetchImpl(threadHistoryUrl(threadId, before))
   if (response.status === 404) return undefined
-  if (!response.ok) throw new Error(await describeFailedResponse(response))
-  const payload: unknown = await response.json()
-  if (!Check(EnsoThreadHistory, payload)) throw new Error("the server's history payload did not match its schema")
-  return payload
+  return checkedPayload(response, EnsoThreadHistory, "the server's history payload did not match its schema")
 }
 
 /**
