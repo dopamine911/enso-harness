@@ -1,12 +1,11 @@
 import { type EnsoProject, type EnsoStoredThread, EnsoTreesListing } from '@enso/core'
 import { TriangleAlertIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Check } from 'typebox/value'
+import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { DeleteThreadButton } from './delete-thread-dialog.tsx'
 import { describeSize, formatBytes, projectDiskUsage, type SizeSum, totalOf } from './disk-usage.ts'
-import { describeFailedResponse } from './stored-threads.ts'
+import { type ListingRead, type ListingRoute, type ListingState, useListing } from './settings-listing.ts'
 
 /**
  * Settings' Storage (#578): what thread trees cost on disk, per project — each tree's size, whether
@@ -16,56 +15,21 @@ import { describeFailedResponse } from './stored-threads.ts'
  * such, never as 0.
  */
 
-export type TreesRead =
-  | { readonly kind: 'loading' }
-  | { readonly kind: 'read'; readonly listing: EnsoTreesListing }
-  | { readonly kind: 'failed'; readonly reason: string }
+export type TreesRead = ListingRead<EnsoTreesListing>
 
 /** `GET /api/trees`, checked against its schema as the delete preview is (`delete-thread.ts`). */
-async function readTrees(fetchImpl: FetchLike): Promise<TreesRead> {
-  try {
-    const response = await fetchImpl('/api/trees')
-    if (!response.ok) return { kind: 'failed', reason: await describeFailedResponse(response) }
-    const payload: unknown = await response.json()
-    if (!Check(EnsoTreesListing, payload))
-      return { kind: 'failed', reason: "the server's trees did not match its schema" }
-    return { kind: 'read', listing: payload }
-  } catch (error) {
-    return { kind: 'failed', reason: error instanceof Error ? error.message : String(error) }
-  }
+const TREES_ROUTE: ListingRoute<typeof EnsoTreesListing> = {
+  route: '/api/trees',
+  schema: EnsoTreesListing,
+  mismatch: "the server's trees did not match its schema",
 }
 
 /**
- * The page's `fetch`, read at call time and called as a function. ⚠ Never `globalThis.fetch`
- * itself as a default: the dialog calls `target.fetch(…)`, and a browser's `fetch` refuses any
- * `this` but the window ("Illegal invocation") — the delete failed live while every scripted test
- * passed. Module-level, so the effect that reads the listing sees one function across renders.
- */
-const pageFetch: FetchLike = (input, init) => fetch(input, init)
-
-/**
  * `GET /api/trees`, read when the caller mounts and again on `reload` — Storage reloads after a
- * delete, as the tree is gone. The Projects page reads it once (#870). A read answered after the
- * caller unmounted or reloaded is dropped.
+ * delete, as the tree is gone. The Projects page reads it once (#870).
  */
-export function useTreesListing(fetchImpl: FetchLike | undefined): {
-  readonly read: TreesRead
-  readonly fetchNow: FetchLike
-  readonly reload: () => void
-} {
-  const fetchNow = fetchImpl ?? pageFetch
-  const [read, setRead] = useState<TreesRead>({ kind: 'loading' })
-  const [generation, setGeneration] = useState(0)
-  useEffect(() => {
-    let current = true
-    void readTrees(fetchNow).then((next) => {
-      if (current) setRead(next)
-    })
-    return (): void => {
-      current = false
-    }
-  }, [fetchNow, generation])
-  return { read, fetchNow, reload: () => setGeneration((count) => count + 1) }
+export function useTreesListing(fetchImpl: FetchLike | undefined): ListingState<EnsoTreesListing> {
+  return useListing(fetchImpl, TREES_ROUTE)
 }
 
 /**

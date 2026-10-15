@@ -241,6 +241,41 @@ export {
   readRecordedMode,
   recordedPermissionMode,
 } from './permission-modes.ts'
+export { closedObject, NonEmptyString } from './closed-schema.ts'
+export {
+  clampEffort,
+  ENSO_DEFAULT_ROLE,
+  ENSO_MODEL_ROLE_ENTRY,
+  EnsoModelPreset,
+  EnsoModelRole,
+  EnsoModelRoles,
+  EnsoModelsConfig,
+  EnsoModelsSettings,
+  EnsoModelTarget,
+  type EnsoRoleResolution,
+  EnsoThreadModelRole,
+  MODEL_PRESET_NAME_MAX,
+  MODEL_ROLE_NAME_SOURCE,
+  readEnsoModelsConfig,
+  resolveModelRole,
+  SUGGESTED_MODEL_ROLES,
+  THINKING_LEVEL_ORDER,
+  threadModelRole,
+  threadModelRoleOf,
+  unavailableReason,
+} from './model-roles.ts'
+export {
+  EnsoAddableProvider,
+  EnsoProvider,
+  EnsoProviderAuth,
+  EnsoProviderAuthType,
+  EnsoProviderLogin,
+  EnsoProviderLoginAnswer,
+  EnsoProviderLoginQuestion,
+  EnsoProviderLoginRequest,
+  EnsoProviderLogoutRequest,
+  EnsoProvidersListing,
+} from './providers.ts'
 export {
   decisionAction,
   ENSO_DRAFTED_RULE_GROUPS,

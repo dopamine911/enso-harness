@@ -6,6 +6,8 @@ import {
   ENSO_PROMPT_BODY_MAX_BYTES,
   ENSO_PROMPT_MAX_IMAGES,
   ensoLogger,
+  type EnsoRoleResolution,
+  type HostCommandOption,
 } from '@enso/core'
 import {
   abortThread,
@@ -54,12 +56,14 @@ import type { ThreadReadDeps } from './thread-read.ts'
 
 const log = ensoLogger('server', 'http')
 
-/** What the thread controls take from the server (#810): the follow's reach, the live-or-cold read, the library's pick. */
+/** What the thread controls take from the server (#810): the follow's reach, the live-or-cold read, the library's pick, the role resolver (#904). */
 export interface ThreadControlRoutesState {
   readonly followDeps: FollowRouteDeps
   readonly threadRead: ThreadReadDeps
   /** A prompt reference as the thread's system prompt, or why not (`prompt-routes.ts`). */
   readonly pickSystemPrompt: (threadId: string, ref: string) => SystemPromptPick
+  /** A role resolved from the user's config against the models on offer (#904, `models-routes.ts`). */
+  readonly resolveRole: (name: string, options: readonly HostCommandOption[]) => EnsoRoleResolution
 }
 
 /** The thread controls' handlers (#810): the two that read no body, and the ones that read the request. */
@@ -82,7 +86,7 @@ export type ThreadControlRoutes = Readonly<
 >
 
 export function createThreadControlRoutes(state: ThreadControlRoutesState): ThreadControlRoutes {
-  const { followDeps, threadRead, pickSystemPrompt } = state
+  const { followDeps, threadRead, pickSystemPrompt, resolveRole } = state
 
   async function respondToPrompt(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readJsonBody(request, response, {
@@ -307,9 +311,10 @@ export function createThreadControlRoutes(state: ThreadControlRoutesState): Thre
   }
 
   /**
-   * `POST …/configure` (#391): a new session's model, effort and mode, applied together — the
-   * launch panel's Start (#877). A refused step answers 422 with its JSON refusal (the step and
-   * the reason), so the panel can say which; a run in flight is the usual 409 text.
+   * `POST …/configure` (#391): a new session's system prompt, model, effort and mode — or a role
+   * (#904) in place of the model and effort — applied together: the launch panel's Start (#877). A
+   * refused step answers 422 with its JSON refusal (the step and the reason), so the panel can say
+   * which; a run in flight is the usual 409 text.
    */
   async function respondToConfigure(
     threadId: string,
@@ -322,7 +327,10 @@ export function createThreadControlRoutes(state: ThreadControlRoutesState): Thre
       parse: readConfigureBody,
     })
     if (configuration === undefined) return
-    const outcome = await configureThread(followDeps, threadId, configuration, (ref) => pickSystemPrompt(threadId, ref))
+    const outcome = await configureThread(followDeps, threadId, configuration, {
+      pickSystemPrompt: (ref) => pickSystemPrompt(threadId, ref),
+      resolveRole,
+    })
     if (outcome.status === 409) {
       log.warn('configure refused (409): {reason}', { threadId, reason: outcome.reason })
       refuseWith(response, outcome)

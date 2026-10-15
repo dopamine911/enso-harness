@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { EnsoStoredThread, HostCommandOption } from '@enso/core'
-import { effortRange, modelGroups, RECENT_MODELS, rankOption, recentModelIds } from '../model-picker.tsx'
+import type { EnsoModelsConfig, EnsoStoredThread, HostCommandOption } from '@enso/core'
+import { effortRange, modelGroups, RECENT_MODELS, rankOption, recentModelIds, roleRows } from '../model-picker.tsx'
 
 /**
  * The model picker's rules (#880), over plain options: the Recent group, the provider groups and
@@ -196,3 +196,79 @@ test('each row’s effort range is its first and last level, its one level, or n
   expect(effortRange(model('a', 'One', { thinkingLevels: ['off'] }))).toBe('off')
   expect(effortRange(model('a', 'One'))).toBeUndefined()
 })
+
+// #904: Favorites lead, in the person's order; one not on offer or logged out is listed, unavailable — never dropped.
+test('Favorites lead in their saved order, unavailable ones shown disabled, and a favorite is not repeated unfiltered', () => {
+  const options = [model('a', 'One'), model('a', 'Two'), model('b', 'Three'), model('c', 'Spare', { loggedIn: false })]
+  const models = { favorites: ['b/three', 'gone/model', 'c/spare', 'a/one'] }
+  const groups = modelGroups(options, ['a/one', 'a/two'], '', models)
+  expect(groups.map((group) => [group.heading, group.rows.map((row) => [row.option.label, row.unavailable])])).toEqual([
+    [
+      'Favorites',
+      [
+        ['Three', false],
+        ['gone/model', true],
+        ['Spare', true],
+        ['One', false],
+      ],
+    ],
+    ['Recent', [['Two', undefined]]],
+  ])
+  // Filtered: a favorite matches by its name, and still shows in its provider's group.
+  expect(shapeWith(options, models, 'thr')).toEqual([
+    ['Favorites', ['Three']],
+    ['b', ['Three']],
+  ])
+})
+
+test('a hidden provider is left out of Recent and the provider groups, but its favorite stays', () => {
+  const options = [model('a', 'One'), model('hid', 'Secret'), model('hid', 'Other')]
+  const models = { favorites: ['hid/secret'], hiddenProviders: ['hid'] }
+  expect(
+    modelGroups(options, ['hid/other', 'a/one'], '', models).map((group) => [
+      group.heading,
+      group.rows.map((row) => row.option.label),
+    ]),
+  ).toEqual([
+    ['Favorites', ['Secret']],
+    ['Recent', ['One']],
+  ])
+  expect(shapeWith(options, models, 'other')).toEqual([])
+})
+
+test('roles: default first then A–Z, each resolved with its clamped effort; refused ones kept; search by name or model', () => {
+  const options = [
+    model('a', 'One', { thinkingLevels: ['off', 'low', 'high'] }),
+    model('b', 'Two', { loggedIn: false }),
+  ]
+  const models = {
+    roles: {
+      review: { model: 'a/one', effort: 'medium' },
+      default: { model: 'a/one', effort: 'low' },
+      deep: { model: 'b/two' },
+    },
+  }
+  const rows = roleRows(models, options, '')
+  expect(rows.map((row) => row.role)).toEqual(['default', 'deep', 'review'])
+  expect(rows.map((row) => row.resolution.kind)).toEqual(['resolved', 'refused', 'resolved'])
+  const review = rows[2]?.resolution
+  expect(review?.kind === 'resolved' ? [review.modelName, review.effort, review.clamped] : review).toEqual([
+    'One',
+    'high',
+    true,
+  ])
+  expect(roleRows(models, options, 'rev').map((row) => row.role)).toEqual(['review'])
+  expect(roleRows(models, options, 'one').map((row) => row.role)).toEqual(['default', 'review'])
+})
+
+/** A group as its heading and its rows' labels, under a models section. */
+function shapeWith(
+  options: readonly HostCommandOption[],
+  models: EnsoModelsConfig,
+  search: string,
+): [string, string[]][] {
+  return modelGroups(options, [], search, models).map((group) => [
+    group.heading,
+    group.rows.map((row) => row.option.label),
+  ])
+}

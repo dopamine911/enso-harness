@@ -16,6 +16,7 @@ import type {
   EnsoSessionUsage,
   EnsoSystemPromptChoice,
   EnsoSystemPromptSection,
+  EnsoThreadModelRole,
   EnsoTranscriptEntry,
   EnsoTreesListing,
   HostFlowOutcome,
@@ -45,7 +46,9 @@ import {
   type ModelThinking,
 } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
+import { sameModelRole } from '../../host/hosted-thread.ts'
 import type { HostedThread, HostedThreadInspection, SystemPromptPreviewOutcome } from '../../host/live-thread.ts'
+import type { HostProviderFacts, HostProviders } from '../../host/provider-settings.ts'
 import { decideSystemPrompt } from '../../host/system-prompt.ts'
 import type { ThreadDeleteOutcome } from '../../host/thread-delete.ts'
 import type { ThreadRenameOutcome, ThreadRestoreOutcome } from '../../host/thread-log-edits.ts'
@@ -151,6 +154,8 @@ export interface FakeThreadRecord {
   systemPrompt: EnsoSystemPromptChoice | undefined
   /** Every resolution the server recorded (#466), in order; the real host appends each to the branch. */
   readonly incidentResolutions: EnsoIncidentResolved[]
+  /** Every role record the server appended (#904), in order; `null` ends one. */
+  readonly modelRoles: (EnsoThreadModelRole | null)[]
   aborts: number
   queueClears: number
   disposed: number
@@ -256,6 +261,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     queueClears: 0,
     continues: 0,
     incidentResolutions: [],
+    modelRoles: [],
     systemPrompt: undefined,
     disposed: 0,
     queue: { interrupting: [], enqueued: [] },
@@ -274,6 +280,10 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     for (const listener of listeners) listener(observation)
   }
   const parts: FakeThreadParts = { record, emit, open }
+  // The real host's rule (#904), by its own comparison: a record equal to the current one appends nothing.
+  const setModelRole = (role: EnsoThreadModelRole | null): void => {
+    if (!sameModelRole(record.modelRoles.at(-1) ?? null, role)) record.modelRoles.push(role)
+  }
   const runtime: ThreadRuntime = {
     prompt: (request: PromptRequest) => {
       record.prompts.push(request)
@@ -299,7 +309,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     listCommands: () => fakeHostRows(record),
     modelState: () => record.modelState,
     sessionUsage: () => record.sessionUsage,
-    runHostCommand: (run: EnsoHostCommandRun) => {
+    runHostCommand: (run: EnsoHostCommandRun, options?: { readonly byRole?: boolean }) => {
       // What the real host does: the shared decision, the set, then the state said as `model`.
       record.hostCommands.push(run)
       const decision = decideHostCommand(run, record.modelState, FAKE_MODELS)
@@ -308,6 +318,9 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
         decision.kind === 'model'
           ? { ...record.modelState, model: { ...decision.model } }
           : { ...record.modelState, thinkingLevel: decision.level }
+      // A model or effort chosen by hand ends the role (#904), as the real host's does; a role's own
+      // step leaves the record to its caller.
+      if (options?.byRole !== true) setModelRole(null)
       emit({ kind: 'model', ...record.modelState })
       return Promise.resolve()
     },
@@ -365,6 +378,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.systemPrompt = choice ?? undefined
       return undefined
     },
+    setModelRole,
     resolveIncident: (incidentId: string, resolution: EnsoIncidentResolution) => {
       // The real host's rule (#466), over the inspection's branch and what was resolved since.
       const branch = [
@@ -517,6 +531,86 @@ const FAKE_EMPTY_CONTEXT: BranchContext = {
 }
 
 /**
+ * The fake's providers (#904): `fake`, an API-key provider nobody set up; `faux-sub`, a
+ * subscription whose login sends a page and asks for the code; and `other`, whose subscription
+ * login asks a region (a `select`) and then a name for the account (`text`), storing `region:name`.
+ * A login stores into `stored`, the fake's credential store. A key starting `bad-` is refused by a
+ * message that QUOTES it, as a careless provider might: what the route says must not.
+ */
+/** The fake providers, and the credentials their logins stored. */
+export type FakeProviders = HostProviders & { readonly stored: Map<string, string> }
+
+export function createFakeProviders(): FakeProviders {
+  const stored = new Map<string, string>()
+  const facts = (): HostProviderFacts[] => [
+    {
+      id: 'fake',
+      name: 'Fake AI',
+      loggedIn: stored.has('fake'),
+      via: stored.has('fake') ? 'api-key' : undefined,
+      stored: stored.has('fake'),
+      offersOAuth: false,
+      offersApiKey: true,
+      registered: false,
+      models: [{ id: 'fake/one', name: 'Fake One' }],
+    },
+    {
+      id: 'faux-sub',
+      name: 'Faux Subscription',
+      loggedIn: stored.has('faux-sub'),
+      via: stored.has('faux-sub') ? 'subscription' : undefined,
+      stored: stored.has('faux-sub'),
+      offersOAuth: true,
+      offersApiKey: false,
+      registered: true,
+      models: [{ id: 'faux-sub/two', name: 'Faux Two' }],
+    },
+    {
+      id: 'other',
+      name: 'Other',
+      loggedIn: false,
+      via: undefined,
+      stored: false,
+      offersOAuth: true,
+      offersApiKey: true,
+      registered: false,
+      models: [],
+    },
+  ]
+  return {
+    stored,
+    list: () => Promise.resolve(facts()),
+    async logIn(providerId, authType, interaction) {
+      if (providerId === 'other' && authType === 'oauth') {
+        const region = await interaction.ask({
+          type: 'select',
+          message: 'Choose a region',
+          options: [
+            { id: 'eu', label: 'Europe' },
+            { id: 'us', label: 'United States' },
+          ],
+        })
+        const name = await interaction.ask({ type: 'text', message: 'Name this account', placeholder: 'work' })
+        stored.set(providerId, `${region}:${name}`)
+        return
+      }
+      if (providerId === 'faux-sub') {
+        interaction.notify({ type: 'auth_url', url: 'https://login.example/authorize' })
+        stored.set(providerId, await interaction.ask({ type: 'manual_code', message: 'Paste the code' }))
+        return
+      }
+      const key = await interaction.ask({ type: 'secret', message: 'Enter Fake AI API key' })
+      if (key.startsWith('bad-')) throw new Error(`Fake AI rejected the key ${key}`)
+      stored.set(providerId, key)
+    },
+    logOut(providerId) {
+      stored.delete(providerId)
+      return Promise.resolve()
+    },
+  }
+}
+
+/**
  * The one fake of the storage seam (`docs/seams/storage.md`): an `AgentHost` whose listing
  * and branch reads come from `stored`, and whose `createSession` is the caller's — that is
  * where a test counts what was built and hands out a `createFakeHostedThread`. Its mode
@@ -585,6 +679,7 @@ export function createFakeAgentHost(
     },
     freshPermissionMode: () => fresh,
     catalogue: () => Promise.resolve(fakeCatalogue()),
+    providers: createFakeProviders(),
     // A project nobody decided is untrusted (#470); a test about a trusted one replaces this.
     projectTrust: (cwd: string) => ({ directory: cwd, trusted: false }),
     storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {

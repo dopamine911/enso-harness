@@ -1,12 +1,14 @@
+import { statSync } from 'node:fs'
 import { type EnsoConfig, type EnsoConfigParseResult, parseEnsoConfig } from '@enso/core'
 import { ensoConfigPath } from '@enso/core/paths'
 import { bytesOf, conflictOf, etagOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
 
 /**
  * The user's `config.json` as Settings' sections read and save it (Security #933, Projects & threads
- * #934). ⚠ IT IS A POLICY FILE THAT FAILS CLOSED: every consumer refuses an unreadable one, so a
- * section's save is the whole file, every key the section does not own kept as it is on disk,
- * validated with `parseEnsoConfig` before it replaces the file atomically; a file that is already
+ * #934, the `models` section of Providers and Roles #904). ⚠ IT IS A POLICY FILE THAT FAILS CLOSED:
+ * every consumer refuses an unreadable one, so a section's save is the whole file, every key the
+ * section does not own kept as it is on disk, validated with `parseEnsoConfig` before it replaces
+ * the file atomically, in the mode the file had (0600 when there was none); a file that is already
  * unreadable is never written over (its owner fixes it by hand: the page cannot know what they
  * meant). Under the `ETag` the page read, so a hand edit made meanwhile is never overwritten unseen.
  */
@@ -55,7 +57,8 @@ export function writeConfigSections<Read>(
   const configPath = ensoConfigPath(home)
   const conflict = conflictOf(configPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
-  const current = parseEnsoConfig(bytesOf(configPath)?.toString('utf8'))
+  const bytes = bytesOf(configPath)
+  const current = parseEnsoConfig(bytes?.toString('utf8'))
   if (current.kind === 'unreadable') {
     return {
       kind: 'refused',
@@ -65,6 +68,8 @@ export function writeConfigSections<Read>(
   const text = `${JSON.stringify(replace(current.config), null, 2)}\n`
   const checked = parseEnsoConfig(text)
   if (checked.kind === 'unreadable') return { kind: 'refused', reason: `nothing was saved: ${checked.reason}` }
-  writeAtomically(configPath, text)
+  // The rename installs the temporary file's inode, so it carries the mode: the file's own, else
+  // 0600 — never the umask's default, which would open the user's config from the second save on.
+  writeAtomically(configPath, text, bytes === undefined ? 0o600 : statSync(configPath).mode & 0o777)
   return { kind: 'written', read: reread() }
 }

@@ -41,6 +41,7 @@ import {
   ENSO_INCIDENT_RESOLVED_CHANNEL,
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_RUN_STOPPED_ENTRY,
+  ENSO_MODEL_ROLE_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoObservation,
   type EnsoIncidentOpened,
@@ -61,6 +62,7 @@ import {
   sessionIncidentsOf,
   withRule,
   readEnsoRunContext,
+  threadModelRole,
   threadTrustsProject,
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
@@ -107,6 +109,7 @@ import {
   writePermissionPolicy,
 } from '../permission-policy-file.ts'
 import { projectTrusted, saveProjectTrust } from '../project-trust.ts'
+import type { HostProviderFacts } from '../provider-settings.ts'
 import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
 import { ThreadDeleted, type ThreadDeleteOutcome } from '../thread-delete.ts'
 import { recordedModelOf, transcriptOf } from '../transcript.ts'
@@ -2742,6 +2745,10 @@ test('⚠ a dispose while the thread moves stops it: during the mint the tree is
   const duringBuild = runPrompt(moving, 'first')
   await building.promise
   expect(moving.runtime.setSystemPrompt(null)).toContain('is moving onto its tree')
+  // A role record too (PR #973 review): it would land on the checkout session and be lost.
+  expect(() =>
+    moving.runtime.setModelRole({ role: 'review', provider: 'enso-faux', modelId: 'faux-1', thinkingLevel: 'off' }),
+  ).toThrow('is moving onto its tree')
   const modeRefused = Promise.withResolvers<string>()
   moving.runtime.setPermissionMode('plan', {
     onAccepted: () => modeRefused.reject(new Error('accepted')),
@@ -2876,6 +2883,20 @@ test('an effort chosen alone before the first prompt survives the move too, on t
   })
   expect(calledWith).toEqual(['faux-1'])
   expect(hosted.runtime.modelState()).toMatchObject({ model: { id: 'faux-1' }, thinkingLevel: 'high' })
+})
+
+// PR #973 review: the Start's role is recorded before the first prompt, in the checkout; the move onto
+// the tree carries it with the model and effort it ran, so the first run's chip and a reload still say it.
+test('a role recorded before the first prompt survives the move onto its tree (#904)', async () => {
+  const record = { role: 'deep', provider: 'enso-faux', modelId: 'faux-2', thinkingLevel: 'high' }
+  const { hosted, project, calledWith } = await firstRunAfter(async (thread) => {
+    await thread.runtime.runHostCommand({ name: 'model', value: 'enso-faux/faux-2' }, { byRole: true })
+    await thread.runtime.runHostCommand({ name: 'thinking', value: 'high' }, { byRole: true })
+    thread.runtime.setModelRole(record)
+  })
+  expect(hosted.inspect().cwd).not.toBe(project)
+  expect(calledWith).toEqual(['faux-2'])
+  expect(threadModelRole(hosted.inspect().entries)).toEqual(record)
 })
 
 /**
@@ -5611,4 +5632,131 @@ test('⚠ Stop cancels a login waiting on its provider: said as cancelled, nothi
   // Nothing stored: `/logout` offers no Faux Device credential.
   const logout = hosted.runtime.listCommands().find((command) => command.name === 'logout')
   expect(logout?.options?.map((option) => option.id) ?? []).not.toContain('faux-device')
+})
+
+// #904 decision 5: a thread started with a role records the role's name with the model and effort it
+// resolved to, through pi — said live, kept by the file, carried by a fork — and a model changed by
+// hand afterwards ends it. A role edited in the config later rewrites nothing: the record is the thread's.
+test('a role is recorded with what it ran: live, in the file, on a fork; a hand change ends it (#904)', async () => {
+  const { host, project } = recordingHost(2)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  const events = collectEvents(hosted)
+  const record = { role: 'review', provider: 'enso-faux', modelId: 'faux-1', thinkingLevel: 'off' }
+  hosted.runtime.setModelRole(record)
+  // Chosen again, it is not news (PR #973 review): one entry.
+  hosted.runtime.setModelRole(record)
+  expect(events.filter((event) => event.kind === 'custom-entry' && event.customType === ENSO_MODEL_ROLE_ENTRY)).toEqual(
+    [{ kind: 'custom-entry', customType: ENSO_MODEL_ROLE_ENTRY, data: record }],
+  )
+  await runPrompt(hosted, 'first')
+  await runPrompt(hosted, 'second')
+  const second = hosted
+    .inspect()
+    .entries.find(
+      (entry) =>
+        entry.kind === 'message' &&
+        entry.role === 'user' &&
+        entry.parts.some((part) => part.type === 'text' && part.text === 'second'),
+    )
+  hosted.runtime.dispose()
+
+  const forked = await host.forkThread(threadId, second?.id ?? '')
+  if (forked.kind !== 'forked') throw new Error(`fork refused: ${JSON.stringify(forked)}`)
+  const fork = await host.createSession(forked.threadId, () => project)
+  openSessions.push(fork)
+  expect(threadModelRole(fork.inspect().entries)).toEqual(record)
+
+  // A switch to another role: the role's own step (`byRole`) ends nothing, and the new role alone is
+  // recorded — never the first one ended in between (PR #973 review).
+  const roleRecords = (): unknown[] =>
+    fork
+      .inspect()
+      .entries.flatMap((entry) =>
+        entry.kind === 'custom' && entry.customType === ENSO_MODEL_ROLE_ENTRY ? [entry.data] : [],
+      )
+  const quick = { ...record, role: 'quick' }
+  await fork.runtime.runHostCommand(
+    { name: 'thinking', value: fork.runtime.modelState().thinkingLevel },
+    { byRole: true },
+  )
+  fork.runtime.setModelRole(quick)
+  expect(roleRecords()).toEqual([record, quick])
+
+  // A thinking level chosen by hand is the person's, not the role's: the record ends.
+  await fork.runtime.runHostCommand({ name: 'thinking', value: fork.runtime.modelState().thinkingLevel })
+  expect(threadModelRole(fork.inspect().entries)).toBeNull()
+  expect(roleRecords()).toEqual([record, quick, null])
+})
+
+// #904: Settings' providers are read from the runtime the model list is: an extension's account slot
+// is listed as registered, with its models, and says HOW it is logged in once it is — a subscription
+// stored — and nothing once logged out. Through real pi: the fake host's facts are declared, not read.
+test("Settings' providers: an extension's slot is listed registered with its models; logged in, it is a stored subscription; logged out, nothing (#904)", async () => {
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-host-providers-')),
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxOAuthProvider],
+  })
+  openSessions.push(await host.createSession(crypto.randomUUID(), () => repoRoot))
+  const slot = async (): Promise<HostProviderFacts | undefined> =>
+    (await host.providers.list()).find((provider) => provider.id === 'faux-oauth')
+  const loggedOut = {
+    id: 'faux-oauth',
+    loggedIn: false,
+    via: undefined,
+    stored: false,
+    offersOAuth: true,
+    registered: true,
+    models: [{ id: 'faux-oauth/faux-oauth-1', name: 'Faux OAuth One' }],
+  }
+  expect(await slot()).toMatchObject(loggedOut)
+
+  const asked: string[] = []
+  await host.providers.logIn('faux-oauth', 'oauth', {
+    signal: AbortSignal.timeout(15_000),
+    ask: (question) => {
+      asked.push(question.type)
+      return Promise.resolve('the-code')
+    },
+    notify: (): void => undefined,
+  })
+  expect(asked).toEqual(['manual_code'])
+  expect(await slot()).toMatchObject({ ...loggedOut, loggedIn: true, via: 'subscription', stored: true })
+
+  await host.providers.logOut('faux-oauth', AbortSignal.timeout(15_000))
+  expect(await slot()).toMatchObject(loggedOut)
+})
+
+// #904: a login from Settings is offered by EVERY live thread's /model at once (`refreshAll`), not
+// only by the session it ran through — the latest live one, the latest bound having been disposed.
+test("a login from Settings changes every live thread's /model at once, the latest thread bound having been disposed (#904)", async () => {
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-host-providers-')),
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxOAuthProvider],
+  })
+  const live = await host.createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(live)
+  openSessions.push(await host.createSession(crypto.randomUUID(), () => repoRoot))
+  const latest = await host.createSession(crypto.randomUUID(), () => repoRoot)
+  latest.runtime.dispose()
+  const slotModel = (): { loggedIn?: boolean } | undefined =>
+    live.runtime
+      .listCommands()
+      .find((command) => command.source === 'host' && command.name === 'model')
+      ?.options?.find((option) => option.id === 'faux-oauth/faux-oauth-1')
+  expect(slotModel()?.loggedIn).toBe(false)
+
+  await host.providers.logIn('faux-oauth', 'oauth', {
+    signal: AbortSignal.timeout(15_000),
+    ask: () => Promise.resolve('the-code'),
+    notify: (): void => undefined,
+  })
+  expect(slotModel()?.loggedIn).toBe(true)
 })

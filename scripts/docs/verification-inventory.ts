@@ -333,6 +333,14 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
     exported: true,
   },
   {
+    file: 'packages/web/src/server/__tests__/fake-hosted-thread.ts',
+    symbol: 'createFakeProviders',
+    label: '`createFakeProviders`',
+    seam: 'the providers port (#904): `HostProviders` over an in-memory credential map',
+    productionSurface: 'Settings providers listing, login (API key and subscription), logout',
+    exported: true,
+  },
+  {
     file: 'packages/web/src/server/__tests__/follow-reader.ts',
     symbol: 'openFollow',
     label: '`openFollow`',
