@@ -53,7 +53,10 @@ afterEach(async () => {
   setPageHealthTimingForTest()
   setRunStatusTimingForTest()
 })
-afterAll(releaseDom)
+afterAll(async () => {
+  globalThis.fetch = originalFetch
+  await releaseDom()
+})
 
 function sleep(ms: number): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>()
@@ -64,10 +67,10 @@ const noop = (): void => undefined
 
 /** Whether the server answers the page's live-view check — the page's own `fetch` (`live-view-check.ts`). */
 let reachable = false
-globalThis.fetch = ((): Promise<Response> =>
-  reachable
-    ? Promise.resolve(new Response('{}'))
-    : Promise.reject(new TypeError('Failed to fetch'))) as unknown as typeof fetch
+// Restored in `afterAll`: test files share one process, and a later one must get the real `fetch`.
+const originalFetch = globalThis.fetch
+globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit): Promise<Response> =>
+  reachable ? Promise.resolve(new Response('{}')) : Promise.reject(new TypeError('Failed to fetch'))) as typeof fetch
 
 function LiveViewCheck(): null {
   usePageLiveViewCheck()
