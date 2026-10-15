@@ -70,7 +70,8 @@ const heading = (name: string): MarkTarget => ({ role: 'heading', name, exact: t
  * Incidents (#464, #466, #467, #468) and the command judge (#469, #532). The shots are of the
  * page's own thread (`INCIDENT_SCRIPT`), played after every other page's: pi goes around a `curl`
  * refusal, the incident opens and halts, pi files its report, and the second shot resolves it. The
- * judge has no view in the web app, so it is said in words, from its config and its commands.
+ * judge's verdicts have no view in the web app (its settings do: Settings › Security, on the
+ * Settings feature page), so they are said in words, from its config and its commands.
  */
 export const INCIDENTS: FeatureSpec = {
   id: 'incidents',
@@ -90,7 +91,7 @@ export const INCIDENTS: FeatureSpec = {
   opens: [
     '{steps}. The card sits at the end of the chat, below the last answer.',
     [
-      'Halting and the judge are set in your `config.json` under `ENSO_HOME`. A project cannot set them:',
+      'Halting, the thresholds and the judge are set in **Settings › Security** (the card\'s "halting is off" opens it), which writes your `config.json` under `ENSO_HOME`. A project cannot set them. In the file:',
       '',
       '```json',
       '{ "security": { "incidents": { "halt": true }, "judge": { "backend": "jev" } } }',

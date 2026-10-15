@@ -99,7 +99,8 @@ function PendingTier({
       )}
       {tier.current === null && tier.problem !== undefined ? null : (
         <div className="-mx-4">
-          <FileDiff change={changeOf(tier, tier.state)} />
+          {/* The patch compares approved and current text, not a thread's work tree: no unchanged lines to expand. */}
+          <FileDiff change={changeOf(tier, tier.state)} readFile={undefined} />
         </div>
       )}
       <Button

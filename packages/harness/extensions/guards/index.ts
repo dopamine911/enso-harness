@@ -10,6 +10,7 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type CommandJudge,
+  ENSO_JUDGE_KEY_NAME,
   type EnsoIncidentPolicy,
   ensoLogger,
   piVersionSupported,
@@ -31,7 +32,7 @@ import {
   sessionIncidentPolicy,
   userJudgeConfig,
 } from '../../core/index.ts'
-import { createJevJudge, createLocalJudge, JEV_KEY_NAME } from './judge-backends.ts'
+import { createJevJudge, createLocalJudge } from './judge-backends.ts'
 
 /**
  * Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. The policy, its decision and the
@@ -296,7 +297,7 @@ function productionCommandJudge(): CommandJudge | undefined {
   }
   if (config.backend === 'off') return undefined
   if (config.backend === 'local') return createLocalJudge({ ...config.local, timeoutMs: LOCAL_JUDGE_TIMEOUT_MS })
-  return createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: JUDGE_TIMEOUT_MS })
+  return createJevJudge({ apiKey: () => readSecret(home, ENSO_JUDGE_KEY_NAME), timeoutMs: JUDGE_TIMEOUT_MS })
 }
 
 /** The pi entry point — the real analyzer, this checkout's root (or the installed package's), the user's config and the running pi's version, wired at the composition root. */

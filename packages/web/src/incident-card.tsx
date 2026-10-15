@@ -27,6 +27,7 @@ import { Field, FieldLabel, FieldLegend, FieldSet } from './components/ui/field.
 import { RadioGroup, RadioGroupItem } from './components/ui/radio-group.tsx'
 import type { IncidentResolveOutcome } from './follow-connection.ts'
 import { cn } from './lib/utils.ts'
+import { LaunchActionsContext } from './pane-context.ts'
 import { PILL } from './step-pill.ts'
 import { useStore, useThreadStores } from './store.ts'
 import { ringElement } from './transcript-reveal.ts'
@@ -116,9 +117,27 @@ function Observed({ record }: { readonly record: EnsoIncidentRecord }): React.Re
 const FACTS = 'gap-y-0.5 text-detail'
 
 function Suspended({ record }: { readonly record: EnsoIncidentRecord }): React.ReactNode {
+  const actions = useContext(LaunchActionsContext)
   const { suspended } = record.opened
   if (suspended.length === 0) {
-    return <p className="text-sm">nothing suspended — halting is off (security.incidents.halt)</p>
+    // The hint opens the control (#933) rather than naming a key to edit by hand; a pane no page holds says where it is.
+    return (
+      <p className="text-sm">
+        nothing suspended — halting is off (
+        {actions === undefined ? (
+          'Settings › Security'
+        ) : (
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={() => actions.openSettings('security')}
+          >
+            Settings › Security
+          </button>
+        )}
+        )
+      </p>
+    )
   }
   return (
     <>

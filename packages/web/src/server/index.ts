@@ -13,6 +13,7 @@ import { createProjectRoutes } from './project-routes.ts'
 import { createProjectRegistry } from './projects.ts'
 import { createPromptLibrary, type PromptLibrary } from './prompt-library.ts'
 import { createPromptRoutes } from './prompt-routes.ts'
+import { createSecurityRoutes } from './security-routes.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createThreadControlRoutes } from './thread-control-routes.ts'
 import { createThreadReadRoutes } from './thread-read-routes.ts'
@@ -258,6 +259,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const { dispatchPromptRoute } = promptRoutes
   const { dispatchPermissionRoute } = permissions
+  const { dispatchSecurityRoute } = createSecurityRoutes({ ensoHome: options.ensoHome })
   const { previews } = reads
 
   /**
@@ -316,7 +318,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom
   // shape is the #27/#34 teardown ordering (#82). What is left in the callback is the one check
-  // every request is admitted by, then the two dispatchers and the miss.
+  // every request is admitted by, then one dispatcher per route family, in order, and the miss.
   const server = createServer((request, response) => {
     if (!fromTrustedOrigin(request)) {
       log.warn('request refused: {method} {url} from host {host} origin {origin}', {
@@ -333,6 +335,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (dispatchProjectRoute(request, response)) return
     if (dispatchPromptRoute(request, response)) return
     if (dispatchPermissionRoute(request, response)) return
+    if (dispatchSecurityRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')
