@@ -90,6 +90,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'permission-modes.ts': 'Permission',
     'permission-policy.ts': 'Permission',
     'security-settings.ts': 'Permission, Control',
+    'projects-settings.ts': 'Project, Control',
     'supported-pi-versions.ts': 'Permission',
     'web-fetch.ts': 'Permission, Control',
     'web-search.ts': 'Permission, Control',
