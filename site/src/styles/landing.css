@@ -452,10 +452,9 @@ html:has(.landing) {
   border-top: 1px solid var(--border);
 }
 
-/* A page widens the name column by setting `--pairs-name-column`; the 850px column below holds on every page. */
 .landing .factory-item {
   display: grid;
-  grid-template-columns: var(--pairs-name-column, 145px) 1fr;
+  grid-template-columns: 145px 1fr;
   gap: 20px;
   padding: 18px 0;
   border-bottom: 1px solid var(--border);
@@ -470,12 +469,6 @@ html:has(.landing) {
 
 .landing .factory-item strong {
   font-weight: 500;
-}
-
-/* `Pairs`' `highlightLast`: the row the others lead to. */
-.landing .factory-item.converge span,
-.landing .factory-item.converge strong {
-  color: var(--cyan);
 }
 
 .landing .note {

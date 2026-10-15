@@ -2,7 +2,7 @@ import starlight from '@astrojs/starlight'
 import mermaid from 'astro-mermaid'
 import { defineConfig } from 'astro/config'
 import starlightTypeDoc from 'starlight-typedoc'
-import { REPOSITORY_URL, SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
+import { SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
 import socialCard from './src/social-card.json'
 
 /**
@@ -76,7 +76,7 @@ export default defineConfig({
       ],
       title: 'Enso',
       description: 'The harness architecture, its seams, and the reference material generated from its source.',
-      social: [{ icon: 'github', label: 'GitHub', href: REPOSITORY_URL }],
+      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/dopamine911/zen-harness-foundation' }],
       // Enso's theme (helloen.so's design): Starlight's variables set in `src/styles/theme.css`,
       // the landing's own rules in `src/styles/landing.css`, imported by that page alone.
       customCss: ['./src/styles/theme.css'],

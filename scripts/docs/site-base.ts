@@ -28,10 +28,3 @@ export const SITE_BASE: string = process.env.ENSO_SITE_BASE ?? '/enso'
  * the origin Pages serves from (`https://enso.engineer` since #506).
  */
 export const SITE_URL: string = process.env.ENSO_SITE_URL ?? 'https://example.invalid'
-
-/**
- * The repository the site links to: Starlight's header icon (`site/astro.config.ts`) and the
- * hand-written pages (`site/src/site-urls.ts`). Here, beside the base, because the config cannot
- * import a module that reads `import.meta.env` (#574 review).
- */
-export const REPOSITORY_URL = 'https://github.com/dopamine911/zen-harness-foundation'
