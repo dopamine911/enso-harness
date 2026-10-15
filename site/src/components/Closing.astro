@@ -1,0 +1,15 @@
+---
+/**
+ * The smile that closes a landing-styled page: the divider, the rule and the centred final
+ * section. The slot is the section's content — its heading, any line under it, its actions.
+ */
+import { Image } from 'astro:assets'
+import smile from '../assets/landing/enso-smile.png'
+---
+
+<div class="smile-divider"><Image class="enso-smile" src={smile} alt="" width={54} height={54} /></div>
+<hr class="rule" />
+<section class="final">
+  <Image class="enso-smile" src={smile} alt="" width={74} height={74} />
+  <slot />
+</section>
