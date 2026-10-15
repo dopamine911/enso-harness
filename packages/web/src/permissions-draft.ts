@@ -56,8 +56,8 @@ export function checkSurfaces(permission: EnsoPermissionMap): string[] {
   return [...new Set(surfaceChoices(permission).flatMap((surface) => [surface, ...(SHORTHANDS[surface] ?? [])]))]
 }
 
-/** The decision `pattern` has on `surface`, when it is there. */
-function decisionAt(
+/** The decision `pattern` has on `surface`, when it is there (`*` for a surface written as one decision). */
+export function decisionAt(
   permission: EnsoPermissionMap,
   surface: string,
   pattern: string,
@@ -120,15 +120,15 @@ export function withGroup(permission: EnsoPermissionMap, group: EnsoDraftedRuleG
   )
 }
 
-/** Rows as the engine orders them, run together per surface. */
-export function rowsBySurface(
-  rows: readonly EnsoPolicyRow[],
-): { readonly surface: string; readonly rows: readonly EnsoPolicyRow[] }[] {
-  const groups: { surface: string; rows: EnsoPolicyRow[] }[] = []
-  for (const row of rows) {
+/** Rows as the engine orders them — each a rule, and whatever the table shows beside it — run together per surface. */
+export function rowsBySurface<Shown extends { readonly row: EnsoPolicyRow }>(
+  rows: readonly Shown[],
+): { readonly surface: string; readonly rows: readonly Shown[] }[] {
+  const groups: { surface: string; rows: Shown[] }[] = []
+  for (const shown of rows) {
     const last = groups.at(-1)
-    if (last?.surface === row.surface) last.rows.push(row)
-    else groups.push({ surface: row.surface, rows: [row] })
+    if (last?.surface === shown.row.surface) last.rows.push(shown)
+    else groups.push({ surface: shown.row.surface, rows: [shown] })
   }
   return groups
 }

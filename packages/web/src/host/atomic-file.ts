@@ -58,10 +58,11 @@ function statOrUndefined(path: string): Stats | undefined {
 }
 
 /**
- * Write `text` to the file behind `path` (a link is followed, and survives) in one step: a
- * temporary file beside it, renamed over it. `mode` is the new file's permission bits; it applies
- * because the temporary file is always newly created (`wx`), so the file is never readable wider
- * for a moment — `secrets.env` is written `0600` so. Without it, the process umask decides.
+ * Write `text` (or bytes — a file put back as it was) to the file behind `path` (a link is
+ * followed, and survives) in one step: a temporary file beside it, renamed over it. `mode` is the
+ * new file's permission bits; it applies because the temporary file is always newly created (`wx`),
+ * so the file is never readable wider for a moment — `secrets.env` is written `0600` so. Without
+ * it, the process umask decides.
  *
  * ⚠ THE MODIFICATION TIME MUST MOVE. The permission engine reloads a policy only when the file's
  * `mtimeMs` differs from the one it last read (`config/policy-loader.ts`), and Linux stamps it from
@@ -69,7 +70,7 @@ function statOrUndefined(path: string): Stats | undefined {
  * reset just after a hand edit) kept the OLD policy in force, silently. Found by
  * `agent-host.test.ts`'s reset test.
  */
-export function writeAtomically(path: string, text: string, mode?: number): void {
+export function writeAtomically(path: string, text: string | Uint8Array, mode?: number): void {
   const target = realpathOrSelf(path)
   const previous = statOrUndefined(target)
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
