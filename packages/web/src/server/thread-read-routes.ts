@@ -5,11 +5,11 @@ import {
   type EnsoThreadHistory,
   type EnsoThreadPages,
 } from '@enso/core'
-import { readGitChanges, readGitState, runGit } from '@enso/core/git'
+import { readGitChanges, readGitFileTexts, readGitState, runGit } from '@enso/core/git'
 import { answerJson, refuseWith, type ThreadResponder, type ThreadRouteHandler } from './request-plumbing.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
-import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
+import { createThreadChangedFileRoute, createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
 import { createThreadSecurityReads, replayThresholdsOf } from './thread-incidents-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import {
@@ -56,7 +56,10 @@ export type ThreadReadRoutes = Readonly<
     ThreadResponder
   > &
     Record<
-      'respondWithThreadHistory' | 'respondWithThreadIncidents' | 'respondWithContextRequest',
+      | 'respondWithThreadHistory'
+      | 'respondWithThreadIncidents'
+      | 'respondWithContextRequest'
+      | 'respondWithChangedFile',
       ThreadRouteHandler
     > & {
       previews: PreviewOrigins
@@ -245,6 +248,14 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
     threadTree: (threadId) => host.threadTree(threadId),
     readCopyChanges: (copy) => host.readCopyChanges(copy),
   })
+  // One changed file whole, on both sides (#461): what the Diff view expands the lines between hunks
+  // from — only a file under the repository's scope, from its git or the copy's store.
+  const changedFile = createThreadChangedFileRoute({
+    ...gitDeps,
+    readFileTexts: (repository, paths) => readGitFileTexts(runGit, repository, paths),
+    threadTree: (threadId) => host.threadTree(threadId),
+    readCopyFileTexts: (copy, paths) => host.readCopyFileTexts(copy, paths),
+  })
   // What the thread built (#619): where it works and its pages — and, once it holds one, the origin
   // its preview is served from, a listener of its own (#713, `thread-preview-route.ts`).
   const pagesOf = createThreadPagesRoute(gitDeps)
@@ -322,6 +333,28 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
       (id: string) => `no request ${segment} on thread ${id}`,
     )(threadId, response)
   }
+  /**
+   * `…/changes/file?path=<path>[&oldPath=<path>]` (#461): one changed file whole. No `path` is the
+   * 400 that says to name one; a path outside the scope, the route's 400; nothing to read from, its
+   * 409; a thread held nowhere, 404.
+   */
+  async function respondWithChangedFile(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const query = new URLSearchParams(match[2] ?? '')
+    const path = query.get('path')
+    if (path === null) {
+      refuseWith(response, { status: 400, reason: 'name the file: ?path=<path>[&oldPath=<path>]' })
+      return
+    }
+    const answer = await changedFile(threadId, { path, oldPath: query.get('oldPath') })
+    if (answer === undefined) refuseWith(response, { status: 404, reason: `no session for thread ${threadId}` })
+    else if (answer.kind === 'refused') refuseWith(response, answer)
+    else answerJson(response, answer.file)
+  }
 
   return {
     respondWithThreadEvents,
@@ -339,6 +372,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
     respondWithThreadPages,
     respondWithThreadIncidents,
     respondWithContextRequest,
+    respondWithChangedFile,
     previews,
   }
 }

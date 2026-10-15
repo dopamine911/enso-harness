@@ -142,9 +142,10 @@ export type SecretWrite =
 
 /**
  * Set (`value`) or remove (`undefined`) one secret in the dotenv file at `path` — Settings' write
- * path (#932). Every other line keeps its text and its own line ending; the name's line is replaced
- * where it stood, keeping its ending and an `export ` it had (a file `source`d into a shell still
- * exports the key), or appended, ending CRLF when the file has any CRLF line. The file is written
+ * path (Web tools' Tavily key, #932; Security's judge key, #933). Every other line keeps its text
+ * and its own line ending; the name's line is replaced where it stood, keeping its ending and an
+ * `export ` it had (a file `source`d into a shell still exports the key), or appended, ending CRLF
+ * when the file has any CRLF line. The file is written
  * owner-only, and only once `parseDotenv` reads the value back exactly, through `replaceFileText`:
  * a `secrets.env` kept as a symlink (a dotfiles or password-store setup) stays a link, and the
  * file behind it changes.

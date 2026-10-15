@@ -238,6 +238,7 @@ async function startWith(
     userConfigPath,
     userSecretsPath,
     hostCheck,
+    ensoHome,
   }: {
     /** The user's secrets file Settings › Web tools sets the Tavily key in (#932). */
     readonly userSecretsPath?: string
@@ -254,6 +255,8 @@ async function startWith(
     readonly agentDir?: string
     /** The user's config the project settings resolve against (#754); absent, the server has none. */
     readonly threadSettings?: ProjectThreadSettingsSource
+    /** `ENSO_HOME`, for the settings files' routes (#933); absent, they refuse. */
+    readonly ensoHome?: string
   } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
@@ -269,6 +272,7 @@ async function startWith(
     ...(userConfigPath === undefined ? {} : { userConfigPath }),
     ...(userSecretsPath === undefined ? {} : { userSecretsPath }),
     ...(hostCheck === undefined ? {} : { hostCheck }),
+    ...(ensoHome === undefined ? {} : { ensoHome }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir,
     permissionRulesPath,
@@ -2798,6 +2802,53 @@ test('GET …/incidents replays under the server’s thresholds or the query’s
   expect(built).toHaveLength(0)
 })
 
+// #461: the changed-file route's own query — no path is the 400 that says to name one, a thread
+// held nowhere a 404, and both paths are URL-decoded before they are held to the scope and read.
+test('GET …/changes/file needs a path and a held thread, and reads its paths URL-decoded', async () => {
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-changed-file-')))
+  const gitPath = Bun.which('git')
+  if (gitPath === null) throw new Error('git is not on PATH')
+  // Hermetic: no user or system config, a fixed identity — and none of a git hook's GIT_* variables.
+  const environment = {
+    PATH: dirname(gitPath),
+    HOME: project,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'Enso',
+    GIT_AUTHOR_EMAIL: 'enso@example.invalid',
+    GIT_COMMITTER_NAME: 'Enso',
+    GIT_COMMITTER_EMAIL: 'enso@example.invalid',
+  }
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: project, env: environment, stdio: 'pipe' })
+  }
+  git('init', '--quiet', '-b', 'main')
+  mkdirSync(join(project, 'a dir'))
+  writeFileSync(join(project, 'a dir', 'old name.ts'), 'one\n')
+  git('add', '.')
+  git('commit', '--quiet', '-m', 'one')
+  git('mv', 'a dir/old name.ts', 'a dir/new name.ts')
+  writeFileSync(join(project, 'a dir', 'new name.ts'), 'two\n')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project })
+  expect(await prompt(url, 'live1', 'hi')).toBe(202)
+  const read = async (threadId: string, query: string): Promise<{ status: number; body: string }> => {
+    const response = await fetch(`${url}/api/threads/${threadId}/changes/file${query}`)
+    return { status: response.status, body: await response.text() }
+  }
+  expect(await read('live1', '')).toEqual({ status: 400, body: 'name the file: ?path=<path>[&oldPath=<path>]' })
+  expect((await read('nowhere', '?path=a')).status).toBe(404)
+  const query = new URLSearchParams({ path: 'a dir/new name.ts', oldPath: 'a dir/old name.ts' })
+  const answered = await read('live1', `?${query.toString()}`)
+  expect(answered.status).toBe(200)
+  expect(JSON.parse(answered.body)).toMatchObject({
+    path: 'a dir/new name.ts',
+    oldPath: 'a dir/old name.ts',
+    oldText: { kind: 'text', text: 'one\n' },
+    newText: { kind: 'text', text: 'two\n' },
+  })
+  // Encoded, a climb out is still a climb out.
+  expect((await read('live1', `?path=${encodeURIComponent('../outside.ts')}`)).status).toBe(400)
+})
+
 // #469: the judge cases are read live-or-cold like the incidents; looking builds nothing.
 test('GET …/judge-cases answers a stored thread with its cases, no thread a 404, and builds nothing', async () => {
   const { url, built } = await startWith(settlesAtOnce, {
@@ -3350,6 +3401,46 @@ async function policyServer(text: string): Promise<{ url: string; policyPath: st
   const { url } = await startWith(settlesAtOnce, {}, undefined, { permissionRulesPath: policyPath })
   return { url, policyPath }
 }
+
+test('⚠ Settings › Security over HTTP: saved only under the version read, other keys kept, a bad file never written over, the key never answered (#933)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-933-route-'))
+  writeFileSync(join(home, 'config.json'), '{"webFetch":{"allowedHosts":["a.example"]}}')
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { ensoHome: home })
+  const read = await send(url, '/api/settings/security', 'GET')
+  const save = (security: unknown, headers: Record<string, string>): Promise<Sent> =>
+    request(url, '/api/settings/security', { method: 'PUT', body: { security }, headers })
+  expect((await save({ incidents: { halt: true } }, {})).status).toBe(428)
+  expect((await save({ incidents: { halt: true } }, { 'If-Match': `"${'0'.repeat(64)}"` })).status).toBe(412)
+  expect((await save({ incidents: { halt: true } }, { 'If-Match': read.etag ?? '' })).status).toBe(200)
+  expect(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))).toEqual({
+    webFetch: { allowedHosts: ['a.example'] },
+    security: { incidents: { halt: true } },
+  })
+  writeFileSync(join(home, 'config.json'), '{"nope":1}')
+  expect((await save({}, { 'If-Match': '*' })).status).toBe(422)
+  expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe('{"nope":1}')
+  const storeKey = (value: string | null): Promise<Sent> =>
+    request(url, '/api/settings/security/judge-key', { method: 'PUT', body: { value }, headers: {} })
+  const key = await storeKey('ts-k-1')
+  expect(JSON.parse(key.body)).toEqual({ judgeKeySet: true })
+  expect((await send(url, '/api/settings/security', 'GET')).body).not.toContain('ts-k-1')
+  // A value `secrets.env` could not read back as written is refused, and the stored key stays.
+  expect((await storeKey('two words')).status).toBe(422)
+  expect(readFileSync(join(home, 'secrets.env'), 'utf8')).toBe('TYPESAFE_API_KEY=ts-k-1\n')
+  expect(JSON.parse((await storeKey(null)).body)).toEqual({ judgeKeySet: false })
+  expect(readFileSync(join(home, 'secrets.env'), 'utf8')).toBe('')
+})
+
+test('Settings › Security answers 404 when the server has no ENSO_HOME (#933)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  expect((await send(url, '/api/settings/security', 'GET')).status).toBe(404)
+  const key = await request(url, '/api/settings/security/judge-key', {
+    method: 'PUT',
+    body: { value: null },
+    headers: {},
+  })
+  expect(key.status).toBe(404)
+})
 
 test('⚠ the permission policy over HTTP: read with its ETag, saved only under the version read, refused with each problem, normalised, and reset with a backup (#474)', async () => {
   const original = `${JSON.stringify({ permission: { bash: { '**': 'ask', 'git status': 'allow' } } }, null, 2)}\n`

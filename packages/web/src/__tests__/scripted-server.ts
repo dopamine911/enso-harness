@@ -160,6 +160,11 @@ const SCRIPTED_LAUNCH_PROJECT: EnsoProject = {
   launch: true,
 }
 
+/** Whether a `fetch` is for a thread's follow: the adapter asks `${base}/follow`, with no query. */
+export function isFollowRequest(input: string | URL | Request): boolean {
+  return requestedUrl(input).endsWith('/follow')
+}
+
 /** The URL a `fetch` was asked for, whichever of its three forms the caller handed it. */
 export function requestedUrl(input: string | URL | Request): string {
   if (typeof input === 'string') return input

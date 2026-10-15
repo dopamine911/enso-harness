@@ -1,33 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto'
-import {
-  constants,
-  copyFileSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  type Stats,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs'
+import { constants, copyFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { EnsoPermissionPolicyRead, EnsoPermissionPolicyRefusal } from '@enso/core'
-import { realpathOrSelf } from '@enso/core/paths'
+import { realpathOrSelf, replaceFileText } from '@enso/core/paths'
 import {
   ENSO_DEFAULT_PERMISSION_POLICY,
   permissionEngineConfigPath,
   withCatchAllFirst,
 } from '@enso/core/permission-rules'
+import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition } from './atomic-file.ts'
 import { policyProblems } from './permission-policy.ts'
-
-/**
- * What a write expects on disk: the server's `WriteCondition` (#443), stated here because the host
- * imports only core. `absent` — no file; `matches` — the version read; `present` — whatever is there.
- */
-type WriteCondition =
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'matches'; readonly etag: string }
-  | { readonly kind: 'present' }
 
 /**
  * The user's permission policy on disk, as Settings reads and writes it (#474):
@@ -45,28 +26,9 @@ type WriteCondition =
  * and an edit made there is never overwritten unseen.
  *
  * In the host, beside the engine's schema, because the write is shaped by what the engine does:
- * it reloads on the modification time alone (`writeAtomically`), and its real-engine tests must
+ * it reloads on the modification time alone (`replaceFileText`), and its real-engine tests must
  * share `agent-host.test.ts`'s process-wide agent dir.
  */
-
-/** A strong entity tag for the file's bytes, quoted as HTTP writes one (the prompt library's). */
-function etagOf(bytes: Uint8Array): string {
-  return `"${createHash('sha256').update(bytes).digest('hex')}"`
-}
-
-function errorCode(error: unknown): unknown {
-  return error instanceof Error && 'code' in error ? error.code : undefined
-}
-
-/** The file's bytes, or `undefined` when there is none. */
-function bytesOf(path: string): Buffer | undefined {
-  try {
-    return readFileSync(path)
-  } catch (error: unknown) {
-    if (errorCode(error) === 'ENOENT') return undefined
-    throw error
-  }
-}
 
 /** Where the engine writes its review log: beside its config, under `logs/`. */
 function reviewLogDirectoryOf(agentDir: string): string {
@@ -100,51 +62,6 @@ export function readPermissionPolicy(policyPath: string, agentDir: string): Enso
   return { kind: 'ok', ...common, etag, file: parsed as Record<string, unknown> }
 }
 
-/** Why the file on disk is not what `condition` expects, or `undefined` when it is. */
-function conflictOf(policyPath: string, condition: WriteCondition): string | undefined {
-  const bytes = bytesOf(policyPath)
-  if (condition.kind === 'absent') return bytes === undefined ? undefined : `${policyPath} already exists`
-  if (bytes === undefined) return `${policyPath} is no longer there: it was deleted since it was opened`
-  if (condition.kind === 'matches' && etagOf(bytes) !== condition.etag) {
-    return `${policyPath} changed on disk since it was opened — reload to see the version there now`
-  }
-  return undefined
-}
-
-function statOrUndefined(path: string): Stats | undefined {
-  try {
-    return statSync(path)
-  } catch (error: unknown) {
-    if (errorCode(error) === 'ENOENT') return undefined
-    throw error
-  }
-}
-
-/**
- * Write `text` to the file behind `policyPath` in one step: a temporary file beside it, renamed over it.
- *
- * ⚠ THE MODIFICATION TIME MUST MOVE. The engine reloads a policy only when the file's `mtimeMs`
- * differs from the one it last read (`config/policy-loader.ts`), and Linux stamps it from a coarse
- * clock — one tick is milliseconds. A write landing in the same tick as the last one (a reset just
- * after a hand edit) kept the OLD policy in force, silently. Found by this file's reset test.
- */
-function writeAtomically(policyPath: string, text: string): void {
-  const target = realpathOrSelf(policyPath)
-  const previous = statOrUndefined(target)
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  writeFileSync(temporary, text, { flag: 'wx' })
-  try {
-    renameSync(temporary, target)
-  } catch (error: unknown) {
-    rmSync(temporary, { force: true })
-    throw error
-  }
-  if (previous === undefined) return
-  const written = statSync(target)
-  if (written.mtimeMs > previous.mtimeMs) return
-  utimesSync(target, written.atime, (previous.mtimeMs + 1) / 1000)
-}
-
 /** @group Permission policy */
 export type PermissionPolicyWrite =
   | { readonly kind: 'written'; readonly read: EnsoPermissionPolicyRead }
@@ -174,7 +91,7 @@ export function writePermissionPolicy(
     const reason = `the engine would not run this policy as written (${problems.length} problem${problems.length === 1 ? '' : 's'}); nothing was saved`
     return { kind: 'refused', refusal: { reason, problems } }
   }
-  writeAtomically(policyPath, `${JSON.stringify(normalized, null, 2)}\n`)
+  replaceFileText(policyPath, `${JSON.stringify(normalized, null, 2)}\n`)
   return { kind: 'written', read: readPermissionPolicy(policyPath, agentDir) }
 }
 
@@ -212,7 +129,7 @@ export function resetPermissionPolicy(
   const conflict = conflictOf(policyPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
   const backup = condition.kind === 'absent' ? undefined : copyAside(realpathOrSelf(policyPath))
-  writeAtomically(policyPath, `${JSON.stringify(ENSO_DEFAULT_PERMISSION_POLICY, null, 2)}\n`)
+  replaceFileText(policyPath, `${JSON.stringify(ENSO_DEFAULT_PERMISSION_POLICY, null, 2)}\n`)
   const read = readPermissionPolicy(policyPath, agentDir)
   return backup === undefined ? { kind: 'reset', read } : { kind: 'reset', backup, read }
 }
