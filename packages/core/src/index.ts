@@ -33,6 +33,7 @@ export {
   ENSO_CONFIG_FILENAME,
   EnsoConfig,
   type EnsoConfigParseResult,
+  EnsoThreadsConfig,
   EnsoThreadTreeMode,
   mergeEnsoConfig,
   parseEnsoConfig,
@@ -282,6 +283,7 @@ export {
   EnsoProjectRegistration,
   EnsoProjectsConfig,
   EnsoProjectsState,
+  EnsoProjectTitleUpdate,
   isEnsoProjectId,
   THREAD_PROJECT_TRUST,
   threadTrustsProject,
@@ -418,6 +420,12 @@ export {
   EnsoSecuritySettingsRead,
   EnsoSecuritySettingsWrite,
 } from './security-settings.ts'
+export {
+  EnsoDefaultProjectTrust,
+  EnsoDefaultProjectTrustState,
+  EnsoProjectsSettingsRead,
+  EnsoProjectsSettingsWrite,
+} from './projects-settings.ts'
 export {
   type CommandJudge,
   commandJudgementOf,

@@ -533,6 +533,7 @@ function ProjectTabs({
           fetch={fetchImpl}
           revision={settingsRevision}
           onSaved={onSaved}
+          onOpenSettings={() => onOpen({ kind: 'settings', section: 'projects' })}
         />
       </TabsContent>
       <TabsContent value="storage">
