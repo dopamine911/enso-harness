@@ -480,6 +480,44 @@ test('configure: only the 422 naming its step is a refusal; a fault is `failed` 
   })
 })
 
+// Every unary route that takes a body is posted the same way (`postJson`): JSON text, labelled
+// as JSON, to `…/<route>`, the route's own segment percent-encoded where it carries an id.
+test('every unary route with a body is one POST of JSON text labelled `application/json`', async () => {
+  const posted: Array<{ route: string; contentType: string | null; body: unknown }> = []
+  const connection = createFollowConnection({
+    threadId: 't1',
+    fetch: (input, init) => {
+      const headers = new Headers(init?.headers)
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body
+      const route = new URL(input, 'http://enso.test').pathname.replace(/^.*\/t1\//, '')
+      posted.push({ route: `${init?.method} ${route}`, contentType: headers.get('Content-Type'), body })
+      return Promise.resolve(new Response(null, { status: 204 }))
+    },
+    onProblem: () => undefined,
+  })
+  await connection.answerDialog({ id: 'd1', value: 'a' })
+  await connection.changeMode('plan')
+  await connection.runHostCommand({ name: 'thinking', value: 'high' })
+  await connection.prompt('queued')
+  await connection.configure({ thinking: 'high' })
+  await connection.fork('e1')
+  await connection.resolveIncident('i/1', { classification: 'false-positive', outcome: 'resume' })
+  const json = 'application/json'
+  expect(posted).toEqual([
+    { route: 'POST dialog', contentType: json, body: { id: 'd1', value: 'a' } },
+    { route: 'POST mode', contentType: json, body: { mode: 'plan' } },
+    { route: 'POST command', contentType: json, body: { name: 'thinking', value: 'high' } },
+    { route: 'POST prompt', contentType: json, body: { message: 'queued', admission: 'enqueue' } },
+    { route: 'POST configure', contentType: json, body: { thinking: 'high' } },
+    { route: 'POST fork', contentType: json, body: { entryId: 'e1' } },
+    {
+      route: 'POST incidents/i%2F1/resolve',
+      contentType: json,
+      body: { classification: 'false-positive', outcome: 'resume' },
+    },
+  ])
+})
+
 // ── the host-command route (#338 slice 2) — the mode route's shape, the mode route's failure path ──
 test('runHostCommand is one JSON POST to …/command; told on 204; the store moves only when the feed says so', async () => {
   const server = scripted()

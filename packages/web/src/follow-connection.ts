@@ -1332,11 +1332,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     }
   }
 
+  /** A {@link post} carrying `body` as JSON: every route but `abort` and `continue` takes one. */
+  function postJson(route: string, what: string, body: unknown): Promise<Response | undefined> {
+    return post(route, what, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  }
+
   async function answerDialog(answer: DialogAnswer): Promise<DialogAnswerOutcome> {
-    const response = await post('dialog', `dialog ${answer.id}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(answer),
-    })
+    const response = await postJson('dialog', `dialog ${answer.id}`, answer)
     if (response === undefined) return 'unreachable'
     if (response.status === 204) return 'answered'
     const outcome: DialogAnswerOutcome = response.status === 404 ? 'gone' : 'refused'
@@ -1364,10 +1366,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function changeMode(mode: string): Promise<ModeChangeOutcome> {
-    const response = await post('mode', `mode ${mode}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
-    })
+    const response = await postJson('mode', `mode ${mode}`, { mode })
     if (response === undefined) return 'unreachable'
     if (response.status === 204) return 'told'
     const outcome: ModeChangeOutcome = response.status === 409 ? 'busy' : 'refused'
@@ -1376,10 +1375,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function runHostCommand(run: EnsoHostCommandRun): Promise<HostCommandOutcome> {
-    const response = await post('command', `/${run.name}${run.value === undefined ? '' : ` ${run.value}`}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(run),
-    })
+    const response = await postJson('command', `/${run.name}${run.value === undefined ? '' : ` ${run.value}`}`, run)
     if (response === undefined) return 'unreachable'
     // 204: applied (`/model`, `/thinking`). 202: STARTED (`/login`, `/logout`, #338 slice 3) — the
     // flow's questions and progress arrive on the feed; told is what this route can say.
@@ -1400,10 +1396,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       admission: 'enqueue',
       ...(images.length === 0 ? {} : { images: [...images] }),
     }
-    const response = await post('prompt', 'queued prompt', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const response = await postJson('prompt', 'queued prompt', body)
     if (response === undefined) return 'unreachable'
     if (response.status !== 202) {
       problem('queued prompt refused: {status} {body}', { status: response.status, body: await response.text() })
@@ -1439,10 +1432,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function configure(configuration: EnsoSessionConfiguration): Promise<ConfigureOutcome> {
-    const response = await post('configure', 'configure', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(configuration),
-    })
+    const response = await postJson('configure', 'configure', configuration)
     if (response === undefined) return { outcome: 'unreachable' }
     if (response.status === 204) return { outcome: 'told' }
     const body = await response.text()
@@ -1460,10 +1450,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function fork(entryId: string): Promise<EnsoForkReceipt | undefined> {
-    const response = await post('fork', 'fork', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entryId }),
-    })
+    const response = await postJson('fork', 'fork', { entryId })
     if (response === undefined) return undefined
     if (response.status !== 200) {
       problem('fork refused: {status} {body}', { status: response.status, body: await response.text() })
@@ -1488,10 +1475,11 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     incidentId: string,
     resolution: EnsoIncidentResolution,
   ): Promise<IncidentResolveOutcome> {
-    const response = await post(`incidents/${encodeURIComponent(incidentId)}/resolve`, `resolve ${incidentId}`, {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(resolution),
-    })
+    const response = await postJson(
+      `incidents/${encodeURIComponent(incidentId)}/resolve`,
+      `resolve ${incidentId}`,
+      resolution,
+    )
     if (response === undefined) return { outcome: 'unreachable' }
     if (response.status === 204) return { outcome: 'told' }
     const reason = await response.text()
