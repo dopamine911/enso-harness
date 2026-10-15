@@ -3639,7 +3639,10 @@ const DELETABLE = 'stored-delete'
 
 /** The page with one stored thread, opened from the rail and on screen: one the server holds, so Delete is offered. */
 async function openDeletable(
-  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees' | 'histories' | 'projects'> & {
+  options: Pick<
+    ScriptedFetchOptions,
+    'deleteAnswers' | 'deletePreview' | 'trees' | 'histories' | 'projects' | 'projectTitleRefusal'
+  > & {
     readonly others?: readonly EnsoStoredThread[]
   } = {},
 ): Promise<MountedPage> {
@@ -4941,8 +4944,13 @@ const pageInUrl = (): (string | null)[] => {
   return [parameters.get('page'), parameters.get('section')]
 }
 
-const pageHeading = (page: MountedPage): string | undefined =>
-  page.container.querySelector('#page-heading')?.textContent ?? undefined
+/** The page's `h1` as it reads on screen: a project title's ", rename project" is for a screen reader only. */
+const pageHeading = (page: MountedPage): string | undefined => {
+  const heading = page.container.querySelector('#page-heading')?.cloneNode(true)
+  if (!(heading instanceof HTMLElement)) return undefined
+  for (const hidden of heading.querySelectorAll('.sr-only')) hidden.remove()
+  return heading.textContent ?? undefined
+}
 
 // @pins resume/url-names-page
 test('Settings opens from the rail as a page, each section a URL of its own; back and forward walk them and the thread behind', async () => {
@@ -5226,6 +5234,140 @@ test('a project’s page opens at its URL from a card’s Settings, the rail’s
     expect(onDiskIn(tab)).toBe(said)
     await popTo(`?thread=${DELETABLE}&page=settings&section=storage`)
     expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Storage')
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+/** A project page's title as a button, and its rename field (#939). */
+function projectRename(page: MountedPage): {
+  titleButton: () => HTMLButtonElement | null
+  field: () => HTMLInputElement | null
+  open: () => Promise<HTMLInputElement>
+} {
+  const titleButton = (): HTMLButtonElement | null =>
+    page.container.querySelector<HTMLButtonElement>('#page-heading button')
+  const field = (): HTMLInputElement | null =>
+    page.container.querySelector<HTMLInputElement>('header input[aria-label="project name"]')
+  const open = async (): Promise<HTMLInputElement> => {
+    const button = titleButton()
+    if (button === null) throw new Error('expected the project title as a button')
+    await page.click(button)
+    return eventually(() => {
+      const found = field()
+      if (found === null) throw new Error('expected the project name field')
+      return found
+    })
+  }
+  return { titleButton, field, open }
+}
+
+/** Open the project page of the card titled `title` from Projects, by its Settings. */
+async function openProjectPage(page: MountedPage, title: string): Promise<void> {
+  await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+  const settings = [...projectCard(page, title).querySelectorAll('button')].find(
+    (button) => button.textContent === 'Settings',
+  )
+  if (settings === undefined) throw new Error(`expected Settings on the card of ${title}`)
+  await page.click(settings)
+}
+
+// #939: a project's page renames it in place, as a thread's header does (#879). Escape sends
+// nothing; Enter saves, and the page, the rail and Projects show the name the server now lists.
+// PR #982 review: the heading (and the region it names) is the title alone, and a save is no
+// arrival — focus goes from the field back to the title button, never to the `h1` on the way.
+test('a project’s title renames it in place: Escape sends nothing, Enter saves — the page, the rail and Projects show the new name (#939)', async () => {
+  const page = await openDeletable({ projects: [LAUNCH_PROJECT, OTHER_PROJECT] })
+  try {
+    await openProjectPage(page, 'other')
+    const { titleButton, field, open } = projectRename(page)
+    const heading = page.container.querySelector<HTMLHeadingElement>('#page-heading')
+    if (heading === null) throw new Error('expected the page heading')
+    expect(titleButton()?.getAttribute('aria-label')).toBeNull()
+    expect(titleButton()?.textContent).toBe('other, rename project')
+    const first = await open()
+    expect(document.activeElement).toBe(first)
+    expect(first.value).toBe('other')
+    expect(document.getElementById(first.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'Enter to save · Escape to cancel · the folder keeps its name',
+    )
+    // While the field is up the `h1` holds plain text: nothing hidden to tab to.
+    expect(heading.querySelector('button')).toBeNull()
+    expect(heading.textContent).toBe('other')
+    await typeOver(first, 'never sent')
+    await pressKey(first, 'Escape')
+    expect(field()).toBeNull()
+    expect(document.activeElement).toBe(titleButton())
+    expect(page.server.projectTitles).toEqual([])
+
+    const again = await open()
+    let headingFocused = 0
+    heading.addEventListener('focus', () => {
+      headingFocused += 1
+    })
+    await typeOver(again, '  Ledger  ')
+    await pressKey(again, 'Enter')
+    await eventually(() => {
+      expect(field()).toBeNull()
+      expect(pageHeading(page)).toBe('Ledger')
+    })
+    expect(document.activeElement).toBe(titleButton())
+    expect(headingFocused).toBe(0)
+    expect(page.server.projectTitles).toEqual([{ projectId: 'p-other', body: { title: 'Ledger' } }])
+    // The path under the title is the folder's, unchanged.
+    expect(page.container.querySelector('header p.font-mono')?.textContent).toBe('/other')
+    expect(page.container.querySelector('button[aria-label="more for Ledger"]')).not.toBeNull()
+    await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+    expect(projectCard(page, 'Ledger')).toBeDefined()
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// PR #982 review: a refused rename is said under the field, in the server's words; the field stays
+// open with the draft, and the page keeps the name it had.
+test('a refused project rename is said under the field, which stays open with the draft (#939)', async () => {
+  const page = await openDeletable({
+    projects: [LAUNCH_PROJECT, OTHER_PROJECT],
+    projectTitleRefusal: { status: 413, reason: 'that title is too long' },
+  })
+  try {
+    await openProjectPage(page, 'other')
+    const { field, open } = projectRename(page)
+    const input = await open()
+    await typeOver(input, 'Ledger')
+    await pressKey(input, 'Enter')
+    await eventually(() => {
+      expect(page.container.querySelector('header [role="alert"]')?.textContent).toBe(
+        'Not renamed: 413 that title is too long',
+      )
+    })
+    expect(field()).toBe(input)
+    expect(input.value).toBe('Ledger')
+    expect(pageHeading(page)).toBe('other')
+    expect(page.server.projectTitles).toEqual([{ projectId: 'p-other', body: { title: 'Ledger' } }])
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// PR #982 review: the folder Enso was started in renames from its page as any project does.
+test('the launch project renames from its page as any project does (#939)', async () => {
+  const page = await openDeletable({ projects: [LAUNCH_PROJECT, OTHER_PROJECT] })
+  try {
+    await openProjectPage(page, 'launch')
+    const { field, open } = projectRename(page)
+    const input = await open()
+    await typeOver(input, 'Home base')
+    await pressKey(input, 'Enter')
+    await eventually(() => {
+      expect(field()).toBeNull()
+      expect(pageHeading(page)).toBe('Home base')
+    })
+    expect(page.server.projectTitles).toEqual([{ projectId: 'p-launch', body: { title: 'Home base' } }])
   } finally {
     window.history.replaceState(null, '', '/')
     await page.unmount()

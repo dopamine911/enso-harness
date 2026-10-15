@@ -2344,7 +2344,7 @@ function treeHost(
     harnessPackageDir: harnessDir,
     projectsDir,
     threadSettings: {
-      user,
+      readUser: () => user,
       userPath: join(tmpdir(), 'enso-home', 'config.json'),
       canonical: (key) => key,
       projectsDir,
