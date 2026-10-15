@@ -115,11 +115,12 @@ export function watchPageFaults(target: Window, threadOnScreen: () => string | u
     if (pageLeaving()) return
     // An `error` event with no error object: Chrome's "ResizeObserver loop …" (a layout that took
     // two passes, routine under the transcript's virtualiser), another origin's throw masked as
-    // "Script error.", or a non-Error throw (`throw null`). The event cannot say which.
-    // Recorded, but no banner: with the bundle same-origin, none of these is a page fault.
+    // "Script error.", or a nullish throw (`throw null`/`throw undefined`). The event cannot say
+    // which. Recorded, but no banner: the first two are not the page's, and a nullish throw from
+    // the page's own code is accepted as the cost of not bannering the others.
     if (event.error == null) {
       if (!event.message.startsWith('ResizeObserver loop')) {
-        log.warn("an error event with no error object (another origin's, or a non-Error throw): {error}", {
+        log.warn("an error event with no error object (another origin's, or a nullish throw): {error}", {
           error: event.message,
           ...(event.filename === '' ? {} : { source: event.filename }),
         })
