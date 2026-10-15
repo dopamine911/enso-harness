@@ -191,6 +191,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'extensions/permission-modes/index.ts',
   'pi-multi-account/index.ts',
   'extensions/ask-user/index.ts',
+  'extensions/write-receipt/index.ts',
   'extensions/system-prompt/index.ts',
   'extensions/run-context/index.ts',
   'extensions/incident-report/index.ts',
