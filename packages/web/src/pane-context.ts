@@ -47,7 +47,7 @@ export const CloseDebugContext = createContext<(() => void) | undefined>(undefin
  * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
  * choice per pane (#938) — switching the thread in a pane keeps it — rendered by the pane itself.
  */
-export type ThreadView = 'chat' | 'context' | 'stats' | 'changes'
+export type ThreadView = 'chat' | 'context' | 'stats' | 'changes' | 'prompt-runs'
 
 /**
  * What THIS pane shows, and how to change its view. `shown` is undefined in a hidden
