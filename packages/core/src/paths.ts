@@ -109,9 +109,10 @@ function fileBehindLinks(path: string): string {
 }
 
 /**
- * Replace the file at `path` with `text` in one step: written beside the file it names, then renamed
- * over it — a reader sees the old file or the new one, never half of one. Settings' writes go through
- * here: the permission policy (#474), `config.json` (#924, #932, #933) and `secrets.env` (#932, #933).
+ * Replace the file at `path` with `text` (or bytes — a file put back as it was, #945) in one step:
+ * written beside the file it names, then renamed over it — a reader sees the old file or the new
+ * one, never half of one. Settings' writes go through here: the permission policy and Enso's rule
+ * record beside it (#474, #945), `config.json` (#924, #932, #933) and `secrets.env` (#932, #933).
  *
  * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config or secrets file kept as a symlink (into a
  * dotfiles repo, say) stays a link, and the file behind it changes — or is made, when the link points
@@ -129,7 +130,7 @@ function fileBehindLinks(path: string): string {
  *
  * @group Workspace paths
  */
-export function replaceFileText(path: string, text: string, options: { mode?: number } = {}): void {
+export function replaceFileText(path: string, text: string | Uint8Array, options: { mode?: number } = {}): void {
   const target = fileBehindLinks(path)
   const previous = existsSync(target) ? statSync(target) : undefined
   const mode = options.mode ?? (previous === undefined ? undefined : previous.mode & 0o7777)

@@ -49,6 +49,19 @@ test('⚠ an UNKNOWN kind falls back to the envelope text, never to blank', () =
   expect(rendered.length).toBeGreaterThan(0)
 })
 
+test('⚠ a renderer that declines with any empty node — null, false, true or an empty string — gets the text', () => {
+  for (const declined of [null, false, true, '']) {
+    const rendered = renderToStaticMarkup(
+      <EnsoToolResult
+        result={partWith({ metadata: { [ENSO_TOOL_RESULT_KEY]: { kind: 'declines', props: {} } } })}
+        runOpen
+        renderers={{ declines: () => declined }}
+      />,
+    )
+    expect(rendered).toContain('PLAIN TEXT FORM')
+  }
+})
+
 test('no descriptor at all falls back to the envelope text', () =>
   expect(html(partWith({}))).toContain('PLAIN TEXT FORM'))
 
