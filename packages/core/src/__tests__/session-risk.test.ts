@@ -223,6 +223,39 @@ test('⚠ a write, edit or write-shaped shell command reaching a config tier is 
   ])
 })
 
+// Review of ff0207b1: the signal is the only backstop for the routes the guard cannot read, so the
+// in-place flags in every spelling, `dd of=`, and a write behind `VAR=`/`env`/`xargs`/`command`
+// count as the bare forms do.
+test('in-place, dd and prefixed writes to a config tier are signals; a dd read from one is none', () => {
+  expect(
+    signalsOf(
+      oneCallEach(
+        [bash('c1', `sed -Ei 's/a/b/' .enso/config.json`)],
+        [bash('c2', `sed -ni 's/a/b/p' .enso/config.json`)],
+        [bash('c3', `sed --in-place 's/a/b/' .enso/config.local.json`)],
+        [bash('c4', `perl -pi -e 's/a/b/' .enso/config.json`)],
+        [bash('c5', `echo '{}' | dd of=.enso/config.json`)],
+        [bash('c6', `echo '{}' | env FOO=1 tee .enso/config.json`)],
+        [bash('c7', 'FOO=1 cp /tmp/evil.json .enso/config.json')],
+        [bash('c8', `echo '{}' | xargs tee .enso/config.local.json`)],
+        [bash('c9', 'command cp /tmp/evil.json .enso/config.json')],
+        [bash('c10', 'dd if=.enso/config.json of=/tmp/backup.json')],
+        [bash('c11', 'env FOO=1 cat .enso/config.json')],
+      ),
+    ).filter(([signal]) => signal === 'config-tier-touch'),
+  ).toEqual([
+    ['config-tier-touch', 'c1'],
+    ['config-tier-touch', 'c2'],
+    ['config-tier-touch', 'c3'],
+    ['config-tier-touch', 'c4'],
+    ['config-tier-touch', 'c5'],
+    ['config-tier-touch', 'c6'],
+    ['config-tier-touch', 'c7'],
+    ['config-tier-touch', 'c8'],
+    ['config-tier-touch', 'c9'],
+  ])
+})
+
 // Review of #987: signals stay in the session, so a read or a mention of a tier file must not be
 // one — five of them (this repo names its own `.enso/config.json` routinely) would open an incident.
 test('a read or a mention of a config tier in a shell command is no signal', () => {

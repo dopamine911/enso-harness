@@ -525,15 +525,31 @@ function configTierTouch(call: RecentCall): EnsoSecuritySignal | undefined {
 
 /** A redirect (`>`, `>>`, `>|`) whose target is a config tier file. */
 const TIER_REDIRECT = /\d?>[>|]?\s*['"]?[^\s'";&|]*\.enso[/\\]config(?:\.local)?\.json(?![\w.-])/i
-/** Commands that write the file named among their arguments (`tee`, `truncate`, `sed -i`, `perl -i`). */
-const WRITES_ARGUMENT = /^(?:sudo\s+)?(?:tee|truncate|(?:sed|perl)\s+(?:[^|;&]*\s)?-i)\b/
+/**
+ * The words a command can stand behind and still be the command: `VAR=value` assignments and the
+ * runners `sudo`/`doas`/`env`/`command`/`exec`/`nohup`/`nice`/`time`/`xargs` with their flags.
+ */
+const COMMAND_PREFIX = String.raw`^(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs)(?:\s+-\S+)*\s+|[A-Za-z_]\w*=\S*\s+)*`
+/**
+ * Commands that write the file named among their arguments: `tee`, `truncate`, and `sed`/`perl`
+ * with an in-place flag in any spelling (`-i`, `-Ei`, `-ni`, `-pi`, `-i.bak`, `--in-place`).
+ */
+const WRITES_ARGUMENT = new RegExp(
+  `${COMMAND_PREFIX}(?:(?:tee|truncate)\\b|(?:sed|perl)\\s+(?:[^|;&]*\\s)?(?:--in-place|-[A-Za-z]*i))`,
+)
+/** `dd` whose output (`of=`) is a config tier file; `dd if=` of one is a read. */
+const DD_WRITES_TIER = new RegExp(
+  `${COMMAND_PREFIX}dd\\s(?:[^|;&]*\\s)?of=['"]?[^\\s'";&|]*\\.enso[/\\\\]config(?:\\.local)?\\.json(?![\\w.-])`,
+  'i',
+)
 /** Commands whose last argument is the destination (`cp`, `mv`, `ln`, `install`, `rsync`). */
-const WRITES_LAST_ARGUMENT = /^(?:sudo\s+)?(?:cp|mv|ln|install|rsync)\s/
+const WRITES_LAST_ARGUMENT = new RegExp(`${COMMAND_PREFIX}(?:cp|mv|ln|install|rsync)\\s`)
 
 /**
  * Whether a shell command names a config tier file in a write-shaped way: an interpreter one-liner
- * naming it (the guard cannot read what it does), a redirect into it, `tee`/`truncate`/`sed -i` with
- * it as an argument, or `cp`/`mv`/`ln`/`install`/`rsync` with it as the destination.
+ * naming it (the guard cannot read what it does), a redirect into it, `tee`/`truncate`/in-place
+ * `sed`/`perl` with it as an argument, `dd of=` it, or `cp`/`mv`/`ln`/`install`/`rsync` with it as
+ * the destination — each also behind `VAR=`/`env`/`sudo`/`xargs`/`command` (`COMMAND_PREFIX`).
  */
 function shellWritesTier(command: string): boolean {
   if (!CONFIG_TIER.test(command)) return false
@@ -541,7 +557,7 @@ function shellWritesTier(command: string): boolean {
   return command.split(/[;&|\n]+/).some((segment) => {
     const words = segment.trim()
     if (!CONFIG_TIER.test(words)) return false
-    if (WRITES_ARGUMENT.test(words)) return true
+    if (WRITES_ARGUMENT.test(words) || DD_WRITES_TIER.test(words)) return true
     if (!WRITES_LAST_ARGUMENT.test(words)) return false
     const last = words.split(/\s+/).at(-1) ?? ''
     return CONFIG_TIER.test(` ${last.replace(/^['"]|['"]$/g, '')}`)
