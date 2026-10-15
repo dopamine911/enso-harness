@@ -25,7 +25,9 @@
 import {
   ENSO_LOG_EVENTS,
   type EnsoObservation,
+  type EnsoQueuedPrompts,
   type EnsoThreadInspection,
+  type EnsoThreadRunState,
   ensoLogger,
   type ThreadRuntime,
 } from '@enso/core'
@@ -169,6 +171,13 @@ export interface ThreadRegistry {
   /** Every live thread, for the inspection listing. Never creates. */
   list(): ThreadView[]
   /**
+   * Every live thread's run now, and every change from now on (#911): the thread built, a run taking
+   * it, its release, the thread dropped — the moments its `status` reaches its followers, told here for
+   * EVERY thread, followed or not, so a page hears a run it has not opened end. `states` is read in
+   * the same tick as the subscription. Never creates.
+   */
+  watchRunStates(listener: (state: EnsoThreadRunState) => void): RunStatesWatch
+  /**
    * Dispose a live thread that is NOT running (#395: its project was removed, so a page still
    * showing it must not go on prompting it in that directory). Its follow ends; the next ask
    * builds anew, and the build decides whether it may. A run is never cut from here: `false`, and
@@ -184,6 +193,12 @@ export interface ThreadRegistry {
 /** A live follow: where the feed stood when it began, and how to leave. */
 export interface ThreadFollow {
   readonly asOfSeq: number
+  readonly unsubscribe: () => void
+}
+
+/** A watch of every thread's run (#911): each live thread's run as it began, and how to leave. */
+export interface RunStatesWatch {
+  readonly states: readonly EnsoThreadRunState[]
   readonly unsubscribe: () => void
 }
 
@@ -326,7 +341,28 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     }
   }
 
+  /** Every page's watch of every thread's run (#911). */
+  const runStateWatchers = new Set<(state: EnsoThreadRunState) => void>()
+
+  function runStateOf(threadId: string, thread: ThreadEntry | undefined): EnsoThreadRunState {
+    return {
+      threadId,
+      busy: thread?.busy ?? false,
+      waiting: thread !== undefined && thread.hosted.runtime.openDialogs().length > 0,
+    }
+  }
+
   function publishStatus(threadId: string, thread: ThreadEntry | undefined): void {
+    if (runStateWatchers.size > 0) {
+      const state = runStateOf(threadId, thread)
+      for (const watcher of runStateWatchers) {
+        try {
+          watcher(state)
+        } catch (error) {
+          log.warn('run states: a watcher threw: {error}', { threadId, error })
+        }
+      }
+    }
     const feed = feeds.get(threadId)
     if (feed === undefined) return
     const live = thread !== undefined
@@ -475,7 +511,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     // A stop must stop: if clearing the queue throws — pi emits the
     // emptied queue to its listeners inside it — the texts are lost and said, and pi is
     // still told to abort. Never the other way round.
-    let cleared: { interrupting: string[]; enqueued: string[] } = { interrupting: [], enqueued: [] }
+    let cleared: EnsoQueuedPrompts = { interrupting: [], enqueued: [] }
     try {
       cleared = thread.hosted.runtime.clearQueue()
     } catch (error: unknown) {
@@ -608,6 +644,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     },
     list(): ThreadView[] {
       return [...threads.entries()].map(([threadId, thread]) => viewOf(threadId, thread))
+    },
+    watchRunStates(listener: (state: EnsoThreadRunState) => void): RunStatesWatch {
+      runStateWatchers.add(listener)
+      return {
+        states: [...threads.entries()].map(([threadId, thread]) => runStateOf(threadId, thread)),
+        unsubscribe: () => {
+          runStateWatchers.delete(listener)
+        },
+      }
     },
     retire(threadId: string, why: string): boolean {
       const thread = threads.get(threadId)

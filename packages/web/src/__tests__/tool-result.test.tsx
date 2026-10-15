@@ -90,6 +90,14 @@ test('an errored result shows the error, not the descriptor', () => {
   expect(rendered).not.toContain('data-enso-kind')
 })
 
+// TanStack's `updateToolResultPart` omits an empty `error`, so `state: 'error'` can arrive with no
+// `error` field (PR #996 review): it is still an error, and its content is the reason.
+test('⚠ a result stated as error with no error field is an error, not done', () => {
+  const part = partWith({ state: 'error', content: 'outside the project' })
+  expect(toolResultState(part, true)).toEqual({ status: 'error', result: part, error: 'outside the project' })
+  expect(html(part)).toContain('outside the project')
+})
+
 test('truncation is rendered from data, not from a pre-rendered string', () => {
   const rendered = html(
     partWith({

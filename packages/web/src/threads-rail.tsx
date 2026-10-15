@@ -1,6 +1,7 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
 import {
   ChevronRightIcon,
+  Columns2Icon,
   EllipsisIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -36,6 +37,7 @@ import {
   sectionLayout,
   startOfLocalDay,
 } from './rail-layout.ts'
+import { RUN_DOT } from './run-status.ts'
 import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
 import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } from './thread-url.ts'
@@ -208,6 +210,16 @@ export interface ThreadsRailProps {
    * `forkParentTitles`. A row in it says so under its title; none when absent.
    */
   readonly forkParents?: ReadonlyMap<string, string>
+  /**
+   * The panes' threads, left to right (#938): while several are open, a row in one shows its
+   * number. Absent where no page holds panes.
+   */
+  readonly panes?: readonly string[]
+  /**
+   * Open a thread beside the one on screen (#938) — a row's beside button, or Ctrl/⌘-click — open on
+   * this page (`onPage`) or stored. Absent where no page holds panes: no row offers it.
+   */
+  readonly onBeside?: (threadId: string, onPage: boolean) => void
 }
 
 /** What a fork's parent reads as when the page lists no thread under its id — another project's, say. */
@@ -240,6 +252,9 @@ export function forkParentTitles(
 /** No thread on the rail is a fork — the rail's default, and the context's outside one. */
 const NO_FORKS: ReadonlyMap<string, string> = new Map()
 const ForkParentsContext = createContext<ReadonlyMap<string, string>>(NO_FORKS)
+
+/** No panes: a rail no page holds panes for (#938). */
+const NO_PANES: readonly string[] = []
 
 /** A row's title, and — for a fork — the thread it came from, under it (#433); the whole title as its hover when the row reads a shorter one. */
 function RowTitle({
@@ -432,36 +447,120 @@ const ROW =
 /** A row's age: mono, at the meta size. */
 const ROW_TIME = 'shrink-0 font-mono text-meta text-muted-foreground tabular-nums'
 
+/**
+ * A page thread's dot (#914): what its status bar says — working, waiting on you, possibly stuck,
+ * finished, stopped by you, failed, live view lost — so a thread off screen says what it needs. A
+ * thread never asked anything is the page's draft (#879): its ring is dashed.
+ */
+function PageThreadDot({ thread }: { thread: ThreadSummary }): React.ReactNode {
+  if (thread.title === undefined && thread.name === undefined && !thread.busy) return <LiveDot state="draft" />
+  const { headline } = thread
+  // Before its bar has said anything, or at rest: the pane's summary, what every row said before #914.
+  if (headline === undefined || headline.state === 'idle') return <LiveDot state={liveState(thread)} />
+  return (
+    <span className={RUN_DOT[headline.state]}>
+      <span className="sr-only">{headline.word}</span>
+    </span>
+  )
+}
+
+/**
+ * A row's part in the panes (#938): the pane it is open in while several are, and its way to open
+ * beside the thread on screen — none for a thread already in a pane. Where no page holds panes
+ * (`offered` false), a row is as it was.
+ */
+interface RowPanes {
+  readonly offered: boolean
+  readonly pane: number | undefined
+  readonly onBeside: (() => void) | undefined
+}
+
+/** A click with Ctrl or ⌘ opens beside (#938), as a middle-click opens a browser tab. */
+function rowClick(open: () => void, panes: RowPanes): (event: React.MouseEvent) => void {
+  return (event) => {
+    if ((event.ctrlKey || event.metaKey) && panes.onBeside !== undefined) panes.onBeside()
+    else open()
+  }
+}
+
+/**
+ * After a row (#938, the prototype's `.row-beside`): its open-beside button, shown on hover or
+ * focus — always on a touch screen — or, for a thread already in a pane, a spacer that keeps the
+ * ages aligned.
+ */
+function RowBeside({ title, panes }: { title: string; panes: RowPanes }): React.ReactNode {
+  if (!panes.offered) return null
+  if (panes.onBeside === undefined) return <span aria-hidden="true" className="w-7 shrink-0" />
+  return (
+    <Button
+      type="button"
+      size="icon"
+      variant="ghost"
+      aria-label={`open “${title}” beside`}
+      title="open beside the thread on screen — or Ctrl- or ⌘-click the row"
+      className="size-7 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-focus-within/row:opacity-100 group-hover/row:opacity-100 hover:bg-card hover:text-foreground [&_svg]:size-4 [@media(hover:none)]:opacity-100"
+      onClick={panes.onBeside}
+    >
+      <Columns2Icon />
+    </Button>
+  )
+}
+
+/** The pane a row's thread is open in, while several are (#938), the prototype's `.pane-chip`. */
+function PaneChip({ pane, current }: { pane: number | undefined; current: boolean }): React.ReactNode {
+  if (pane === undefined) return null
+  return (
+    <span
+      title={`open in pane ${pane}`}
+      className={cn(
+        'inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-xs border px-1 font-mono text-meta font-semibold',
+        current ? 'border-primary text-primary' : 'border-border-strong text-foreground',
+      )}
+    >
+      {pane}
+      <span className="sr-only">, open in pane {pane}</span>
+    </span>
+  )
+}
+
 function ThreadRow({
   thread,
   label,
   active,
   onSelect,
+  panes,
 }: {
   thread: ThreadSummary
   /** What the row reads as — `railLabels`. */
   label: string | undefined
   active: boolean
   onSelect: (threadId: string) => void
+  panes: RowPanes
 }): React.ReactNode {
+  const { headline } = thread
   return (
-    <li>
+    <li className="group/row flex items-center gap-0.5">
       <button
         type="button"
         data-thread-id={thread.threadId}
+        data-run-state={headline?.state}
         aria-current={active ? 'true' : undefined}
-        onClick={() => onSelect(thread.threadId)}
+        title={
+          headline === undefined || headline.state === 'idle'
+            ? undefined
+            : [headline.word, ...(headline.detail === undefined ? [] : [headline.detail])].join(' — ')
+        }
+        onClick={rowClick(() => onSelect(thread.threadId), panes)}
         className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : '')}
       >
-        {/* A thread never asked anything is the page's draft (#879): its ring is dashed. */}
-        <LiveDot
-          state={thread.title === undefined && thread.name === undefined && !thread.busy ? 'draft' : liveState(thread)}
-        />
+        <PageThreadDot thread={thread} />
         <RowTitle threadId={thread.threadId} title={label} full={thread.name ?? thread.title} />
+        <PaneChip pane={panes.pane} current={active} />
         <span className={ROW_TIME} title={thread.lastActivityAt.toLocaleString()}>
           <Age from={thread.lastActivityAt} />
         </span>
       </button>
+      <RowBeside title={label ?? thread.name ?? thread.title ?? UNTITLED_THREAD} panes={panes} />
     </li>
   )
 }
@@ -478,21 +577,23 @@ function EarlierThreadRow({
   thread,
   label,
   onResume,
+  panes,
 }: {
   thread: EnsoStoredThread
   /** What the row reads as — `railLabels`. */
   label: string | undefined
   onResume: (threadId: string) => void
+  panes: RowPanes
 }): React.ReactNode {
   const at = new Date(thread.lastActivityAt)
   const state = liveState(thread)
   return (
-    <li>
+    <li className="group/row flex items-center gap-0.5">
       <button
         type="button"
         data-thread-id={thread.threadId}
         title={STORED_ROW_HOVER[state] ?? `not open here — resume it (${at.toLocaleString()})`}
-        onClick={() => onResume(thread.threadId)}
+        onClick={rowClick(() => onResume(thread.threadId), panes)}
         className={ROW}
       >
         <LiveDot state={state} />
@@ -501,6 +602,7 @@ function EarlierThreadRow({
           <Age from={at} />
         </span>
       </button>
+      <RowBeside title={label ?? thread.name ?? thread.title ?? UNTITLED_THREAD} panes={panes} />
     </li>
   )
 }
@@ -606,13 +708,29 @@ function SectionHeader({
   )
 }
 
-/** What a section's rows read as and do: open a thread of this page, resume a stored one. */
+/** What a section's rows read as and do: open a thread of this page, resume a stored one, open either beside (#938). */
 interface RowActions {
   /** What each row reads as — `railLabels`. */
   readonly labels: ReadonlyMap<string, string | undefined>
   readonly activeThreadId: string | undefined
   readonly onSelect: (threadId: string) => void
   readonly onResume: (threadId: string) => void
+  /** The panes' threads, left to right (#938); empty where no page holds panes. */
+  readonly panes: readonly string[]
+  /** Open a thread beside the one on screen — open on this page or not; absent where no page holds panes. */
+  readonly onBeside: ((threadId: string, onPage: boolean) => void) | undefined
+}
+
+/** A row's part in the panes, from the section's actions. */
+function rowPanes(actions: RowActions, threadId: string, onPage: boolean): RowPanes {
+  const { onBeside, panes } = actions
+  const at = panes.indexOf(threadId)
+  return {
+    offered: onBeside !== undefined,
+    // The pane's number while several are open: one pane has nothing to tell apart.
+    pane: at === -1 || panes.length < 2 ? undefined : at + 1,
+    onBeside: onBeside === undefined || at !== -1 ? undefined : (): void => onBeside(threadId, onPage),
+  }
 }
 
 function RailRowItem({ row, actions }: { row: RailRow; actions: RowActions }): React.ReactNode {
@@ -623,6 +741,7 @@ function RailRowItem({ row, actions }: { row: RailRow; actions: RowActions }): R
         label={actions.labels.get(row.thread.threadId)}
         active={row.thread.threadId === actions.activeThreadId}
         onSelect={actions.onSelect}
+        panes={rowPanes(actions, row.thread.threadId, true)}
       />
     )
   }
@@ -632,6 +751,7 @@ function RailRowItem({ row, actions }: { row: RailRow; actions: RowActions }): R
         thread={row.thread}
         label={actions.labels.get(row.thread.threadId)}
         onResume={actions.onResume}
+        panes={rowPanes(actions, row.thread.threadId, false)}
       />
     )
   }
@@ -1118,6 +1238,8 @@ export function ThreadsRail(props: ThreadsRailProps): React.ReactNode {
     page,
     shownNarrow = false,
     forkParents = NO_FORKS,
+    panes = NO_PANES,
+    onBeside,
   } = props
   const groups = groupByProject(projects, threads, earlier)
   const search = useRailSearch()
@@ -1143,7 +1265,13 @@ export function ThreadsRail(props: ThreadsRailProps): React.ReactNode {
             opening={opening}
             search={search}
             anyProjects={projects.length > 0}
-            rows={{ activeThreadId: page === undefined ? activeThreadId : undefined, onSelect, onResume }}
+            rows={{
+              activeThreadId: page === undefined ? activeThreadId : undefined,
+              onSelect,
+              onResume,
+              panes,
+              onBeside,
+            }}
             actions={{ onNew, onRemove: onRemoveProject, onSettings: onProjectSettings }}
           />
           <button

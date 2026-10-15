@@ -107,46 +107,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     return
   }
   if (eventType === 'snapshot') {
-    if (!snapshotValidator.Check(data)) return
-    applyPermissionMode(stores, data.permissionMode)
-    stores.sessionRisk.set(data.sessionRisk)
-    // The incidents as the server folded the branch (#466): the resync, replacing whatever the
-    // live fold held — a resolution from another tab lands here too.
-    stores.incidents.set(data.incidents)
-    // The session's model (#338 slice 2) — `null` when the thread is not live, applied as such:
-    // a snapshot is the resync, and a model this page cannot vouch for is no model. A cold
-    // thread's recorded model (#434) rides beside it, never as live state.
-    stores.model.applySnapshot(data.model, data.recordedModel)
-    stores.systemPrompt.set(data.systemPrompt)
-    stores.cwd.set(data.cwd)
-    stores.tree.set(data.tree)
-    // #659: a session or messages means the routes answer — latched, never cleared by a later resync.
-    if (data.model !== null || data.messageCount > 0) stores.readable.set(true)
-    stores.usage.set(data.usage)
-    // The status bar's refusal word, resynced (#381): set when the branch's last reply is a
-    // refused attempt — how a resumed thread still says it — and cleared when it is not. The
-    // snapshot's own output is the mark a later reply must grow past.
-    const trailing = data.trailingRefusal
-    stores.refusal.set(
-      trailing === undefined
-        ? undefined
-        : {
-            refusalClass: providerRefusalClass(trailing),
-            provider: providerRefusalSource(trailing),
-            outputAtRefusal: data.usage.output,
-          },
-    )
-    // @invariant follow-snapshot-frames/snapshot-lists-complete The snapshot's lists are complete, so the browser replaces rather than appends.
-    // `openDialogs` is every question the thread is blocked on now (#114): a reconnect's snapshot
-    // is the resync, so an empty list is a fact ("nothing is waiting") this page must apply too;
-    // it clears a card for a question that settled while the page was away. One card at a time:
-    // a second concurrent question shows once the first settles and the next snapshot lists it.
-    stores.dialog.set(data.openDialogs[0])
-    // A login waiting on its provider (#348) — a page arriving mid-login offers its Stop too.
-    stores.login.set(data.login)
-    // The branch's stopped runs (#766): only those this page has not said yet.
-    showRunStops(stores, data.stoppedAfter)
-    applyStatus(stores, data.generation)
+    if (snapshotValidator.Check(data)) applySnapshot(stores, data)
     return
   }
   if (eventType === 'status') {
@@ -155,6 +116,52 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
   }
   if (!observationValidator.Check(data) || data.kind !== eventType) return
   routeObservation(stores, data)
+}
+
+/** The thread as of the follow's snapshot: the resync, so every list it carries replaces this page's. */
+function applySnapshot(stores: ThreadStores, data: EnsoFollowSnapshot): void {
+  applyPermissionMode(stores, data.permissionMode)
+  stores.sessionRisk.set(data.sessionRisk)
+  // The incidents as the server folded the branch (#466): the resync, replacing whatever the
+  // live fold held — a resolution from another tab lands here too.
+  stores.incidents.set(data.incidents)
+  // The session's model (#338 slice 2) — `null` when the thread is not live, applied as such:
+  // a snapshot is the resync, and a model this page cannot vouch for is no model. A cold
+  // thread's recorded model (#434) rides beside it, never as live state.
+  stores.model.applySnapshot(data.model, data.recordedModel)
+  stores.systemPrompt.set(data.systemPrompt)
+  stores.cwd.set(data.cwd)
+  stores.tree.set(data.tree)
+  // #659: a session or messages means the routes answer — latched, never cleared by a later resync.
+  if (data.model !== null || data.messageCount > 0) stores.readable.set(true)
+  stores.usage.set(data.usage)
+  // The status bar's refusal word, resynced (#381): set when the branch's last reply is a
+  // refused attempt — how a resumed thread still says it — and cleared when it is not. The
+  // snapshot's own output is the mark a later reply must grow past.
+  const trailing = data.trailingRefusal
+  stores.refusal.set(
+    trailing === undefined
+      ? undefined
+      : {
+          refusalClass: providerRefusalClass(trailing),
+          provider: providerRefusalSource(trailing),
+          outputAtRefusal: data.usage.output,
+        },
+  )
+  // @invariant follow-snapshot-frames/snapshot-lists-complete The snapshot's lists are complete, so the browser replaces rather than appends.
+  // `openDialogs` is every question the thread is blocked on now (#114): a reconnect's snapshot
+  // is the resync, so an empty list is a fact ("nothing is waiting") this page must apply too;
+  // it clears a card for a question that settled while the page was away. One card at a time:
+  // a second concurrent question shows once the first settles and the next snapshot lists it.
+  stores.dialog.set(data.openDialogs[0])
+  // What pi holds behind the run (#917), complete like `openDialogs`: a page that opens mid-run
+  // lists what another page queued, and absent is a fact — nothing waits.
+  stores.queue.set(data.queue === undefined ? [] : [...data.queue.interrupting, ...data.queue.enqueued])
+  // A login waiting on its provider (#348) — a page arriving mid-login offers its Stop too.
+  stores.login.set(data.login)
+  // The branch's stopped runs (#766): only those this page has not said yet.
+  showRunStops(stores, data.stoppedAfter)
+  applyStatus(stores, data.generation)
 }
 
 /** What a stopped run says in the thread (#766): the operator's Stop, so it never reads as a finish. */

@@ -265,6 +265,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     messageCount: mount.messageCount,
     ...(mount.trailingRefusal === undefined ? {} : { trailingRefusal: mount.trailingRefusal }),
     openDialogs: mount.openDialogs,
+    ...(mount.queue.interrupting.length + mount.queue.enqueued.length === 0 ? {} : { queue: mount.queue }),
     ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
     ...(mount.stoppedAfter.length === 0 ? {} : { stoppedAfter: mount.stoppedAfter }),
     ...(mount.login === undefined ? {} : { login: mount.login }),

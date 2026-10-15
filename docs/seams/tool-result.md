@@ -179,6 +179,9 @@ export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) =>
 export function toolResultState(result: ToolResultPart | undefined, runOpen: boolean): ToolResultState {
   if (result === undefined) return runOpen ? { status: 'pending' } : { status: 'aborted' }
   if (result.error !== undefined) return { status: 'error', result, error: result.error }
+  if (result.state === 'error') {
+    return { status: 'error', result, error: typeof result.content === 'string' ? result.content : '' }
+  }
   return { status: 'done', result }
 }
 ```
@@ -259,7 +262,7 @@ textual fallback, and a `kind` with no renderer is the textual fallback WITH the
 it, because the truncation is data, not the renderer's. *The fallback
 is the point, not a courtesy* (the header of `EnsoToolResult.tsx`): a type-tag design's characteristic failure is an unrenderable
 payload showing as nothing, indistinguishable from a successful empty result. `toolResultState` is also
-what the status bar's `running <tool>` reads (`thread-status.tsx#describeActivity`).
+what the status bar's `running <tool>` reads (`run-status.ts#describeStep`).
 
 **The renderer map holds Enso's own kinds** (`message-row.tsx#descriptorRenderers`, filled from
 `tool-views.tsx#TOOL_RESULT_RENDERERS`, #920): a returned image as a thumbnail, `ask_user`'s questions
