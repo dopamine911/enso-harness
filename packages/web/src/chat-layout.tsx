@@ -1,6 +1,6 @@
 import type { UIMessage } from '@tanstack/ai-client'
 import type { LayoutProps } from '@tanstack/ai-react/ui'
-import { useCallback, useContext, useId, useRef } from 'react'
+import { useCallback, useContext, useId, useRef, useState } from 'react'
 import { Conversation, ConversationContent, ConversationScrollButton } from './components/ai-elements/conversation.tsx'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { PendingQueue } from './composer.tsx'
@@ -18,13 +18,14 @@ import {
   PaneViewContext,
 } from './pane-context.ts'
 import { useStore, useThreadStores } from './store.ts'
-import { ThreadChanges } from './thread-changes.tsx'
+import { DiffFocusContext, ThreadChanges } from './thread-changes.tsx'
 import { ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadEvalDrawer } from './thread-eval.tsx'
 import { settledToolResults } from './thread-git.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar, useRunClock } from './thread-status.tsx'
+import { OpenInDiffContext } from './tool-views.tsx'
 import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
 import {
   type TranscriptScroller,
@@ -152,61 +153,76 @@ function ThreadViews(): React.ReactNode {
     },
     [open],
   )
+  // A tool card's "open in Diff" (#920): the Diff view, at the file the call wrote or edited.
+  const [diffFocus, setDiffFocus] = useState<{ readonly path: string } | undefined>(undefined)
+  const openInDiff = useCallback(
+    (path: string): void => {
+      setDiffFocus({ path })
+      open('changes')
+    },
+    [open],
+  )
   /** Whether the transcript is the view shown — a pane off screen keeps its chat. */
   const onChat = (shown ?? 'chat') === 'chat'
   const { selection, placed } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
   const incidentReveal = useIncidentReveal(scroller)
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and `inert`,
+    <OpenInDiffContext.Provider value={openInDiff}>
+      <DiffFocusContext.Provider value={diffFocus}>
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and `inert`,
           never `hidden` (#362): a `display: none` box comes back resized, and the stick-to-bottom
           scroller re-pins a reader who had scrolled up. Kept at its size, its scroll, its lock
           and its bubbles (the stats rows' targets) survive a trip to Context or Stats. */}
-      <div
-        role="tabpanel"
-        {...panelIdsOf(shown, 'chat')}
-        inert={!onChat}
-        className={onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'}
-      >
-        <Conversation>
-          <TranscriptRevealBridge into={scroller} />
-          <ConversationContent className="mx-auto w-full max-w-transcript gap-6 px-6 pt-6 pb-8 max-md:p-4 ledger:gap-0">
-            {/* Each pane its own boundary (#919): a throw drawing the transcript leaves the
+          <div
+            role="tabpanel"
+            {...panelIdsOf(shown, 'chat')}
+            inert={!onChat}
+            className={
+              onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
+            }
+          >
+            <Conversation>
+              <TranscriptRevealBridge into={scroller} />
+              <ConversationContent className="mx-auto w-full max-w-transcript gap-6 px-6 pt-6 pb-8 max-md:p-4 ledger:gap-0">
+                {/* Each pane its own boundary (#919): a throw drawing the transcript leaves the
                 question, the run's error and the composer under it working. */}
-            <PaneBoundary pane="transcript" threadId={stores.threadId}>
-              <TranscriptContent
-                messages={chat.messages}
-                setMessages={chat.setMessages}
-                selection={selection}
-                placed={placed}
-                incidentReveal={incidentReveal}
-              />
-            </PaneBoundary>
-            {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
+                <PaneBoundary pane="transcript" threadId={stores.threadId}>
+                  <TranscriptContent
+                    messages={chat.messages}
+                    setMessages={chat.setMessages}
+                    selection={selection}
+                    placed={placed}
+                    incidentReveal={incidentReveal}
+                  />
+                </PaneBoundary>
+                {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
                 `ask` verdict reaches the browser, and an unmounted slot is precisely
                 why an approval would silently never appear. */}
-            <PendingDialog />
-            <RunProblem />
-          </ConversationContent>
-          <ConversationScrollButton />
-        </Conversation>
-      </div>
-      {/* Keyed by the view: another view, or the chat, is drawn afresh after one failed. */}
-      <PaneBoundary
-        key={shown ?? 'chat'}
-        pane="views"
-        threadId={stores.threadId}
-        placement="absolute top-0 left-0 z-10"
-      >
-        <ThreadViewOverlay
-          shown={shown}
-          revealInTranscript={revealInTranscript}
-          changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
-          messages={chat.messages}
-          generating={chat.sessionGenerating}
-        />
-      </PaneBoundary>
-    </div>
+                <PendingDialog />
+                <RunProblem />
+              </ConversationContent>
+              <ConversationScrollButton />
+            </Conversation>
+          </div>
+          {/* Keyed by the view: another view, or the chat, is drawn afresh after one failed. */}
+          <PaneBoundary
+            key={shown ?? 'chat'}
+            pane="views"
+            threadId={stores.threadId}
+            placement="absolute top-0 left-0 z-10"
+          >
+            <ThreadViewOverlay
+              shown={shown}
+              revealInTranscript={revealInTranscript}
+              changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
+              messages={chat.messages}
+              generating={chat.sessionGenerating}
+            />
+          </PaneBoundary>
+        </div>
+      </DiffFocusContext.Provider>
+    </OpenInDiffContext.Provider>
   )
 }
 
