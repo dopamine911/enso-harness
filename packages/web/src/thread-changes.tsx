@@ -393,7 +393,8 @@ function omittedText(change: EnsoGitFileChange): string {
   return 'git reported no line changes: a mode change, or an empty file.'
 }
 
-function FileDiff({
+/** One file's diff, split side by side: a thread's changed file, and a project config file to approve (#753). */
+export function FileDiff({
   change,
   readFile,
 }: {
