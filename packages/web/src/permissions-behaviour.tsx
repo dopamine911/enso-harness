@@ -101,13 +101,16 @@ function valueWords(file: Readonly<Record<string, unknown>>, key: string): strin
   return Object.hasOwn(file, key) ? JSON.stringify(file[key]) : 'not set'
 }
 
-function Switch({
+/** The prototype's `.switch`: named by the element `labelledBy` points at, or by `label`. Settings' rule rows and groups use it too (#945). */
+export function Switch({
   on,
   labelledBy,
+  label,
   onChange,
 }: {
   on: boolean
-  labelledBy: string
+  labelledBy?: string
+  label?: string
   onChange: (on: boolean) => void
 }): React.ReactNode {
   return (
@@ -116,6 +119,7 @@ function Switch({
       role="switch"
       aria-checked={on}
       aria-labelledby={labelledBy}
+      aria-label={label}
       onClick={() => onChange(!on)}
       className="group relative mt-0.5 h-6 w-10 shrink-0 rounded-full bg-border-strong transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-checked:bg-primary"
     >
