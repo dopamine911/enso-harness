@@ -14,6 +14,7 @@
  * `src/generated/landing-features.json`. Links into the docs go through the site's base.
  */
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
+import { Image } from 'astro:assets'
 import context from '../assets/landing/captured/context-now-trend.png'
 import diff from '../assets/landing/captured/diff.png'
 import guardReceipt from '../assets/landing/captured/guards-receipt.png'
@@ -22,14 +23,14 @@ import forkPoint from '../assets/landing/captured/lineage-fork-point.png'
 import prompts from '../assets/landing/captured/prompts-manager.png'
 import questions from '../assets/landing/captured/questions-ask-user.png'
 import startSession from '../assets/landing/captured/sessions-start.png'
-import Closing from '../components/Closing.astro'
-import Pairs from '../components/Pairs.astro'
+import smile from '../assets/landing/enso-smile.png'
 import Shot from '../components/Shot.astro'
 import landingFeatureGroups from '../generated/landing-features.json'
-import { REPOSITORY_URL, SITE_PATH } from '../site-urls'
 import '../styles/landing.css'
 
-const feature = (slug: string): string => `${SITE_PATH}/features/${slug}/`
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+const feature = (slug: string): string => `${base}/features/${slug}/`
+const github = 'https://github.com/dopamine911/zen-harness-foundation'
 
 const factory = [
   ['Model', 'Which model is doing the work, and with how much effort?'],
@@ -101,9 +102,6 @@ const outcomes = [
           Sometimes the agent misunderstood. Sometimes you left something important unsaid. Sometimes your own assumption was
           wrong. Enso gives you somewhere to look when the result and the intent part ways.
         </p>
-        <nav class="chapter-links" aria-label="Where Enso came from">
-          <a href={`${SITE_PATH}/origin/`}>Where Enso came from →</a>
-        </nav>
       </div>
     </section>
 
@@ -293,7 +291,16 @@ const outcomes = [
             improve.
           </div>
         </div>
-        <Pairs rows={factory} />
+        <div class="factory-list">
+          {
+            factory.map(([name, question]) => (
+              <div class="factory-item">
+                <span>{name}</span>
+                <strong>{question}</strong>
+              </div>
+            ))
+          }
+        </div>
       </div>
     </section>
 
@@ -367,7 +374,7 @@ const outcomes = [
           </p>
           <nav class="chapter-links" aria-label="Foundation documentation">
             <a href="https://github.com/earendil-works/pi">pi →</a>
-            <a href={`${SITE_PATH}/architecture/`}>Architecture →</a>
+            <a href={`${base}/architecture/`}>Architecture →</a>
           </nav>
         </div>
       </div>
@@ -402,7 +409,7 @@ const outcomes = [
       </div>
       <p class="feature-docs-note">
         The feature docs document not only what each capability does, but also how to open it, what to look for, and what it does
-        <em>not</em> do. <a href={`${SITE_PATH}/features/`}>Browse all feature documentation →</a>
+        <em>not</em> do. <a href={`${base}/features/`}>Browse all feature documentation →</a>
       </p>
     </section>
 
@@ -417,23 +424,25 @@ const outcomes = [
             build checks for drift.
           </p>
           <nav class="chapter-links" aria-label="Documentation evidence">
-            <a href={`${SITE_PATH}/features/`}>Features →</a>
-            <a href={`${SITE_PATH}/verification/`}>Verification →</a>
-            <a href={`${SITE_PATH}/architecture/`}>Architecture →</a>
+            <a href={`${base}/features/`}>Features →</a>
+            <a href={`${base}/verification/`}>Verification →</a>
+            <a href={`${base}/architecture/`}>Architecture →</a>
           </nav>
         </div>
       </div>
     </section>
 
-    <Closing>
+    <div class="smile-divider"><Image class="enso-smile" src={smile} alt="" width={54} height={54} /></div>
+    <hr class="rule" />
+    <section class="final">
+      <Image class="enso-smile" src={smile} alt="" width={74} height={74} />
       <h2>I check your work.<br />You check mine.<br />The system keeps the receipts.</h2>
       <p>Enso is for developers who want capable agents to do real work without making the process disappear.</p>
       <div class="hero-actions">
-        <a class="button primary" href={REPOSITORY_URL}>View on GitHub</a>
-        <a class="button" href={`${SITE_PATH}/features/`}>Read the docs</a>
-        <a class="button" href={`${SITE_PATH}/origin/`}>Where it came from</a>
+        <a class="button primary" href={github}>View on GitHub</a>
+        <a class="button" href={`${base}/features/`}>Read the docs</a>
       </div>
-    </Closing>
+    </section>
   </div>
 
   <div class="landing-lightbox" role="dialog" aria-modal="true" aria-label="Expanded product screenshot" data-lightbox>
