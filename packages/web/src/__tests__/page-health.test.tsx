@@ -335,6 +335,23 @@ test('an error event with no error object — another origin’s "Script error."
   ])
 })
 
+test('a thrown value that is not an Error but is not nullish (`throw "boom"`) still raises the banner', async () => {
+  const container = await mount(<PageFaultBanner />)
+  const unwatch = watchPageFaults(window, () => 't-screen')
+  await act(async () => {
+    window.dispatchEvent(new ErrorEvent('error', { error: 'boom', message: 'Uncaught boom' }))
+    await tick()
+  })
+  unwatch()
+  expect(banner(container)?.dataset.pageFault).toBe('error')
+  expect(shippedFaults()).toEqual([
+    {
+      page: PAGE_ID,
+      properties: expect.objectContaining({ trigger: 'error', threadId: 't-screen', error: 'boom' }),
+    },
+  ])
+})
+
 test('⚠ a chunk handed to the client and never taken back is a stall: the banner, and a line naming the chunk and the thread', async () => {
   const container = await mount(<PageFaultBanner />)
   const server = createScriptedFetch()
