@@ -120,8 +120,9 @@ export interface FollowConnectionOptions {
 interface OpenRun {
   readonly runId: string
   /**
-   * The assistant message the view is streaming into. Rotates when pi claims a queued prompt (#75),
-   * and when pi starts a new attempt after a refused one (#382).
+   * The assistant message the view is streaming into. Rotates on every assistant message after the
+   * run's first (#921), when pi claims a queued prompt (#75), and when pi starts a new attempt after
+   * a refused one (#382).
    */
   messageId: string
   /** The receipt's `messageId` — how a `prompt-rejected` names this run. Undefined for a run another client started. */
@@ -521,8 +522,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   function observeMessageStart(role: string): void {
     if (current === undefined) return
     if (role === 'assistant') {
-      // Whatever began before the refusal — the attempt's own message, or none when the provider
-      // refused before pi started one — stays in the bubble the refusal's lines follow.
+      // Any assistant message after one already begun is a new model turn, with its own bubble
+      // (#921). After a refusal, so is the retry even when this view saw no message begin before
+      // it (a page that joined mid-attempt): the refused attempt keeps the bubble the refusal's
+      // lines follow. Both at once rotate once.
       if (current.refused || current.assistantMessages > 0) rotateMessage(current)
       current.assistantMessages += 1
       return

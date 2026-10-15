@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
-import type { EnsoFollowFrame } from '@enso/core'
+import type { EnsoFollowFrame, EnsoObservation } from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { StreamChunk } from '@tanstack/ai'
@@ -670,6 +670,38 @@ test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistan
   }
   expect(lastDelta).toMatchObject({ messageId: secondMessageId, delta: 'two' })
   server.abort()
+})
+
+// PR #986 review: three triggers rotate the bubble — a new model turn (#921), a retry after a
+// refusal (#382), a claimed queued prompt (#75) — and where two coincide they must rotate ONCE:
+// two rotations would leave an empty bubble between the turns.
+test('each new message rotates the assistant bubble exactly once, whichever triggers coincide (#921, #382, #75)', async () => {
+  const assistant: EnsoObservation = { kind: 'message-start', role: 'assistant' }
+  const refused: EnsoObservation = { kind: 'provider-refused', provider: 'anthropic', status: 429, message: '429' }
+  const claimed: EnsoObservation = { kind: 'message-start', role: 'user', text: 'queued' }
+  const sequences: ReadonlyArray<readonly [string, readonly EnsoObservation[]]> = [
+    ['assistant → assistant', [assistant, assistant]],
+    ['assistant → refused → assistant', [assistant, refused, assistant]],
+    ['refused, no message seen → assistant', [refused, assistant]],
+    ['assistant → claimed prompt → assistant', [assistant, claimed, assistant]],
+  ]
+  for (const [name, sequence] of sequences) {
+    const server = scripted()
+    server.frame(SNAPSHOT_IDLE)
+    await server.untilChunks(1)
+    await send(server, 'first')
+    await server.untilChunks(3) // RUN_STARTED, TEXT_MESSAGE_START
+    const own: EnsoObservation = { kind: 'message-start', role: 'user', text: 'first' }
+    const last: EnsoObservation = { kind: 'text-delta', contentIndex: 0, delta: 'LAST' }
+    for (const [index, observation] of [own, ...sequence, last].entries())
+      server.frame({ type: 'observation', seq: index + 1, observation })
+    const lastArrived = (): boolean =>
+      server.chunks.some((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT && chunk.delta === 'LAST')
+    while (!lastArrived()) await server.untilChunks(server.chunks.length + 1)
+    const rotations = server.chunks.filter((chunk) => chunk.type === EventType.TEXT_MESSAGE_END).length
+    expect({ name, rotations }).toEqual({ name, rotations: 1 })
+    server.abort()
+  }
 })
 
 // PR #120 review: the callers fire-and-forget (`void connection.abort()`), so a network
