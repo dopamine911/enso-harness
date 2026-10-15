@@ -1,8 +1,18 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { ensoLogger, EnsoProjectRegistration, EnsoProjectSettingsUpdate, EnsoProjectTrustUpdate } from '@enso/core'
+import {
+  ensoLogger,
+  EnsoProjectConfigApproval,
+  EnsoProjectRegistration,
+  EnsoProjectSettingsUpdate,
+  EnsoProjectTrustUpdate,
+} from '@enso/core'
 import type { Static, TSchema } from 'typebox'
 import type { ProjectThreadSettingsSource } from '../host/tree-setup.ts'
-import { createProjectSettingsRoute, type ProjectSettingsAnswer } from './project-settings-route.ts'
+import {
+  createProjectSettingsRoute,
+  type ProjectConfigReviewAnswer,
+  type ProjectSettingsAnswer,
+} from './project-settings-route.ts'
 import { createProjectTrustRoute, type ProjectTrustRouteAnswer } from './project-trust-route.ts'
 import type { ProjectRegistry } from './projects.ts'
 import { answerJson, answerOrFail, MAX_DIALOG_BODY_BYTES, readClosedJsonBody, refuseWith } from './request-plumbing.ts'
@@ -10,7 +20,7 @@ import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 
 /**
  * The project routes (#395, #810): the projects listed, registered, browsed and removed, a
- * project's settings (#754) and its trust (#873). ⚠ `scripts/docs/routes.ts` reads the literal routes off the
+ * project's settings (#754), its trust (#873) and its config approval (#753). ⚠ `scripts/docs/routes.ts` reads the literal routes off the
  * `request.method === … && url …` conditions below (#174): keep that spelling.
  */
 
@@ -30,6 +40,20 @@ const PROJECT_SETTINGS_WRITE_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/settings
  */
 const PROJECT_TRUST_READ_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/trust$/
 const PROJECT_TRUST_WRITE_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/trust$/
+/**
+ * `/api/projects/<projectId>/config-approval` (#753): the project page's review of its own config
+ * files against the versions approved. `GET` reads each file's state and diff, `PUT` approves one.
+ */
+const PROJECT_CONFIG_APPROVAL_READ_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/config-approval$/
+const PROJECT_CONFIG_APPROVAL_WRITE_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/config-approval$/
+/** An approval's body (#753), as its 413 and 400 name it. */
+const APPROVAL_BODY = {
+  what: 'project config approval',
+  schema: EnsoProjectConfigApproval,
+  name: 'project config approval',
+  requirement:
+    'a project config approval takes a `tier` ("shared" or "local") and `sha256`, the file\'s hash as reviewed, or null for its removal',
+}
 
 /** What the project routes read from the server (#810): the registries, and where project settings come from. */
 export interface ProjectRoutesState {
@@ -232,6 +256,14 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
       respondWithRead: async (projectId, response) => answerProjectTrust(response, projectTrust.read(projectId)),
       respondToWrite: respondToProjectTrustWrite,
     },
+    // #753: `GET` each own config file against the version approved; `PUT` approves one as it was shown.
+    {
+      read: PROJECT_CONFIG_APPROVAL_READ_ROUTE,
+      write: PROJECT_CONFIG_APPROVAL_WRITE_ROUTE,
+      respondWithRead: async (projectId, response) =>
+        answerProjectConfigReview(response, projectSettings.review(projectId)),
+      respondToWrite: respondToProjectConfigApproval,
+    },
   ]
 
   /** True when the request was one of a project's own subroutes. */
@@ -283,6 +315,26 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
       })
     } else log.warn('project {projectId}: settings not written: {reason}', { projectId, reason: answer.reason })
     answerProjectSettings(response, answer)
+  }
+
+  /**
+   * `PUT /api/projects/<projectId>/config-approval` (#753): `{ tier, sha256 }` — the file as the page
+   * showed it, `null` for its removal — becomes the version that applies, answered with the review as
+   * it now stands (the approval logs itself, `project-settings-route.ts`). A file that changed since
+   * is a 409; one that cannot be approved as it is, a 422.
+   */
+  async function respondToProjectConfigApproval(
+    projectId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const approval = await readProjectBody(request, response, APPROVAL_BODY)
+    if (approval !== undefined) answerProjectConfigReview(response, projectSettings.approve(projectId, approval))
+  }
+
+  function answerProjectConfigReview(response: ServerResponse, answer: ProjectConfigReviewAnswer): void {
+    if ('kind' in answer) refuseWith(response, answer)
+    else answerJson(response, answer)
   }
 
   function answerProjectSettings(response: ServerResponse, answer: ProjectSettingsAnswer): void {

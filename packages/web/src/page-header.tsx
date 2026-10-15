@@ -5,6 +5,7 @@ import {
   EllipsisIcon,
   FileDiffIcon,
   GitForkIcon,
+  HistoryIcon,
   LayersIcon,
   MenuIcon,
   MessagesSquareIcon,
@@ -48,6 +49,7 @@ const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = {
   context: 'context',
   stats: 'stats',
   changes: 'changes',
+  'prompt-runs': 'prompt-runs',
 }
 
 /**
@@ -518,5 +520,11 @@ const RUN_VIEWS = [
     label: 'Diff',
     hover: 'every file that differs from the last push, and its diff side by side',
     Icon: FileDiffIcon,
+  },
+  {
+    view: 'prompt-runs',
+    label: 'Diff Viewer',
+    hover: "step through the thread's prompts: the files each one changed, snapshot to snapshot",
+    Icon: HistoryIcon,
   },
 ] as const satisfies readonly { view: ThreadView; label: string; hover: string; Icon: typeof LayersIcon }[]

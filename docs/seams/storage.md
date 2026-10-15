@@ -107,6 +107,12 @@ export interface AgentHost {
    * to hold to the copy.
    */
   readCopyFileTexts(copy: ThreadTreePlace, paths: ChangedFilePaths): Promise<ChangedFileTexts>
+  /** The thread's prompt runs and their snapshots (#553), for the Diff Viewer; `undefined` for a thread held nowhere. */
+  threadPromptRuns: ThreadPromptRunReads['threadPromptRuns']
+  /** Two of the thread's snapshots compared in its store (#553), writing nothing; a pair git cannot compare is refused with git's words. */
+  readPromptRunChanges: ThreadPromptRunReads['readPromptRunChanges']
+  /** One file between two of the thread's snapshots, whole on both sides (#553), writing nothing. */
+  readPromptRunFileTexts: ThreadPromptRunReads['readPromptRunFileTexts']
   /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.

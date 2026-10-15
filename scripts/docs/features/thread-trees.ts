@@ -128,7 +128,7 @@ export const THREAD_TREES: FeatureSpec = {
   limits: [
     "Nothing brings a tree's work back into your checkout yet. For a worktree, `git merge enso/<thread-id>` brings what was committed. Uncommitted edits, and everything in a copy, you copy over yourself.",
     "A tree has none of your ignored files until the project's setup copies them in or recreates them. With no setup configured, a build or a test may need its install step first.",
-    "Setup commands run on your machine, as you, whenever a tree is made. The project's own files are read only once you trust the project, but a change to them after that is not asked about again (#753): the commands the trust confirmation listed are the ones there when you trusted it.",
+    "Setup commands run on your machine, as you, whenever a tree is made. The project's own files are read only once you trust the project, and only as you approved them on the project page (#753): a file changed since — by pi, a commit or a pull — is shown there as a diff with **Approve this version**, and until then the next tree is made from the version you approved. A file you never approved runs nothing.",
     'A setup that fails is said in **What this thread built**, with its output; the thread still opens.',
     "The isolation is of files, not of git: in a worktree, bash `git` still reaches your repository's refs, config and remotes.",
     'A tree is kept until its thread is deleted. Nothing removes old trees on its own.',
