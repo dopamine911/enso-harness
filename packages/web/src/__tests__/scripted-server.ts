@@ -17,7 +17,8 @@ import type {
   EnsoTreesListing,
   RuntimeCommand,
 } from '@enso/core'
-import { NO_SESSION_INCIDENTS } from '@enso/core'
+import { EnsoProjectTitleUpdate, NO_SESSION_INCIDENTS } from '@enso/core'
+import { Check } from 'typebox/value'
 
 /**
  * A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames
@@ -61,6 +62,8 @@ export interface ScriptedFetch {
   readonly forks: Array<{ threadId: string; body: unknown }>
   /** Every `POST …/name` (#670) as the thread it names and the body it carried: `{ name }`. */
   readonly names: Array<{ threadId: string; body: unknown }>
+  /** Every `PUT /api/projects/:id/title` (#939) as the project it renames and the body it carried. */
+  readonly projectTitles: Array<{ projectId: string; body: unknown }>
   /** Every `POST …/configure` (#391) as the thread it configures and the settings it carried. */
   readonly configures: Array<{ threadId: string; body: unknown }>
   /** Hold the next prompt's answer; returns the release. */
@@ -98,6 +101,8 @@ export interface ScriptedFetchOptions {
   readonly storedThreads?: EnsoStoredThread[]
   /** What `GET /api/projects` lists (#395); the launch project alone, `p-launch`, when absent. */
   readonly projects?: EnsoProject[]
+  /** What `PUT /api/projects/:id/title` (#939) answers instead of renaming: the server's refusal, said as its text. */
+  readonly projectTitleRefusal?: { status: number; reason: string }
   /** What `GET /api/threads/:id/history` answers for a resume click; keyed by thread id. */
   readonly histories?: Record<string, EnsoThreadHistory>
   /** What `GET /api/threads/:id/history?before=<id>` answers (#739) — "Load earlier"; keyed by that message id. */
@@ -210,6 +215,9 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const names: Array<{ threadId: string; body: unknown }> = []
   const configures: Array<{ threadId: string; body: unknown }> = []
   let storedThreads = options.storedThreads ?? []
+  /** What `GET /api/projects` lists; a rename (#939) changes the title it lists. */
+  let projects = options.projects ?? [SCRIPTED_LAUNCH_PROJECT]
+  const projectTitles: Array<{ projectId: string; body: unknown }> = []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
   /** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
@@ -227,7 +235,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const literalReads: Readonly<Record<string, () => unknown>> = {
     '/api/mode': () => mode,
     '/api/stored-threads': () => storedThreads,
-    '/api/projects': () => options.projects ?? [SCRIPTED_LAUNCH_PROJECT],
+    '/api/projects': () => projects,
   }
   /** A thread analysis each view reads (#45, #441, #453), without its `threadId`; undefined is the 404. */
   const analysisReads: Readonly<Record<string, () => object | undefined>> = {
@@ -360,6 +368,26 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     storedThreads = storedThreads.filter((stored) => stored.threadId !== threadId)
     return new Response(null, { status: 204 })
   }
+  /**
+   * `PUT /api/projects/:id/title` (#939): recorded, and the listed project renamed; a body the real
+   * route would refuse is the 400, an id it does not list the 404, and `projectTitleRefusal` the
+   * answer a test scripts. Undefined for any other request.
+   */
+  const retitleProject = (path: string, init: RequestInit | undefined): Response | undefined => {
+    const matched = init?.method === 'PUT' ? /^\/api\/projects\/([^/]+)\/title$/.exec(path)?.[1] : undefined
+    if (matched === undefined) return undefined
+    const projectId = decodeURIComponent(matched)
+    const body = postedJson(init)
+    projectTitles.push({ projectId, body })
+    if (!Check(EnsoProjectTitleUpdate, body)) return new Response('not a project title update', { status: 400 })
+    const refusal = options.projectTitleRefusal
+    if (refusal !== undefined) return new Response(refusal.reason, { status: refusal.status })
+    const found = projects.find((project) => project.projectId === projectId)
+    if (found === undefined) return new Response(`no registered project has the id ${projectId}`, { status: 404 })
+    const renamed = { ...found, title: body.title.trim() }
+    projects = projects.map((project) => (project.projectId === projectId ? renamed : project))
+    return Response.json(renamed)
+  }
   const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     // Relative URLs, as the browser issues them; the base only makes `pathname` parse.
     const url = new URL(requestedUrl(input), 'http://localhost')
@@ -384,7 +412,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init, path)
     if (action !== undefined) countedReads[action]?.push(path)
-    return Promise.resolve(pageRead(path, url.searchParams.get('before')) ?? new Response('not found', { status: 404 }))
+    return Promise.resolve(
+      retitleProject(path, init) ??
+        pageRead(path, url.searchParams.get('before')) ??
+        new Response('not found', { status: 404 }),
+    )
   }) as typeof fetch
   return {
     fetch: fetchImpl,
@@ -403,6 +435,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     threadTreeReads,
     forks,
     names,
+    projectTitles,
     configures,
     deleteTags,
     holdPrompt: () => {
