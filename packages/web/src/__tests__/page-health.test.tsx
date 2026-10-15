@@ -316,7 +316,7 @@ test('an unhandled rejection and an uncaught error each leave a line naming the 
   ])
 })
 
-test('an error event with no error behind it — another origin’s "Script error." — is logged, and raises no banner', async () => {
+test('an error event with no error object — another origin’s "Script error." — is logged, and raises no banner', async () => {
   const container = await mount(<PageFaultBanner />)
   const unwatch = watchPageFaults(window, () => 't-screen')
   await act(async () => {
@@ -329,8 +329,25 @@ test('an error event with no error behind it — another origin’s "Script erro
   expect(shippedLines('enso.browser.page')).toEqual([
     {
       level: 'warning',
-      message: expect.stringContaining('not from this page'),
+      message: expect.stringContaining('no error object'),
       properties: expect.objectContaining({ error: 'Script error.' }),
+    },
+  ])
+})
+
+test('a thrown value that is not an Error but is not nullish (`throw "boom"`) still raises the banner', async () => {
+  const container = await mount(<PageFaultBanner />)
+  const unwatch = watchPageFaults(window, () => 't-screen')
+  await act(async () => {
+    window.dispatchEvent(new ErrorEvent('error', { error: 'boom', message: 'Uncaught boom' }))
+    await tick()
+  })
+  unwatch()
+  expect(banner(container)?.dataset.pageFault).toBe('error')
+  expect(shippedFaults()).toEqual([
+    {
+      page: PAGE_ID,
+      properties: expect.objectContaining({ trigger: 'error', threadId: 't-screen', error: 'boom' }),
     },
   ])
 })
@@ -399,6 +416,37 @@ test('⚠ a follow the server closed applies nothing: appliedAt is undefined onc
   connection.close()
 })
 
+test('⚠ the chunks a closed follow drains apply nothing: appliedAt stays undefined between them', async () => {
+  const server = createScriptedFetch()
+  const connection = createFollowConnection({ threadId: 't-drain', fetch: server.fetch })
+  const chunks = connection.subscribe()[Symbol.asyncIterator]()
+  const first = chunks.next()
+  await tick()
+  server.frame({ ...SNAPSHOT_IDLE, threadId: 't-drain' })
+  await first
+  // A run open when the server closes: `followClosed` queues its RUN_ERROR, then the follow's end.
+  const release = server.holdPrompt()
+  const sending = connection.send(
+    [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'hello' }] }],
+    undefined,
+    undefined,
+    { threadId: 't-drain', runId: 'r1', clientTools: [], forwardedProps: {} },
+  )
+  await tick()
+  server.closeFollow()
+  let taken = await chunks.next()
+  while (taken.done !== true && taken.value.type !== 'RUN_ERROR') taken = await chunks.next()
+  expect(taken.done).toBe(false)
+  // Taking the RUN_ERROR back resumes the drain; the follow's end is still being handed over.
+  taken = await chunks.next()
+  expect(taken.done).toBe(false)
+  expect(connection.appliedAt()).toBeUndefined()
+  while (taken.done !== true) taken = await chunks.next()
+  release()
+  await sending.catch(() => undefined)
+  connection.close()
+})
+
 test('a frame off the wire schema applies nothing: appliedAt does not move for it', async () => {
   const server = createScriptedFetch()
   const connection = createFollowConnection({ threadId: 't-skew', fetch: server.fetch })
@@ -413,7 +461,7 @@ test('a frame off the wire schema applies nothing: appliedAt does not move for i
   expect(applied).toBeNumber()
   await sleep(30)
   // A newer server's frame this page cannot read: dropped, as a version skew drops it.
-  server.frame(JSON.parse('{"type":"from-a-newer-server","threadId":"t-skew"}'))
+  server.rawFrame('{"type":"from-a-newer-server","threadId":"t-skew"}')
   await tick()
   expect(connection.appliedAt()).toBe(applied)
   connection.close()

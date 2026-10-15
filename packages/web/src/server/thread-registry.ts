@@ -25,6 +25,7 @@
 import {
   ENSO_LOG_EVENTS,
   type EnsoObservation,
+  type EnsoQueuedPrompts,
   type EnsoThreadInspection,
   ensoLogger,
   type ThreadRuntime,
@@ -475,7 +476,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     // A stop must stop: if clearing the queue throws — pi emits the
     // emptied queue to its listeners inside it — the texts are lost and said, and pi is
     // still told to abort. Never the other way round.
-    let cleared: { interrupting: string[]; enqueued: string[] } = { interrupting: [], enqueued: [] }
+    let cleared: EnsoQueuedPrompts = { interrupting: [], enqueued: [] }
     try {
       cleared = thread.hosted.runtime.clearQueue()
     } catch (error: unknown) {

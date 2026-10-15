@@ -5,6 +5,7 @@ import {
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoProviderRefusal,
+  type EnsoQueuedPrompts,
   type EnsoRecordedModel,
   type EnsoRiskThresholds,
   type EnsoSessionIncidents,
@@ -136,7 +137,7 @@ export interface ThreadMount {
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
   /** What pi holds behind the run (#917), interrupting first; both empty when nothing waits or not live. */
-  readonly queue: { interrupting: string[]; enqueued: string[] }
+  readonly queue: EnsoQueuedPrompts
   /** The login waiting on its provider (#348), which Stop can end; undefined when none is, or not live. */
   readonly login: EnsoLoginInProgress | undefined
   /**

@@ -434,6 +434,25 @@ export const EnsoTurnEnd = Type.Object({
 export type EnsoTurnEnd = Static<typeof EnsoTurnEnd>
 
 /**
+ * The prompts pi holds behind the run in flight, in Enso's words (#216): the ones that cut in at
+ * the next step boundary (`interrupting`), then the ones that wait for the run to settle
+ * (`enqueued`). One shape wherever the two lists travel — the `queue` observation, the follow
+ * snapshot (#917), and the runtime's `queued`/`clearQueue`.
+ *
+ * @group Observations
+ * @category Prompt admission
+ */
+export const EnsoQueuedPrompts = Type.Object(
+  { interrupting: Type.Array(Type.String()), enqueued: Type.Array(Type.String()) },
+  { additionalProperties: false },
+)
+/**
+ * @group Observations
+ * @category Prompt admission
+ */
+export type EnsoQueuedPrompts = Static<typeof EnsoQueuedPrompts>
+
+/**
  * What is waiting behind the run in flight (#75, #112, #216): prompts that will INTERRUPT at
  * the next step boundary, and prompts ENQUEUED until the run settles.
  *
@@ -453,8 +472,7 @@ export type EnsoTurnEnd = Static<typeof EnsoTurnEnd>
  */
 export const EnsoQueue = Type.Object({
   kind: Type.Literal('queue'),
-  interrupting: Type.Array(Type.String()),
-  enqueued: Type.Array(Type.String()),
+  ...EnsoQueuedPrompts.properties,
 })
 /**
  * @group Observations
