@@ -20,6 +20,10 @@ interface HeardRun {
   readonly busy: boolean
   readonly waiting: boolean
   readonly at: number
+  /** The frame said `waiting` without reading a question: a take's `run-state`, before any could open. */
+  readonly waitingUnread: boolean
+  /** The frame count at the last frame that said this thread was not busy; undefined when none was heard. */
+  readonly idleAt: number | undefined
 }
 
 export function createStoredThreadsStore(
@@ -31,14 +35,21 @@ export function createStoredThreadsStore(
   let wholeAt = 0
   /**
    * `row` as the frames after the `since`-th say it; the same object when they say nothing new.
-   * ⚠ A frame's `waiting` is read at a take, a release or a drop — at a take, before any question
-   * could open — and a question opening mid-run sends no frame. So while the frame says busy, a
-   * listing that says waiting is kept: a question it saw opened after the take the frame reports.
+   * ⚠ A `run-state`'s `waiting` is read at a build, a take, a release or a drop — at a take, before
+   * any question could open — and a question opening mid-run sends no frame. So when the frame was
+   * a take and no frame since the listing was asked said the thread was idle, a listing that says
+   * waiting is kept: it may have seen a question open in the run that take began. A `run-states`
+   * snapshot reads the open questions, so its `waiting` is not overridden (PR #995 review).
    */
   const corrected = (row: EnsoStoredThread, since: number): EnsoStoredThread => {
-    const said = heard.get(row.threadId) ?? (wholeAt > since ? { busy: false, waiting: false, at: wholeAt } : undefined)
+    const said =
+      heard.get(row.threadId) ??
+      (wholeAt > since
+        ? { busy: false, waiting: false, at: wholeAt, waitingUnread: false, idleAt: wholeAt }
+        : undefined)
     if (said === undefined || said.at <= since) return row
-    const waiting = said.busy ? row.waiting || said.waiting : said.waiting
+    const listingSawThisRun = said.waitingUnread && (said.idleAt === undefined || said.idleAt <= since)
+    const waiting = listingSawThisRun ? row.waiting || said.waiting : said.waiting
     if (row.busy === said.busy && row.waiting === waiting) return row
     return { ...row, busy: said.busy, waiting }
   }
@@ -53,9 +64,13 @@ export function createStoredThreadsStore(
       if (frame.type === 'run-states') {
         heard.clear()
         wholeAt = frames
-        for (const { threadId, busy, waiting } of frame.threads) heard.set(threadId, { busy, waiting, at: frames })
+        for (const { threadId, busy, waiting } of frame.threads) {
+          heard.set(threadId, { busy, waiting, at: frames, waitingUnread: false, idleAt: busy ? undefined : frames })
+        }
       } else {
-        heard.set(frame.threadId, { busy: frame.busy, waiting: frame.waiting, at: frames })
+        const { busy, waiting } = frame
+        const idleAt = busy ? heard.get(frame.threadId)?.idleAt : frames
+        heard.set(frame.threadId, { busy, waiting, at: frames, waitingUnread: busy, idleAt })
       }
       listing.update((rows) => rows.map((row) => corrected(row, frames - 1)))
     },
