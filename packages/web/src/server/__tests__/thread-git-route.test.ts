@@ -1,7 +1,13 @@
 import { expect, test } from 'bun:test'
-import type { EnsoGitFileChange, EnsoGitState } from '@enso/core'
+import type { EnsoGitFileChange, EnsoGitRepository, EnsoGitState } from '@enso/core'
+import type { ChangedFilePaths, ChangedFileTexts } from '@enso/core/git'
 import type { ThreadTreePlace } from '../../host/thread-log-edits.ts'
-import { createThreadChangesRoute, createThreadGitRoute } from '../thread-git-route.ts'
+import {
+  type ChangedFileRoute,
+  createThreadChangedFileRoute,
+  createThreadChangesRoute,
+  createThreadGitRoute,
+} from '../thread-git-route.ts'
 import type { ThreadView } from '../thread-registry.ts'
 import { createFakeAgentHost, createFakeHostedThread } from './fake-hosted-thread.ts'
 
@@ -11,7 +17,7 @@ import { createFakeAgentHost, createFakeHostedThread } from './fake-hosted-threa
  * changed file — asked only of a repository, and a diff git cannot make said as such.
  */
 
-const REPOSITORY: EnsoGitState = {
+const REPOSITORY: EnsoGitRepository = {
   kind: 'repository',
   root: '/work/live',
   scope: '',
@@ -198,4 +204,88 @@ test("a worktree's tree outside a repository reads as before: nothing to diff, n
     copy: null,
   })
   expect(copied).toEqual([])
+})
+
+// ── #461: one changed file whole ─────────────────────────────────────────────────────────────
+
+const TEXTS: ChangedFileTexts = { oldText: { kind: 'text', text: 'a\n' }, newText: { kind: 'text', text: 'b\n' } }
+
+/** The route over a live thread in `git`, recording every path it was asked to read. */
+function changedFileRoute(
+  git: EnsoGitState,
+  options: { readonly tree?: ThreadTreePlace } = {},
+): { read: ChangedFileRoute; asked: ChangedFilePaths[] } {
+  const asked: ChangedFilePaths[] = []
+  const live = createFakeHostedThread({ inspect: { cwd: '/work/live' } })
+  const read = createThreadChangedFileRoute({
+    threads: {
+      peek: (threadId: string) => (threadId === 'live' ? ({ hosted: live.hosted } as ThreadView) : undefined),
+    },
+    host: createFakeAgentHost(() => Promise.reject(new Error('looking must not build'))),
+    servesDirectory: () => true,
+    readGit: () => Promise.resolve(git),
+    readFileTexts: (_repository, paths) => {
+      asked.push(paths)
+      return Promise.resolve(TEXTS)
+    },
+    threadTree: () => Promise.resolve(options.tree),
+    readCopyFileTexts: (_copy, paths) => {
+      asked.push(paths)
+      return Promise.resolve(TEXTS)
+    },
+  })
+  return { read, asked }
+}
+
+/** A project inside a dotfiles repository at `$HOME`: its scope is its own directory. */
+const DOTFILES: EnsoGitRepository = { ...REPOSITORY, root: '/home/me', scope: 'work/shop/' }
+
+test('a file under the scope is read whole, both sides, with its old path for a rename', async () => {
+  const { read, asked } = changedFileRoute(DOTFILES)
+  expect(await read('live', { path: 'work/shop/src/app.ts', oldPath: 'work/shop/src/old.ts' })).toEqual({
+    kind: 'file',
+    file: { threadId: 'live', path: 'work/shop/src/app.ts', oldPath: 'work/shop/src/old.ts', ...TEXTS },
+  })
+  expect(asked).toEqual([{ path: 'work/shop/src/app.ts', oldPath: 'work/shop/src/old.ts' }])
+  expect(await read('nowhere', { path: 'work/shop/src/app.ts', oldPath: null })).toBeUndefined()
+})
+
+// ⚠ #456's limit, held for a path the page names: nothing outside the project's scope is read.
+test('⚠ a path outside the scope is refused with a 400 and never read — as either side, by any spelling', async () => {
+  const { read, asked } = changedFileRoute(DOTFILES)
+  const outside: ChangedFilePaths[] = [
+    { path: '.ssh/id_ed25519', oldPath: null },
+    { path: 'work/shop-other/x.ts', oldPath: null },
+    { path: 'work/shop/../../.ssh/id_ed25519', oldPath: null },
+    { path: 'work/shop/./src/app.ts', oldPath: null },
+    { path: 'work/shop//src/app.ts', oldPath: null },
+    { path: '/home/me/.ssh/id_ed25519', oldPath: null },
+    { path: 'work/shop/src/app.ts', oldPath: '.bashrc' },
+    { path: 'work/shop/src/app.ts\0', oldPath: null },
+  ]
+  for (const paths of outside) {
+    const answer = await read('live', paths)
+    expect(answer).toMatchObject({ kind: 'refused', status: 400 })
+    expect(answer?.kind === 'refused' ? answer.reason : '').toContain('is not a file under work/shop/')
+  }
+  expect(asked).toEqual([])
+  // From the top level the scope is the whole tree, and a climb out of it is still refused.
+  const top = changedFileRoute({ ...DOTFILES, scope: '' })
+  expect(await top.read('live', { path: '../etc/passwd', oldPath: null })).toMatchObject({ status: 400 })
+  expect(await top.read('live', { path: '.bashrc', oldPath: null })).toMatchObject({ kind: 'file' })
+})
+
+test("a copy's file is read from its store under the copy's whole tree; no repository and no copy is a 409", async () => {
+  const copy = changedFileRoute({ kind: 'not-a-repository' }, { tree: COPY_TREE })
+  expect(await copy.read('live', { path: 'src/app.ts', oldPath: null })).toMatchObject({ kind: 'file' })
+  expect(await copy.read('live', { path: '../outside.ts', oldPath: null })).toMatchObject({ status: 400 })
+  expect(copy.asked).toEqual([{ path: 'src/app.ts', oldPath: null }])
+  const nowhere = changedFileRoute({ kind: 'not-a-repository' })
+  expect(await nowhere.read('live', { path: 'src/app.ts', oldPath: null })).toMatchObject({ status: 409 })
+  const broken = changedFileRoute({ kind: 'unavailable', reason: 'fatal: dubious ownership' })
+  expect(await broken.read('live', { path: 'src/app.ts', oldPath: null })).toEqual({
+    kind: 'refused',
+    status: 409,
+    reason: 'git could not answer: fatal: dubious ownership',
+  })
 })

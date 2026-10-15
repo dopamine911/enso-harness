@@ -91,6 +91,14 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'load',
   },
   {
+    key: 'GH_TOKEN',
+    source: 'scripts/review/review-pr.ts',
+    reader: '`scripts/review/review-pr.ts#reviewPoster` (child environment write)',
+    purposeAndDefault:
+      "Set only when `~/.config/enso-review/app.json` exists: the review App's one-hour installation token, for this repository only, so the local reviewer's `gh` reads and posts as the App's bot (#981). Absent: the reviewer's `gh` uses the owner's stored login.",
+    phase: 'per-call',
+  },
+  {
     key: 'FORCE_COLOR',
     source: 'scripts/gate.ts',
     reader: '`scripts/gate.ts#runGate` (child environment write)',

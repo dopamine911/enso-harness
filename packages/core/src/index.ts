@@ -76,9 +76,11 @@ export {
   EnsoGitBaselineRule,
   EnsoGitFileChange,
   EnsoGitFileStatus,
+  EnsoGitFileText,
   EnsoGitOperation,
   EnsoGitRepository,
   EnsoGitState,
+  EnsoThreadChangedFile,
   EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'
@@ -227,7 +229,10 @@ export {
 export {
   decisionAction,
   ENSO_DRAFTED_RULE_GROUPS,
+  ENSO_EMPTY_RULE_RECORD,
+  EnsoDisabledRule,
   type EnsoDraftedRuleGroup,
+  EnsoGroupAddedRule,
   EnsoPermissionAction,
   EnsoPermissionCheckRequest,
   type EnsoPermissionDecision,
@@ -240,6 +245,7 @@ export {
   type EnsoPolicyKnobs,
   type EnsoPolicyRow,
   type EnsoPolicyRowOwner,
+  EnsoRuleRecord,
   type EnsoSurfaceValue,
   effectivePermission,
   effectiveRows,
@@ -248,6 +254,7 @@ export {
   policyKnobs,
   policyRows,
   runsAnyCode,
+  toPatternMap,
   withoutRule,
   withRule,
   withRuleMoved,
@@ -545,6 +552,17 @@ export {
   type ThreadTreeRecord,
 } from './thread-tree-record.ts'
 export { summarizeToolInput } from './tool-input.ts'
+export {
+  ENSO_IMAGES_KIND,
+  ENSO_QUESTIONNAIRE_ANSWERS_KIND,
+  ENSO_WRITE_RECEIPT_KIND,
+  EnsoImagesProps,
+  EnsoQuestionnaireAnswersProps,
+  EnsoWriteReceiptProps,
+  isEnsoImagesProps,
+  isEnsoQuestionnaireAnswersProps,
+  isEnsoWriteReceiptProps,
+} from './tool-result-kinds.ts'
 export {
   ENSO_TOOL_RESULT_KEY,
   EnsoToolResultDescriptor,

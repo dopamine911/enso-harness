@@ -196,9 +196,21 @@ function dataUrlOf(value: string): [string, string] | undefined {
   return match?.[1] !== undefined && match[2] !== undefined ? [match[1], match[2]] : undefined
 }
 
-/** `data:` lines of an SSE body, one parsed frame at a time; comments (keepalives) are skipped. */
+/**
+ * `data:` lines of an SSE body, one parsed frame at a time; comments (keepalives) are skipped.
+ *
+ * ⚠ `signal` ends a read that is WAITING, not only the next one (#915): the reader is cancelled the
+ * moment it aborts. A loop that only checked it between reads sat in `reader.read()` for as long as
+ * the server kept the stream open (all of a run, keepalives every 5 s), so a subscription that had
+ * to stop could not, whatever the `fetch` underneath did with the same signal.
+ */
 async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<unknown> {
   const reader = body.getReader()
+  const cancel = (): void => {
+    // A body the fetch already failed rejects the cancel too: the read it ends is what matters.
+    void reader.cancel().catch(() => undefined)
+  }
+  signal.addEventListener('abort', cancel, { once: true })
   const decoder = new TextDecoder()
   let buffered = ''
   try {
@@ -213,6 +225,7 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
       }
     }
   } finally {
+    signal.removeEventListener('abort', cancel)
     reader.releaseLock()
   }
 }
@@ -453,8 +466,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return run
   }
 
+  /**
+   * End a run: its closing chunk, once. A run no longer open says nothing — closed already, or
+   * forgotten when the client stopped taking chunks (`consumerStopped`): TanStack reset it, and a
+   * late receipt's chunk would be yielded ahead of the next subscription's snapshot.
+   */
   function closeRun(run: OpenRun, chunk: StreamChunk): void {
-    runs.delete(run.runId)
+    if (!runs.delete(run.runId)) return
     if (current === run) current = undefined
     push(chunk)
   }
@@ -665,12 +683,114 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return { kind: 'refused', detail, failure: new Error(`follow ${threadId}: ${detail}`) }
   }
 
+  /**
+   * A follow that closed, whoever closed it. Its open runs end as errors, or the client would wait
+   * on them forever — unless the client is the one that stopped (`consumerGone`): nothing will take
+   * a chunk any more, so they are forgotten instead of queued for nobody.
+   *
+   * The follow ended under this page (#103 receipt, step 8) — not this page releasing it, nor this
+   * subscription stopping itself (`follow`). Said as a chunk so the page can show it and the debug
+   * pane refetches: with no run open nothing else would mention it, and the pane would keep
+   * presenting its last fetch of a session that may no longer exist as current.
+   * ⚠ Said even while the page is leaving (#664): the follow HAS ended, and a page the
+   * back/forward cache restores must know it — a live-looking page over a dead follow is what #274
+   * ended. Only the "failed" log line was false; that one is gated.
+   */
+  function followClosed(follow: AbortSignal, consumerGone: boolean): void {
+    if (consumerGone) {
+      runs.clear()
+      current = undefined
+    }
+    for (const run of runs.values()) {
+      closeRun(run, {
+        type: EventType.RUN_ERROR,
+        runId: run.runId,
+        message: 'the follow closed before the run settled',
+      })
+    }
+    if (!follow.aborted) push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
+    wake?.()
+    wake = undefined
+  }
+
+  /**
+   * The client stopped taking chunks while the follow was live (#915): said, and what it never took
+   * is dropped.
+   *
+   * ⚠ TanStack's loop leaves a subscription for two reasons only: its own abort (which is
+   * `abort`, and silent) or a THROW from handling the chunk it was just handed — its stream
+   * processor, a callback of ours, a React update. That throw lands in TanStack's `for await`, and
+   * this adapter only sees the loop return. Before this, the return waited on a follow the server
+   * keeps open for the whole run: the loop never finished, TanStack never reached the `catch` that
+   * reports it, and the page stopped applying the thread without a word while frames kept
+   * arriving — #915, a tab frozen at a `write` for 20 minutes and 23 tool calls, nothing logged.
+   * The chunk is named; the exception is TanStack's to hand on (`chat.error`, `thread-pane.tsx`).
+   */
+  function consumerStopped(state: Following, abort: AbortSignal): void {
+    if (state.handing === undefined || abort.aborted) return
+    state.consumerGone = true
+    queue.length = 0
+    const name = state.handing.type === EventType.CUSTOM ? state.handing.name : state.handing.type
+    problem(
+      "this page stopped applying the thread's updates: handling a {chunk} chunk failed. What it shows is as of then, and the thread may have moved on — reload the page to catch up",
+      { chunk: name },
+    )
+  }
+
+  /** One subscription's state the pump and the yielding loop share. */
+  interface Following {
+    /** The pump has stopped: nothing more will be queued. */
+    ended: boolean
+    /** The client stopped taking chunks (`consumerStopped`). */
+    consumerGone: boolean
+    /** The chunk handed over and not yet taken back: the one being handled if the client stops. */
+    handing: StreamChunk | undefined
+  }
+
+  /**
+   * Frames off the follow, observed into the queue, on their own loop so `send` can interleave
+   * chunks. Ends when the server closes the follow, the wire fails, or `follow` aborts.
+   */
+  async function pumpFrames(frames: AsyncGenerator<unknown>, follow: AbortSignal, state: Following): Promise<void> {
+    try {
+      for await (const raw of frames) {
+        if (follow.aborted) break
+        if (admitted(raw)) observe(raw)
+      }
+      // The server closed it: `followClosed` says so on the page; this is the record of why.
+      if (!follow.aborted && !leaving()) log.warn('the follow ended: the server closed it')
+    } catch (error) {
+      // ⚠ #664: a stream the browser cut because the page is leaving is not a failure — every
+      // reload logged "the follow failed: TypeError: network error" for each followed thread.
+      if (!follow.aborted && !leaving()) problem('the follow failed: {error}', { error: String(error) })
+    } finally {
+      state.ended = true
+      followClosed(follow, state.consumerGone)
+    }
+  }
+
+  /**
+   * The next queued chunk, or undefined when none is. Its message is read here, at the hand-over,
+   * not where the chunk was queued: TanStack processes one chunk to the end — custom events
+   * included — before it asks for the next, so this is the message of the chunk being processed,
+   * whatever the pump has queued behind it.
+   */
+  function takeQueued(): StreamChunk | undefined {
+    const next = queue.shift()
+    if (next?.type === EventType.TEXT_MESSAGE_START) streamMessageId = next.messageId
+    return next
+  }
+
   async function* subscribe(signal?: AbortSignal): AsyncIterable<StreamChunk> {
     // The page's own end (#272) rides with TanStack's: either one closes the socket, and a
     // connection already released never opens one.
     if (released.signal.aborted) return
     const abort = signal === undefined ? released.signal : AbortSignal.any([signal, released.signal])
-    const opening = await openFollow(abort)
+    // This subscription's own end (#915): when the loop below is done, for any reason, the socket
+    // closes and the pump ends with it — nothing waits on a stream the server keeps open.
+    const stop = new AbortController()
+    const follow = AbortSignal.any([abort, stop.signal])
+    const opening = await openFollow(follow)
     if (opening.kind === 'released') return
     if (opening.kind === 'refused') {
       // A throwing fetch is the same fact as a refusing one (#274) — unless the CALLER is the
@@ -678,60 +798,26 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       if (!abort.aborted) yield* followNeverOpened(opening.detail)
       throw opening.failure
     }
-    const frames = readSseFrames(opening.body, abort)
-    // Frames are consumed on their own loop so `send` can interleave chunks; this loop
-    // yields whatever is queued, waiting when nothing is.
-    let ended = false
-    const pump = (async () => {
-      try {
-        for await (const raw of frames) {
-          if (admitted(raw)) observe(raw)
-        }
-      } catch (error) {
-        // ⚠ #664: a stream the browser cut because the page is leaving is not a failure — every
-        // reload logged "the follow failed: TypeError: network error" for each followed thread.
-        if (!abort.aborted && !leaving()) problem('the follow failed: {error}', { error: String(error) })
-      } finally {
-        ended = true
-        // The follow closed under open runs: the client would otherwise wait forever.
-        for (const run of runs.values()) {
-          closeRun(run, {
-            type: EventType.RUN_ERROR,
-            runId: run.runId,
-            message: 'the follow closed before the run settled',
-          })
-        }
-        // The follow ended under this page (#103 receipt, step 8) — not this page releasing it
-        // (`abort`). Said as a chunk so the page can show it and the debug pane refetches:
-        // with no run open nothing else would mention it, and the pane would keep
-        // presenting its last fetch of a session that may no longer exist as current.
-        // ⚠ Said even while the page is leaving (#664): the follow HAS ended, and
-        // a page the back/forward cache restores must know it — a live-looking page over a dead
-        // follow is what #274 ended. Only the "failed" log line was false; that one is gated.
-        if (!abort.aborted) {
-          push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
-        }
-        wake?.()
-        wake = undefined
-      }
-    })()
+    // The pump fills the queue; this loop hands it over, waiting when nothing is queued.
+    const state: Following = { ended: false, consumerGone: false, handing: undefined }
+    const pump = pumpFrames(readSseFrames(opening.body, follow), follow, state)
     try {
       while (!abort.aborted) {
-        const next = queue.shift()
-        if (next !== undefined) {
-          // Read here, at the yield, not where the chunk was queued: TanStack processes one chunk
-          // to the end — custom events included — before it asks for the next, so this is the
-          // message of the chunk being processed, whatever the pump has queued behind it.
-          if (next.type === EventType.TEXT_MESSAGE_START) streamMessageId = next.messageId
-          yield next
+        const next = takeQueued()
+        if (next === undefined) {
+          if (state.ended) return
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
           continue
         }
-        if (ended) return
-        await new Promise<void>((resolve) => {
-          wake = resolve
-        })
+        state.handing = next
+        yield next
+        state.handing = undefined
       }
     } finally {
+      consumerStopped(state, abort)
+      stop.abort()
       await pump
     }
   }

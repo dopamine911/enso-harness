@@ -164,7 +164,12 @@ The web's half — renderers keyed by kind, and the one definition of what state
 
 <!-- source: packages/web/src/EnsoToolResult.tsx#EnsoRendererMap -->
 ```ts
-/** Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. */
+/**
+ * Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. A renderer
+ * declines a descriptor by returning `null`, `undefined`, a boolean or `''`, and the text is shown
+ * instead of a blank box. Only those values are seen: an empty array or fragment, or an element
+ * whose component renders `null`, is drawn as given — a renderer that declines returns `null`.
+ */
 export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
 ```
 
@@ -188,11 +193,14 @@ entry carries it), so a live transcript and a resumed one agree. The builder:
 <!-- source: packages/web/src/host/map-events.ts#descriptorFrom -->
 ```ts
 /**
- * Build our descriptor from pi's `details`.
+ * Build our descriptor from pi's `details` and `content`.
  *
- * ⚠ Only truncation is mapped today, and deliberately: `details` is tool-specific and
- * inventing a `kind` per tool here would put rendering decisions in the transport. A tool
- * that wants a richer descriptor should emit one; this is the floor, not the ceiling.
+ * ⚠ No `kind` is invented per tool here: that would put rendering decisions in the transport. A
+ * tool that wants a richer descriptor emits one in its `details`, under {@link ENSO_TOOL_RESULT_KEY}
+ * (`ask_user`'s answers, the `write` receipt — #920), and it is taken as it stands. Truncation is
+ * mapped for every tool; an image the tool returned in its `content` (`read` of a PNG — #920), which
+ * the text this seam keeps names only as `[image content]`, is mapped unless the tool emits its own
+ * descriptor — then the tool's descriptor stands and the image is not drawn (no tool does both).
  *
  * `truncation` is pi's `TruncationResult` — the one shape every built-in tool (read, bash, grep,
  * find, ls) puts there (#411: this once read `shown`/`total`/`unit`, which pi never sends, so no
@@ -200,26 +208,37 @@ entry carries it), so a live transcript and a resumed one agree. The builder:
  * the byte limit is what cut them — the reader counts lines, and pi's own notice does
  * (`Showing lines 1-1841 of 3000 (50.0KB limit)`). Only a cut inside one line is said in bytes.
  */
-export function descriptorFrom(toolName: string, details: unknown): EnsoToolResultDescriptor | undefined {
-  if (typeof details !== 'object' || details === null) return undefined
-  const truncation = (details as { truncation?: Partial<TruncationResult> | null }).truncation
-  if (truncation?.truncated !== true) return undefined
-  const { outputLines, totalLines, outputBytes, totalBytes } = truncation
-  const kind = `pi.tool.${toolName}`
-  if (typeof outputLines === 'number' && typeof totalLines === 'number' && outputLines < totalLines) {
-    return { kind, props: {}, truncated: { shown: outputLines, total: totalLines, unit: 'lines' } }
-  }
-  if (typeof outputBytes !== 'number' || typeof totalBytes !== 'number') return undefined
-  return { kind, props: {}, truncated: { shown: outputBytes, total: totalBytes, unit: 'bytes' } }
+export function descriptorFrom(
+  toolName: string,
+  details: unknown,
+  content: unknown,
+): EnsoToolResultDescriptor | undefined {
+  const record = typeof details === 'object' && details !== null ? (details as Record<string, unknown>) : undefined
+  const emitted = readEnsoToolResultDescriptor(record)
+  const images = imagesOf(content)
+  const truncated = truncationOf(record)
+  if (emitted === undefined && images.length === 0 && truncated === undefined) return undefined
+  const base =
+    emitted ??
+    (images.length > 0 ? { kind: ENSO_IMAGES_KIND, props: { images } } : { kind: `pi.tool.${toolName}`, props: {} })
+  return truncated === undefined ? base : { ...base, truncated }
 }
 ```
 
-Only truncation is mapped, and the `kind` is `pi.tool.<toolName>` with empty `props` — the floor, not
-the ceiling: a tool that wants a richer descriptor should emit one. **No tool does today.**
-`web-fetch` and `web-search` return `details: undefined` on every path
-(`web-fetch/index.ts#refusal`, `web-fetch/index.ts#renderResponse`; `web-search/index.ts#progressForwarder`, `web-search/index.ts#refusal`, `web-search/index.ts#renderUngrounded`, `web-search/index.ts#renderOutcome`),
-so no extension of ours attaches a descriptor. `toolResultMetadata` (`host/map-events.ts#toolResultMetadata`) is the
-one place the key is written onto a part's `metadata`.
+Three things are mapped (#920). **A tool's own descriptor**, under `ENSO_TOOL_RESULT_KEY` in its
+`details`, is taken as it stands: `ask_user` emits `enso.questionnaire-answers` (the questions beside
+the answers, `ask-user/index.ts#textResult`), and the `write-receipt` extension adds `enso.write-receipt`
+(whether the file existed when the call started — in a parallel batch, before any call of the batch
+ran, an earlier write of the batch to the same path counting as there unless a guard blocked it;
+`write-receipt/index.ts#writeReceipt`)
+to pi's `write`, whose own `details` are empty. **An image the tool returned** in its `content` becomes
+`enso.images` — its bytes, never a URL — unless the tool emitted its own descriptor, which stands.
+**Truncation** goes on whichever of these it is, else on `pi.tool.<toolName>` with
+empty `props`. The kinds and their props schemas are `core/src/tool-result-kinds.ts`. `web-fetch` and
+`web-search` still return `details: undefined` on every path
+(`web-fetch/index.ts#refusal`, `web-fetch/index.ts#renderResponse`; `web-search/index.ts#progressForwarder`, `web-search/index.ts#refusal`, `web-search/index.ts#renderUngrounded`, `web-search/index.ts#renderOutcome`).
+`toolResultMetadata` (`host/map-events.ts#toolResultMetadata`) is the one place the key is written
+onto a part's `metadata`.
 
 **Carried** on the observation (`EnsoToolResultObservation.descriptor`), then onto the state layer's
 result event under the same key — as an extra field, because that event declares `content` and
@@ -242,10 +261,15 @@ is the point, not a courtesy* (the header of `EnsoToolResult.tsx`): a type-tag d
 payload showing as nothing, indistinguishable from a successful empty result. `toolResultState` is also
 what the status bar's `running <tool>` reads (`thread-status.tsx#describeActivity`).
 
-**The renderer map is empty** (`message-row.tsx#descriptorRenderers`): every result falls through to the text form,
-which is exactly what the contract promises for an unknown kind, so empty is the honest default. A
-renderer is added when a tool earns one. A truncated `read` or `bash` result therefore reads as its
-text and `showing 1841 of 3000 lines` under it.
+**The renderer map holds Enso's own kinds** (`message-row.tsx#descriptorRenderers`, filled from
+`tool-views.tsx#TOOL_RESULT_RENDERERS`, #920): a returned image as a thumbnail, `ask_user`'s questions
+with their chosen answers, the write receipt. Each checks its `props` against the core schema and draws
+nothing when they do not check, which `EnsoToolResult` treats as an unknown kind: the text, never a
+blank. Any other result reads as its text through the tool's own text view where it has one
+(`tool-views.tsx#toolTextView`: `bash` as a terminal, `read` as a line count over a folded preview,
+`grep`/`find`/`ls` as a count), with `showing 1841 of 3000 lines` under it when truncated. The row
+draws the call's arguments per tool too (`tool-views.tsx#ToolInput`; an unknown tool's as a
+`key: value` list), and its `raw` switch shows the model's JSON and the result's text as they came.
 
 **Second implementation:** none for a surface. `packages/web/src/__tests__/tool-result.test.tsx` renders
 `EnsoToolResult` over a one-entry `EnsoRendererMap` (`tool-result.test.tsx#renderers`) and pins the branches: a known kind renders
@@ -272,10 +296,11 @@ in `@enso/core` and consumed by name. Two facts to know, neither a leak of this 
 - **The descriptor is derived from the runtime's `details` field**, read by the mapper as the
   vendor's own type (`TruncationResult`, imported by `host/map-events.ts`; `result?.details` in `host/map-events.ts#mapToolExecutionEnd`). That is L2's
   event-side half, inventoried on the thread-runtime page; the mapper is the one place it is read.
-- **The `kind` values in use are the runtime's tool names** — `pi.tool.bash`, `pi.tool.read` — minted
+- **The `kind` values minted per tool are the runtime's tool names** — `pi.tool.bash`, `pi.tool.read` —
   by `descriptorFrom`. A kind is a string by contract and the renderer map has no entry for any
-  of them, so today the vendor's name is data, not a dependency; a renderer keyed on `pi.tool.*` would
-  make it one.
+  of them, so the vendor's name is data, not a dependency; a renderer keyed on `pi.tool.*` would
+  make it one. The per-tool views key on the tool's NAME (`bash`, `read`), which is the call's, not
+  the descriptor's.
 
 ## Pivot cost
 
@@ -284,7 +309,7 @@ Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_
 **Replace the web renderer** (a different state layer, a different component kit) and the files that
 change are web-local: `EnsoToolResult.tsx` (the map, the state, the fallback), `selected-message-part.tsx`
 and `thread-status.tsx` (its two callers), `to-agui.ts` (where the descriptor rides onto the stream),
-and `message-row.tsx`'s empty map. `packages/core/src/tool-result.ts` and the observation's
+`message-row.tsx`'s map and `tool-views.tsx` (the per-tool views and Enso's renderers). `packages/core/src/tool-result.ts` and the observation's
 `descriptor` field do not change; `tool-result.test.tsx`'s reader tests run against core
 alone.
 

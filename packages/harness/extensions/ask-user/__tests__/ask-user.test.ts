@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import {
   ASK_USER_TOOL_NAME,
+  ENSO_QUESTIONNAIRE_ANSWERS_KIND,
+  ENSO_TOOL_RESULT_KEY,
   type EnsoQuestion,
   type EnsoQuestionnaireResult,
   QUESTIONNAIRE_COMPONENT_KEY,
@@ -25,7 +27,7 @@ interface CapturedTool {
       onUpdate: undefined,
       extensionContext: unknown,
     ]
-  ) => Promise<{ content: { type: string; text: string }[]; terminate?: boolean }>
+  ) => Promise<{ content: { type: string; text: string }[]; terminate?: boolean; details?: unknown }>
 }
 
 function loadTool(): CapturedTool {
@@ -110,6 +112,31 @@ test('outside a terminal it asks as ONE card carrying the whole questionnaire, a
       '- Which checks? → lint, tests, in their own words: "e2e"',
     ].join('\n'),
   )
+})
+
+// #920: the card shows question → chosen answer from the result's own descriptor, not the model's
+// arguments — every answer, the multi-choice ones and the free text included; a decline carries none.
+test("the result's details describe it: the questions beside the answers, none for a decline", async () => {
+  const answers = [{ selected: ['SQLite'] }, { selected: ['lint', 'tests'], other: 'e2e' }]
+  const answered = scriptedContext({ mode: 'rpc', card: { answers } })
+  const result = await loadTool().execute(
+    'call-1',
+    { questions: [DATABASE, CHECKS] },
+    undefined,
+    undefined,
+    answered.context,
+  )
+  expect(result.details).toEqual({
+    [ENSO_TOOL_RESULT_KEY]: {
+      kind: ENSO_QUESTIONNAIRE_ANSWERS_KIND,
+      props: { questions: [DATABASE, CHECKS], answers },
+    },
+  })
+  const declined = scriptedContext({ mode: 'rpc', card: { cancelled: true } })
+  const none = await loadTool().execute('call-1', { questions: [DATABASE] }, undefined, undefined, declined.context)
+  expect(none.details).toEqual({
+    [ENSO_TOOL_RESULT_KEY]: { kind: ENSO_QUESTIONNAIRE_ANSWERS_KIND, props: { questions: [DATABASE] } },
+  })
 })
 
 // ⚠ #379, #465: an unanswered question ends the turn — the user's "no" is a stop, not a cue for

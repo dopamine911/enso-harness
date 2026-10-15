@@ -27,6 +27,7 @@ import {
   NO_SESSION_INCIDENTS,
   sessionEvalOf,
 } from '@enso/core'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { UIMessage } from '@tanstack/ai-client'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
@@ -45,6 +46,7 @@ import {
 import { ensureDom, releaseDom } from './dom-environment.ts'
 import {
   createScriptedFetch,
+  isFollowRequest,
   requestedUrl,
   type ScriptedFetch,
   type ScriptedFetchOptions,
@@ -5091,5 +5093,46 @@ test('the launch project renames from its page as any project does (#939)', asyn
   } finally {
     window.history.replaceState(null, '', '/')
     await page.unmount()
+  }
+})
+
+// PR #974 review: the record of WHY the subscription ended on an error is the pane's own
+// (`useSubscriptionFailureRecord`) — the exception with its stack, beside the adapter's notice.
+// Driven by a follow the fetch refuses: the hook records every subscription error alike, and
+// this is the one a pane test can raise without a frame handler that throws.
+test('a subscription whose follow is refused leaves the record of why: the exception, its stack and the thread', async () => {
+  const logs = await recordEnsoLogs()
+  const server = createScriptedFetch()
+  globalThis.fetch = server.fetch
+  const broken: typeof fetch = Object.assign(
+    (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+      isFollowRequest(input) ? Promise.reject(new TypeError('the follow broke')) : server.fetch(input, init),
+    { preconnect: server.fetch.preconnect },
+  )
+  const stores = mintThread(broken)
+  stores.launch.set(false)
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root: Root = createRoot(container)
+  try {
+    await flush(async () => {
+      root.render(
+        <ThreadPane threadId={stores.threadId} active debugOpen={false} view="chat" onView={() => undefined} />,
+      )
+      await tick()
+    })
+    const record = await eventually(() => {
+      const found = logs.records.find((line) => line.rawMessage === 'the live subscription ended on an error: {error}')
+      if (found === undefined) throw new Error('expected the subscription failure record')
+      return found
+    })
+    expect(record.level).toBe('warning')
+    expect(record.category).toEqual(['enso', 'browser', 'follow'])
+    expect(record.properties).toMatchObject({ threadId: stores.threadId, error: 'TypeError: the follow broke' })
+    expect(record.properties.stack).toBeString()
+  } finally {
+    await flush(async () => root.unmount())
+    container.remove()
+    await releaseEnsoLogs()
   }
 })
