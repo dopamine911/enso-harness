@@ -2,7 +2,8 @@
  * git, read (#453) — THE one way Enso runs git: the run-context recorder's revision probe
  * (#435) and the web server's `GET /api/threads/:threadId/git` both come through {@link runGitIn}.
  * {@link readGitState} turns a cwd into an {@link EnsoGitState}, the last-push baseline included;
- * {@link readGitChanges} lists every file that differs from that baseline, with its patch (#452).
+ * {@link readGitChanges} lists every file that differs from that baseline, with its patch (#452);
+ * {@link readGitFileTexts} reads one of them whole, on both sides, for the Diff view to expand (#461).
  *
  * ⚠ GIT IN THE GIVEN CWD, NOT THE ENVIRONMENT'S REPOSITORY. git honours an inherited `GIT_DIR` /
  * `GIT_WORK_TREE` / `GIT_INDEX_FILE` over its working directory, and git exports them to every
@@ -37,11 +38,13 @@
  */
 
 import { type ChildProcess, execFile } from 'node:child_process'
-import { existsSync, lstatSync } from 'node:fs'
+import { constants, existsSync, lstatSync } from 'node:fs'
+import { type FileHandle, lstat, open, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
   EnsoGitBaseline,
   EnsoGitFileChange,
+  EnsoGitFileText,
   EnsoGitOperation,
   EnsoGitRepository,
   EnsoGitState,
@@ -460,9 +463,12 @@ export async function readGitState(runGit: GitRunner, cwd: string): Promise<Enso
 /**
  * The files under `scope` and nothing else: from the top level whatever the cwd (`top`), and
  * character for character, so a directory named `[x]` or `*` is not a pattern (`literal`). An empty
- * scope is the whole working tree.
+ * scope is the whole working tree. The one spelling of a path given to git — the snapshot store's
+ * too.
+ *
+ * @group Git
  */
-function scopePathspec(scope: string): string {
+export function scopePathspec(scope: string): string {
   return `:(top,literal)${scope}`
 }
 
@@ -782,4 +788,215 @@ export async function readGitChanges(
       return listed.stdout.split('\0')
     },
   })
+}
+
+// ── One changed file, whole (#461) ─────────────────────────────────────────────────────────────
+
+/**
+ * The largest file whose text is sent, either side, in bytes — the 512 KiB one file's patch may be
+ * ({@link MAX_PATCH_CHARS}). A side past it is `too-large`; the Diff view cannot expand a file
+ * whose old side is past it (the runs come from the old side alone), and says so.
+ */
+const MAX_FILE_TEXT_BYTES = 512 * 1024
+
+/**
+ * Whether `path` names a file under `scope` and nothing else (#461): relative to the root,
+ * `/`-separated, no empty, `.` or `..` segment, no NUL, and starting with `scope` — `''` for the
+ * whole tree, else `/`-ended ({@link EnsoGitRepository}'s `scope`). ⚠ THE LIMIT #456 SET, held for
+ * a file the page names: a project inside a dotfiles repository at `$HOME` reads its own files,
+ * never another file under home.
+ *
+ * @group Git
+ */
+export function isPathInScope(scope: string, path: string): boolean {
+  if (path.includes('\0') || !path.startsWith(scope)) return false
+  return path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+}
+
+/**
+ * A changed file's two paths: now, and at the baseline when it was renamed or copied.
+ *
+ * @group Git
+ */
+export interface ChangedFilePaths {
+  readonly path: string
+  readonly oldPath: string | null
+}
+
+/**
+ * A changed file's two sides, each its text or why not.
+ *
+ * @group Git
+ */
+export interface ChangedFileTexts {
+  readonly oldText: EnsoGitFileText
+  readonly newText: EnsoGitFileText
+}
+
+/**
+ * Whether the work tree's file is one the changes may list: listed, not listed (ignored), or the
+ * listing failed, in git's or the store's words.
+ *
+ * @group Git
+ */
+export type WorkTreeListing = 'listed' | 'not-listed' | { readonly failed: string }
+
+/**
+ * Where {@link readFileTexts} reads a changed file: from `root`, the old side at `base` — `null`
+ * before the first commit, where there is no old side — and the new side in the work tree.
+ *
+ * @group Git
+ */
+export interface FileTextPlace {
+  readonly root: string
+  readonly base: string | null
+  /**
+   * Whether the work tree's `path` is a file the changes may list — tracked, or untracked and not
+   * ignored. One that is not is never read: an ignored `.env` is no more shown than listed.
+   */
+  readonly listed: (path: string) => Promise<WorkTreeListing>
+}
+
+const NO_FILE: EnsoGitFileText = { kind: 'none' }
+
+const unreadable = (reason: string): EnsoGitFileText => ({ kind: 'unavailable', reason })
+
+/** A file's text as sent: binary when it holds a NUL, as git decides it. */
+const textOf = (text: string): EnsoGitFileText => (text.includes('\0') ? { kind: 'binary' } : { kind: 'text', text })
+
+/** `git ls-tree -l -z` records: `<mode> <type> <object> <size>\t<path>`, NUL-ended. */
+const TREE_ENTRY = /^\d+ (\w+) ([0-9a-f]+) +(\d+|-)\t(.*)$/s
+
+/** The blob `path` names in `ls-tree`'s output, with its size; `undefined` for none. */
+function blobIn(listing: string, path: string): { readonly object: string; readonly size: number } | undefined {
+  for (const record of listing.split('\0')) {
+    const entry = TREE_ENTRY.exec(record)
+    if (entry?.[1] === 'blob' && entry[4] === path) return { object: entry[2] ?? '', size: Number(entry[3]) }
+  }
+  return undefined
+}
+
+/**
+ * `path`'s text at `base`. ⚠ `cat-file blob` prints the object as stored: no textconv, filter or
+ * eol conversion runs unless asked for (`--textconv`, `--filters`), so nothing the repository
+ * configures runs here — the guarantee `git show --no-textconv` would give, with the size read first.
+ */
+async function readCommittedText(
+  runGit: GitRunner,
+  root: string,
+  base: string,
+  path: string,
+): Promise<EnsoGitFileText> {
+  const listed = await runGit(['ls-tree', '-l', '-z', base, '--', scopePathspec(path)], root)
+  if (listed.code !== 0) return unreadable(reasonOf(listed))
+  const blob = blobIn(listed.stdout, path)
+  if (blob === undefined) return NO_FILE
+  if (blob.size > MAX_FILE_TEXT_BYTES) return { kind: 'too-large', bytes: blob.size }
+  const shown = await runGit(['cat-file', 'blob', blob.object], root)
+  return shown.code === 0 ? textOf(shown.stdout) : unreadable(reasonOf(shown))
+}
+
+const LINKED = unreadable('a symbolic link, which is not followed')
+
+/**
+ * `path`'s text in the work tree; none when nothing is there — a deleted file, or one under a
+ * directory that became a file. ⚠ NEVER THROUGH A SYMBOLIC LINK: a link inside the scope can point
+ * anywhere, so the file's real path must be the one asked for — no link on the way — and it is
+ * opened `O_NOFOLLOW`. That guards only the last name, and the agent writes the tree meanwhile: a
+ * directory on the way may become a link between the check and the open. So the check runs again
+ * after the open, and the path must still name the very file opened (its device and inode). Then
+ * it is held to a regular file of at most {@link MAX_FILE_TEXT_BYTES}, and no more than its size
+ * at the open is read. A file the changes would not list is not read.
+ */
+async function readWorkTreeText(place: FileTextPlace, path: string): Promise<EnsoGitFileText> {
+  const asked = join(await realpath(place.root), path)
+  try {
+    if ((await realpath(asked)) !== asked) return LINKED
+    const listing = await place.listed(path)
+    if (listing === 'not-listed') return unreadable('not a file the changes list: an ignored one')
+    if (listing !== 'listed') return unreadable(`whether the changes list it is unknown: ${listing.failed}`)
+    const file = await open(asked, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const facts = await file.stat()
+      if ((await realpath(asked)) !== asked) return LINKED
+      const there = await lstat(asked)
+      if (there.dev !== facts.dev || there.ino !== facts.ino) return unreadable('the file moved while it was read')
+      if (!facts.isFile()) return unreadable('not a regular file')
+      if (facts.size > MAX_FILE_TEXT_BYTES) return { kind: 'too-large', bytes: facts.size }
+      return await textUpTo(file, facts.size)
+    } finally {
+      await file.close()
+    }
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException
+    if (code === 'ENOENT' || code === 'ENOTDIR') return NO_FILE
+    return unreadable(error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * The open `file`'s text, `size` bytes as its stat gave — one byte more is asked for, so a file
+ * that grew since is caught rather than read on past the cap.
+ */
+async function textUpTo(file: FileHandle, size: number): Promise<EnsoGitFileText> {
+  const buffer = Buffer.alloc(size + 1)
+  let filled = 0
+  while (filled < buffer.length) {
+    const { bytesRead } = await file.read(buffer, filled, buffer.length - filled, filled)
+    if (bytesRead === 0) break
+    filled += bytesRead
+  }
+  if (filled > size) return unreadable('the file grew while it was read')
+  return textOf(buffer.toString('utf8', 0, filled))
+}
+
+/**
+ * One changed file whole, on both sides (#461): the old side at `place.base`, read from `oldPath`
+ * for a rename or copy, and the new side in the work tree — what the Diff view expands the lines
+ * between hunks from. Each side is its text, or why not: none there, too large, binary, unreadable.
+ * ⚠ The caller holds both paths to the scope first ({@link isPathInScope}); this reads what it is given.
+ *
+ * @group Git
+ */
+export async function readFileTexts(
+  runGit: GitRunner,
+  place: FileTextPlace,
+  paths: ChangedFilePaths,
+): Promise<ChangedFileTexts> {
+  const [oldText, newText] = await Promise.all([
+    place.base === null ? NO_FILE : readCommittedText(runGit, place.root, place.base, paths.oldPath ?? paths.path),
+    readWorkTreeText(place, paths.path),
+  ])
+  return { oldText, newText }
+}
+
+/**
+ * One changed file of `repository` whole ({@link readFileTexts}): the old side at the baseline
+ * commit — none before the first commit — and the new side if git lists it: tracked, or untracked
+ * and not ignored, as {@link readGitChanges} lists files.
+ *
+ * @group Git
+ */
+export function readGitFileTexts(
+  runGit: GitRunner,
+  repository: EnsoGitRepository,
+  paths: ChangedFilePaths,
+): Promise<ChangedFileTexts> {
+  const { root } = repository
+  return readFileTexts(
+    runGit,
+    {
+      root,
+      base: repository.baseline.commit,
+      listed: async (path) => {
+        const found = await runGit(
+          ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', scopePathspec(path)],
+          root,
+        )
+        if (found.code !== 0) return { failed: reasonOf(found) }
+        return found.stdout.split('\0').includes(path) ? 'listed' : 'not-listed'
+      },
+    },
+    paths,
+  )
 }

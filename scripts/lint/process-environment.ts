@@ -33,6 +33,7 @@ export const PROCESS_ENVIRONMENT_READERS: readonly string[] = [
   'packages/web/src/server/dev-web.ts', // launcher: ENSO_HOME + levels
   'scripts/dev.ts', // launcher of both surfaces: ENSO_HOME + levels for its own records (#385)
   'scripts/docs/site-base.ts', // ENSO_SITE_BASE: where the published site is served from
+  'scripts/review/review-pr.ts', // the local PR reviewer's child environment: GH_TOKEN, the review App's one-repository token (#981)
   'packages/web/e2e/e2e-home.ts', // the browser suite: its seeded home for the stack, ENSO_E2E_MODEL, PI_CODING_AGENT_DIR for the seed writer (#486)
   'test/scratch-preload.ts', // the test run's TMPDIR and ENSO_HOME, repointed at a per-run scratch before any test loads (#546, #551)
 ]
