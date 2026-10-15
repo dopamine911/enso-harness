@@ -21,6 +21,7 @@ import { NotificationLines, type PlacedLines } from './notifications.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { useStore, useThreadStores } from './store.ts'
+import { TOOL_RESULT_RENDERERS } from './tool-views.tsx'
 import type { KeyedPart, TranscriptSelection } from './transcript-selection.ts'
 
 /**
@@ -29,13 +30,11 @@ import type { KeyedPart, TranscriptSelection } from './transcript-selection.ts'
  */
 
 /**
- * Renderers keyed by descriptor `kind` (#18).
- *
- * ⚠ Empty on purpose. Every tool result falls through to the mandatory textual form, which
- * is exactly what the contract promises for an unknown kind — so empty is the honest
- * default, not a gap. A renderer is added when a tool earns one.
+ * Renderers keyed by descriptor `kind` (#18): the kinds Enso's own tools emit (#920 — a returned
+ * image, `ask_user`'s answers, the `write` receipt). Any other kind falls through to the mandatory
+ * textual form, exactly what the contract promises for an unknown kind.
  */
-const descriptorRenderers: EnsoRendererMap = {}
+const descriptorRenderers: EnsoRendererMap = TOOL_RESULT_RENDERERS
 
 /**
  * The transcript's selection for the rows (#280, #739): built in `ChatLayout`, where the chat is
