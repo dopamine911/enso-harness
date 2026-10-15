@@ -58,7 +58,7 @@ each: `thread` is the noun everywhere the id crosses; `session` is reserved for 
 
 | Term | Meaning | Id | Minted by | Owner, lifetime |
 |---|---|---|---|---|
-| **project** | a working tree threads run in (#395) | `projectId` (its canonical path, hashed) | the launch directory, or registered from a page strictly under a root the install declares — a request never chooses a path the install did not allow | the registration; a thread's is fixed when its session is created |
+| **project** | a working tree threads run in (#395) | `projectId` (its canonical path, hashed) | the launch directory, or registered from a page — any folder the standing refusals allow, or strictly under a root when the install declares any (#866); a request never chooses a path the install refuses | the registration; a thread's is fixed when its session is created |
 | **thread** | one conversation, the user-facing unit: what the rail lists, what the URL names, what a run acquires. `thread` is the noun for the id everywhere it crosses — routes, wire types, the browser | `threadId`, UUID-shaped (`isEnsoThreadId`), validated as a filename component at every entry point | the browser, or reused from a stored thread on resume | the registry's entry while live; the id outlives it |
 | **session** | **reserved**: the runtime's durable, append-only log and the runtime's own live object over it. Nothing of ours that means *thread* may say session. *Decision (1):* the one legitimate Enso-owned use is the three fields that locate that log — `sessionId`, `sessionDir`, `sessionFile` on an inspection — because they name the log, not the conversation | the same string as `threadId` (#95) | the runtime, under the browser's id | 1:1 with the thread; the log outlives everything |
 | **stored thread** | a thread whose log is on disk and can be resumed: what the rail lists after a restart. Wire: `EnsoStoredThread` | `threadId` | the runtime's first flush — the file does not exist until the first assistant message; a fork's is written when it is made (#433) | the storage seam lists it; the file is the record |
@@ -323,7 +323,8 @@ observation; stop, answer and prompt are Control, and never share a surface with
 - **status** — the frame that says whether the thread is live, busy, and at which generation. Closes a
   run in every browser alike; a status that says busy with no run to match opens an *external* run.
 - **follow** — one browser's subscription to a thread: snapshot, then frames, until the page or the
-  server drops it. A dropped follow is said (`follow-ended`), never silent. *Id:* none — per page,
+  server drops it. A dropped follow is said (`follow-ended`), never silent; so is a page that stops
+  applying one (#915). *Id:* none — per page,
   per thread. *Minted by:* the follow route. *Owner:* the page.
 - **tail** — the recent events kept for inspection (#97). Two per thread: the **emitted tail** (what
   the host received from the runtime, with how) and the **sent tail** (what the server put on the

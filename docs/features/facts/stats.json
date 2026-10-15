@@ -4,10 +4,15 @@
     {
       "image": "stats",
       "steps": ["open a thread from the rail", "choose the **Stats** tab at the top of the thread"],
-      "shown": ["2 refused by a guard — not failures", "Tokens", "Cost per turn", "Costliest calls"],
+      "shown": [
+        "1 exited non-zero · 2 refused by Enso guard — not failures",
+        "Tokens",
+        "Cost per turn",
+        "Costliest calls"
+      ],
       "measured": {
-        "totalCost": "$0.1661",
-        "failures": "1 · 12.5%",
+        "totalCost": "$0.1658",
+        "failures": "0 · 0%",
         "offBranch": "$0.0302"
       }
     }

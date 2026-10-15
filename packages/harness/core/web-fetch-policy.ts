@@ -93,10 +93,25 @@ const FETCHABLE_MEDIA_TYPE_SUFFIXES: readonly string[] = ['+json', '+xml']
  */
 export function isFetchableContentType(contentTypeHeader: string | null): boolean {
   if (contentTypeHeader === null) return false
-  const mediaType = (contentTypeHeader.split(';')[0] ?? '').trim().toLowerCase()
+  const mediaType = mediaTypeOf(contentTypeHeader)
   if (mediaType.startsWith('text/')) return true
   if (FETCHABLE_EXACT_MEDIA_TYPES.has(mediaType)) return true
   return FETCHABLE_MEDIA_TYPE_SUFFIXES.some((suffix) => mediaType.endsWith(suffix))
+}
+
+/**
+ * True for an HTML page, which web_fetch returns as its readable text (#927); every other
+ * fetchable type is returned as it came.
+ *
+ * @group Web fetch policy
+ */
+export function isHtmlContentType(contentTypeHeader: string | null): boolean {
+  return contentTypeHeader !== null && mediaTypeOf(contentTypeHeader) === 'text/html'
+}
+
+/** The header's media type, parameters dropped: `Text/HTML; charset=utf-8` → `text/html`. */
+function mediaTypeOf(contentTypeHeader: string): string {
+  return (contentTypeHeader.split(';')[0] ?? '').trim().toLowerCase()
 }
 
 const IPV4_OCTET_COUNT = 4

@@ -302,20 +302,24 @@ function mapCompactionEnd(event: RuntimeEvent): EnsoObservation {
   return { kind: 'unmapped', event }
 }
 
-/** One streamed delta of the in-flight message: its text or its thinking, with the usage pi attaches. */
+/**
+ * One streamed delta of the in-flight message: its text or its thinking.
+ *
+ * ⚠ pi's `usage` stays here (#915): it rides on every `message_update`, cumulative, ~350 bytes a
+ * delta, and a 68 KB `write` composed as thousands of `toolcall_delta`s was megabytes of it on the
+ * follow. Nothing downstream reads it — a message's accounting is its `message_end`. So a mapped
+ * delta carries none, and an event carried as `unmapped` (start/end markers, tool-call arguments)
+ * crosses without it.
+ */
 function mapMessageUpdate(event: RuntimeEvent): EnsoObservation {
   const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined
-  const usage = readUsage(event.usage)
   const contentIndex = typeof delta?.contentIndex === 'number' ? delta.contentIndex : 0
   const text = typeof delta?.delta === 'string' ? delta.delta : ''
-  if (delta?.type === 'text_delta') {
-    return { kind: 'text-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
-  }
-  if (delta?.type === 'thinking_delta') {
-    return { kind: 'thinking-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
-  }
+  if (delta?.type === 'text_delta') return { kind: 'text-delta', contentIndex, delta: text }
+  if (delta?.type === 'thinking_delta') return { kind: 'thinking-delta', contentIndex, delta: text }
   // start/end markers and any future delta type: carried, not dropped.
-  return { kind: 'unmapped', event }
+  const { usage: _usage, ...carried } = event
+  return { kind: 'unmapped', event: carried }
 }
 
 /** A running tool's partial result: never complete, never an error. */

@@ -65,6 +65,12 @@ const THREAD_GIT_ROUTE = threadRoute('git')
 /** `GET /api/threads/<threadId>/changes` — every file that differs from the last-push baseline, with its patch (#452). */
 const THREAD_CHANGES_ROUTE = threadRoute('changes')
 /**
+ * `GET /api/threads/<threadId>/changes/file?path=<path>[&oldPath=<path>]` — one changed file whole, at
+ * the baseline and in the work tree, for the Diff view to expand (#461). Only a file under the
+ * repository's scope; any other path is a 400.
+ */
+const THREAD_CHANGED_FILE_ROUTE = /^\/api\/threads\/([^/?#]+)\/changes\/file(?:\?([^#]*))?$/
+/**
  * `GET /api/threads/<threadId>/tree` — where the thread works, the HTML pages it holds, and the origin
  * its preview is served from (#619, #713: an origin of its own, not a route of this server).
  */
@@ -127,8 +133,8 @@ const THREAD_NAME_ROUTE = threadRoute('name')
 const THREAD_INCIDENT_RESOLVE_ROUTE = /^\/api\/threads\/([^/?#]+)\/incidents\/([0-9A-Za-z-]+)\/resolve$/
 /**
  * `GET …/incidents` (#468): the thread's incident history and its replay — under the server's
- * thresholds, or the ones the query names (`?incidentAtSignals=4`). One of two thread reads that
- * take a query; `…/history?before=` is the other.
+ * thresholds, or the ones the query names (`?incidentAtSignals=4`). One of three thread reads that
+ * take a query; `…/history?before=` and `…/changes/file?path=` are the others.
  */
 const THREAD_INCIDENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/incidents(?:\?([^#]*))?$/
 
@@ -194,6 +200,7 @@ export function createThreadRoutes(state: ThreadRoutesState): ThreadRoutes {
     { method: 'GET', route: THREAD_PROJECT_PROMPTS_ROUTE, respond: idOnly(prompts.respondWithProjectPrompts) },
     { method: 'GET', route: THREAD_PROJECT_PROMPT_ROUTE, respond: prompts.respondWithProjectPrompt },
     { method: 'GET', route: THREAD_INCIDENTS_ROUTE, respond: reads.respondWithThreadIncidents },
+    { method: 'GET', route: THREAD_CHANGED_FILE_ROUTE, respond: reads.respondWithChangedFile },
     { method: 'GET', route: THREAD_HISTORY_ROUTE, respond: reads.respondWithThreadHistory },
     { method: 'GET', route: THREAD_ROUTE, respond: idOnly(reads.respondWithThread) },
     {

@@ -75,9 +75,11 @@ export {
   EnsoGitBaselineRule,
   EnsoGitFileChange,
   EnsoGitFileStatus,
+  EnsoGitFileText,
   EnsoGitOperation,
   EnsoGitRepository,
   EnsoGitState,
+  EnsoThreadChangedFile,
   EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'
@@ -391,10 +393,17 @@ export {
   toolFamilyOf,
 } from './session-incident.ts'
 export {
+  EnsoJudgeKeyState,
+  EnsoJudgeKeyWrite,
+  EnsoSecuritySettingsRead,
+  EnsoSecuritySettingsWrite,
+} from './security-settings.ts'
+export {
   type CommandJudge,
   commandJudgementOf,
   ENSO_COMMAND_JUDGEMENT_ENTRY,
   ENSO_JUDGE_BACKENDS,
+  ENSO_JUDGE_KEY_NAME,
   ENSO_JUDGE_POLICY,
   ENSO_JUDGE_QUESTIONS,
   EnsoCommandJudgement,
@@ -405,6 +414,7 @@ export {
   type EnsoJudgeQuestion,
   type EnsoJudgeState,
   EnsoThreadJudgeCases,
+  localJudgeUrlProblem,
   readEnsoCommandJudgement,
   readEnsoThreadJudgeCases,
 } from './command-judge.ts'
@@ -557,7 +567,7 @@ export {
   EnsoTranscriptPart,
   EnsoTranscriptToolResult,
 } from './transcript.ts'
-export { contentToText, customEntriesOf, transcriptEntryOf, transcriptOf } from './runtime-entries.ts'
+export { contentToText, customEntriesOf, shellExitCodeOf, transcriptEntryOf, transcriptOf } from './runtime-entries.ts'
 export {
   EXTERNAL_WEB_CONTENT_NOTICE,
   WEB_FETCH_MAX_RESPONSE_BYTES,

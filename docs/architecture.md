@@ -142,6 +142,7 @@ type-only crossing is still a dependency.
 | `harness-extension-tests` | `packages/harness/extensions/**/__tests__/` | `harness-extensions`, `core`, `harness-core`, `judge-backends`, `test-support` |
 | `harness-extensions` | `packages/harness/extensions/` (all else) | `core`, `harness-core`, `judge-backends` |
 | `host-tests` | `packages/web/src/host/**/__tests__/` | `host`, `core`, `test-support` |
+| `page-follow-tests` | `packages/web/src/server/__tests__/follow-page.test.ts` | `server-tests`, `server`, `browser`, `host`, `core`, `test-support` |
 | `server-tests` | `packages/web/src/server/**/__tests__/` | `server`, `core`, `host`, `test-support` |
 | `browser-tests` | `packages/web/src/**/__tests__/` | `browser`, `core`, `test-support` |
 | `host` | `packages/web/src/host/` (all else) | `core` |
@@ -192,7 +193,7 @@ from our words to the vendors' is its vendor map, the one place it names them.
 
 | Noun | Meaning | Id | Minted by | Owner, lifetime |
 |---|---|---|---|---|
-| **project** | a directory threads run in (#395) | `projectId` (its canonical path, hashed) | the launch directory (`EnsoServerOptions.cwd`), or registered under a root the user's config declares — never a path chosen by a request | the registration; many threads per project, many projects per server |
+| **project** | a directory threads run in (#395) | `projectId` (its canonical path, hashed) | the launch directory (`EnsoServerOptions.cwd`), or registered from Enso's page after the standing refusals — and under a root, when the user's config declares any (#866) | the registration; many threads per project, many projects per server |
 | **thread** | one conversation | `threadId`, UUID-shaped (`isEnsoThreadId`) | the browser (`crypto.randomUUID()`), or reused from a stored log on resume | the registry's `ThreadEntry` while live; the id outlives it |
 | **pi session** | pi's append-only log, and the live `AgentSession` over it | **the same string as `threadId`** (#95) | pi, under the browser's id | 1:1 with the thread; the log outlives everything |
 | **run** | one acquisition of a thread: prompt admission → `agent_settled`. Not one prompt — prompts during a run queue into it (#75) | `generation`, per thread, monotonic for the server's lifetime | `acquire()` | the lease; released by the settle observer, or on acceptance where acceptance IS completion (an extension command, a mode change); never by a returning prompt |
@@ -226,7 +227,11 @@ stateDiagram-v2
 frame that says busy with no run to match (another tab's — `external-<generation>`). Closed by the
 feed's `settled` + `status` for every run the server took, and by the returning POST only where no
 frame ever will — see invariant 1. A dropped follow is said as a chunk (`follow-ended`) so the page
-can say so; the next follow's snapshot is the resync (#103, #114).
+can say so; the next follow's snapshot is the resync (#103, #114). A page that stops APPLYING the
+follow — a throw while handling a chunk ends TanStack's subscription — closes the socket and says so
+too: a warning naming the chunk, and the exception in the run alert and the log
+(`follow-connection.ts#consumerStopped`, #915). Before that it kept reading a live follow it no
+longer applied, with nothing said.
 
 **A dialog.** pi blocks; the follow carries a blocking `extension-ui-request`; an answer is `POST …/dialog`, validated
 against the question (#112); every settle path — answered, cancelled, timeout, abort — emits
@@ -242,7 +247,7 @@ question so a reconnect renders the card at once.
    `docs/flows/prompt-run-settle.md` pins it). A prompt that never became a run — a refused image,
    an unreachable or refusing POST, an unreadable receipt, a rejection that beat its own receipt —
    is opened and closed on this side, because no frame will ever name it; and a follow that drops
-   closes what is still open as an error rather than leaving it hanging (`#subscribe`'s `finally`).
+   closes what is still open as an error rather than leaving it hanging (`follow-connection.ts#followClosed`).
    This is why abort (#116), dialogs (#113, #114) and resume (#95) landed without regressions: each
    added a unary route and changed nothing about how a run ends.
 2. **A route tells pi; the feed ends the run.** Four control routes, each answering before its effect
