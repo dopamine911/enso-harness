@@ -1,14 +1,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
+  type EnsoPromptRunChanges,
   type EnsoThreadChangedFile,
   type EnsoThreadCommands,
   type EnsoThreadEvents,
   type EnsoThreadHistory,
   type EnsoThreadPages,
-  type EnsoTurnChanges,
+  isSnapshotHash,
 } from '@enso/core'
 import { isPathInScope, readGitChanges, readGitFileTexts, readGitState, runGit } from '@enso/core/git'
-import type { TurnRead } from '../host/thread-turn-reads.ts'
+import type { PromptRunRead } from '../host/thread-prompt-run-reads.ts'
 import { answerJson, refuseWith, type ThreadResponder, type ThreadRouteHandler } from './request-plumbing.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
@@ -64,8 +65,8 @@ export type ThreadReadRoutes = Readonly<
       | 'respondWithThreadIncidents'
       | 'respondWithContextRequest'
       | 'respondWithChangedFile'
-      | 'respondWithTurnChanges'
-      | 'respondWithTurnFile',
+      | 'respondWithPromptRunChanges'
+      | 'respondWithPromptRunFile',
       ThreadRouteHandler
     > & {
       previews: PreviewOrigins
@@ -306,7 +307,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
   const respondWithThreadChanges = analysisResponder(threadChanges)
   const respondWithThreadJudgeCases = analysisResponder((threadId: string) => securityReads.judgeCases(threadId))
   const respondWithThreadPages = analysisResponder(threadPages)
-  // The thread's prompts and their snapshots (#553): the Diff Viewer's steps, off the branch alone.
+  // The thread's prompt runs and their snapshots (#553): the Diff Viewer's steps, off the branch alone.
   const respondWithThreadPromptRuns = analysisResponder((threadId: string) => host.threadPromptRuns(threadId))
   /** The incident history under the query's thresholds; a query that names no threshold well is the 400 that says why. */
   function respondWithThreadIncidents(
@@ -366,7 +367,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
 
   /**
    * The two snapshots a Diff Viewer read names, `?from=<hash>&to=<hash>`, or the 400 that says so.
-   * Hashes only: the host refuses one the thread's prompts do not record.
+   * Hashes only: the host refuses one the thread's prompt runs do not record.
    */
   function snapshotPairOf(
     query: URLSearchParams,
@@ -374,36 +375,28 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
   ): { readonly from: string; readonly to: string } | undefined {
     const from = query.get('from')
     const to = query.get('to')
-    const hash = /^([0-9a-f]{40}|[0-9a-f]{64})$/
-    if (from !== null && to !== null && hash.test(from) && hash.test(to)) return { from, to }
+    if (isSnapshotHash(from) && isSnapshotHash(to)) return { from, to }
     refuseWith(response, { status: 400, reason: 'name two snapshots: ?from=<hash>&to=<hash>' })
     return undefined
   }
 
   /**
-   * A Diff Viewer read answered (#553): the payload; a thread held nowhere, 404; a snapshot its
-   * prompts do not record, 409; a pair git could not compare (an object the store lost), 409 with
-   * git's words — never an empty diff.
+   * A Diff Viewer read answered (#553): the payload; a thread held nowhere, 404; a refused pair — a
+   * snapshot its prompt runs do not record, or two git could not compare (an object the store lost),
+   * with git's words — 409, never an empty diff. A read that throws is a fault, and reaches the 500.
    */
-  async function answerTurnRead<Read>(
+  function answerPromptRunRead<Read>(
     response: ServerResponse,
-    read: () => Promise<TurnRead<Read>>,
+    answer: PromptRunRead<Read>,
     payload: (read: Read) => object,
-  ): Promise<void> {
-    let answer: TurnRead<Read>
-    try {
-      answer = await read()
-    } catch (error) {
-      refuseWith(response, { status: 409, reason: `git could not compare the snapshots: ${String(error)}` })
-      return
-    }
+  ): void {
     if (answer.kind === 'no-thread') refuseWith(response, { status: 404, reason: answer.reason })
     else if (answer.kind === 'refused') refuseWith(response, { status: 409, reason: answer.reason })
     else answerJson(response, payload(answer.read))
   }
 
   /** `…/prompt-runs/changes?from=<hash>&to=<hash>` (#553): every file that differs between two of the thread's snapshots. */
-  async function respondWithTurnChanges(
+  async function respondWithPromptRunChanges(
     threadId: string,
     _request: IncomingMessage,
     response: ServerResponse,
@@ -411,18 +404,19 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
   ): Promise<void> {
     const pair = snapshotPairOf(new URLSearchParams(match[2] ?? ''), response)
     if (pair === undefined) return
-    await answerTurnRead(
+    answerPromptRunRead(
       response,
-      () => host.readTurnChanges(threadId, pair.from, pair.to),
-      (read): EnsoTurnChanges => ({ threadId, ...pair, ...read }),
+      await host.readPromptRunChanges(threadId, pair.from, pair.to),
+      (read): EnsoPromptRunChanges => ({ threadId, ...pair, ...read }),
     )
   }
 
   /**
-   * `…/prompt-runs/file?from=<hash>&to=<hash>&path=<path>[&oldPath=<path>]` (#553): one file whole at both
-   * snapshots, for the Diff Viewer to expand. A path that names no file of the tree is a 400.
+   * `…/prompt-runs/file?from=<hash>&to=<hash>&path=<path>[&oldPath=<path>]` (#553): one file whole at
+   * both snapshots, for the Diff Viewer to expand. A malformed path (empty, `..`, an empty segment, a
+   * NUL) is a 400; a well-formed one no file has is a 200 whose side says `none`.
    */
-  async function respondWithTurnFile(
+  async function respondWithPromptRunFile(
     threadId: string,
     _request: IncomingMessage,
     response: ServerResponse,
@@ -437,9 +431,9 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
       refuseWith(response, { status: 400, reason: `${JSON.stringify(outside)} is not a file under the tree` })
       return
     }
-    await answerTurnRead(
+    answerPromptRunRead(
       response,
-      () => host.readTurnFileTexts(threadId, pair, paths),
+      await host.readPromptRunFileTexts(threadId, pair, paths),
       (read): EnsoThreadChangedFile => ({ threadId, ...paths, ...read }),
     )
   }
@@ -462,8 +456,8 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
     respondWithThreadIncidents,
     respondWithContextRequest,
     respondWithChangedFile,
-    respondWithTurnChanges,
-    respondWithTurnFile,
+    respondWithPromptRunChanges,
+    respondWithPromptRunFile,
     previews,
   }
 }

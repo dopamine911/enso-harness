@@ -1,5 +1,5 @@
 import type { LayoutProps } from '@tanstack/ai-react/ui'
-import { useCallback, useContext, useId, useRef } from 'react'
+import { useCallback, useContext, useEffect, useId, useRef } from 'react'
 import { Conversation, ConversationContent, ConversationScrollButton } from './components/ai-elements/conversation.tsx'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { PendingQueue } from './composer.tsx'
@@ -20,9 +20,9 @@ import { ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadEvalDrawer } from './thread-eval.tsx'
 import { settledToolResults } from './thread-git.tsx'
+import { ThreadPromptRunDiffs } from './thread-prompt-run-diffs.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
-import { ThreadTurnDiffs } from './thread-turn-diffs.tsx'
 import { locateStatsTarget, type RevealStatsTarget, revealElement, ringElement } from './transcript-reveal.ts'
 import {
   type TranscriptScroller,
@@ -40,6 +40,14 @@ import {
 
 /** The launch panel's column: its head, the composer and the recent threads, top-aligned at the prototype's padding (#417), scrolled when they don't fit. */
 const LAUNCH_COLUMN = 'flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-8 max-md:px-4 max-md:py-6'
+
+/**
+ * How long Show in Chat (#553) waits, after scrolling a message's row into view, before ringing it.
+ * A guess, not a signal: the windowed list measures the rows it draws and corrects its scroll on its
+ * own time, and nothing says when it is done. The ring is decoration only — the row is already
+ * scrolled to — so a ring a little early costs nothing.
+ */
+const RING_AFTER_SCROLL_MS = 400
 
 /**
  * Renders a run-level error as a destructive Alert. Reads the thread's chat through the
@@ -106,11 +114,15 @@ function ThreadViewOverlay({
       </div>
     )
   }
-  // The Diff Viewer (#553): the thread's prompts, stepped through snapshot to snapshot, over the transcript.
+  // The Diff Viewer (#553): the thread's prompt runs, stepped through snapshot to snapshot, over the transcript.
   if (shown === 'prompt-runs') {
     return (
       <div role="tabpanel" {...panelIdsOf(shown, 'prompt-runs')} className="absolute inset-0">
-        <ThreadTurnDiffs moment={changesMoment} revealMessage={revealMessage} revealInTranscript={revealInTranscript} />
+        <ThreadPromptRunDiffs
+          moment={changesMoment}
+          revealMessage={revealMessage}
+          revealInTranscript={revealInTranscript}
+        />
       </div>
     )
   }
@@ -148,8 +160,11 @@ function ThreadViews(): React.ReactNode {
   const incidentReveal = useIncidentReveal(scroller)
   // A message by its id — a resumed thread's messages are its branch's entries (#553) — wherever it
   // is: the windowed list (#739) scrolls its row into view first, as an incident's reveal does
-  // (#588), and the row, drawn, is ringed.
+  // (#588), and the row, once drawn, is ringed after RING_AFTER_SCROLL_MS. Only the newest ring is
+  // waited for, and none once the views are gone.
   const { rowScroll } = incidentReveal
+  const ringTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(ringTimer.current), [])
   const revealMessage = useCallback(
     (messageId: string): boolean => {
       const row = chat.messages.findIndex((message) => message.id === messageId)
@@ -158,11 +173,11 @@ function ThreadViews(): React.ReactNode {
       open('chat')
       bridge.stopScroll()
       rowScroll.current?.(row)
-      // The virtualizer settles its own scroll as the rows it draws are measured: ring once it has.
-      window.setTimeout(() => {
+      window.clearTimeout(ringTimer.current)
+      ringTimer.current = window.setTimeout(() => {
         const element = bridge.content()?.querySelector(`[data-index="${row}"] [data-role]`)
         if (element !== null && element !== undefined) ringElement(element)
-      }, 400)
+      }, RING_AFTER_SCROLL_MS)
       return true
     },
     [chat.messages, open, rowScroll],

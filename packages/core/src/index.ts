@@ -84,12 +84,12 @@ export {
   EnsoThreadGit,
 } from './git-state.ts'
 export {
-  EnsoThreadTurn,
+  EnsoPromptRun,
+  EnsoPromptRunBaseline,
+  EnsoPromptRunChanges,
+  EnsoPromptRunSnapshot,
   EnsoThreadPromptRuns,
-  EnsoTurnBaseline,
-  EnsoTurnChanges,
-  EnsoTurnSnapshot,
-} from './turn-diffs.ts'
+} from './prompt-runs.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
 export {
   ENSO_TREE_SETUP_ENTRY,
@@ -529,9 +529,11 @@ export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thre
 export {
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  EnsoSnapshotHash,
   EnsoThreadTreeKind,
   EnsoThreadTreeRecord,
   EnsoTreeRestored,
+  isSnapshotHash,
   readEnsoThreadTree,
   readEnsoTreeRestored,
   type ThreadTreeKind,

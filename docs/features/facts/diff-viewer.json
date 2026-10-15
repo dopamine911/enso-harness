@@ -5,10 +5,10 @@
       "image": "diff-viewer",
       "steps": ["open a thread from the rail", "choose the **Diff Viewer** tab at the top of the thread"],
       "shown": [
-        "previous turn",
+        "previous prompt",
         "what the diff compares",
         "prompts",
-        "the files as turn 3 began (e6992c36) → the files after turn 3 (4de4af58)",
+        "the files as prompt 3 began (6092079f) → the files after prompt 3 (c9045fd3)",
         "+ databaseUrl: required('DATABASE_URL'),"
       ],
       "measured": {}
