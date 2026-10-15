@@ -27,13 +27,14 @@
 
 export { runUnderDeadline } from './deadline.ts'
 export { inputRecordOf, type ShellAnalyzerDenial } from './guard-denials.ts'
-export { createGuardSession, type GuardSession } from './guard-session.ts'
+export { createGuardSession, type GuardProject, type GuardSession } from './guard-session.ts'
 export {
+  decidedProjectTrust,
   type SessionConfigContext,
   type SessionEnsoConfig,
   sessionConfigEnvironment,
   sessionEnsoConfig,
-  userIncidentPolicy,
+  sessionIncidentPolicy,
   userJudgeConfig,
 } from './session-config.ts'
 export { readableTextOfHtml } from './html-text.ts'

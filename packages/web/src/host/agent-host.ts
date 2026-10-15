@@ -47,6 +47,7 @@ import {
 } from './thread-log-edits.ts'
 import { createLog, openLog, probeLog, type ThreadLog } from './thread-log.ts'
 import { treeOnFirstRun } from './thread-on-tree.ts'
+import { createThreadPromptRunReads, type ThreadPromptRunReads } from './thread-prompt-run-reads.ts'
 import { createTreeMaking } from './thread-tree-making.ts'
 import { sessionDirectoryFor, treeRecordOf } from './thread-trees.ts'
 import { type ProjectThreadSettingsSource } from './tree-setup.ts'
@@ -241,6 +242,12 @@ export interface AgentHost {
    * to hold to the copy.
    */
   readCopyFileTexts(copy: ThreadTreePlace, paths: ChangedFilePaths): Promise<ChangedFileTexts>
+  /** The thread's prompt runs and their snapshots (#553), for the Diff Viewer; `undefined` for a thread held nowhere. */
+  threadPromptRuns: ThreadPromptRunReads['threadPromptRuns']
+  /** Two of the thread's snapshots compared in its store (#553), writing nothing; a pair git cannot compare is refused with git's words. */
+  readPromptRunChanges: ThreadPromptRunReads['readPromptRunChanges']
+  /** One file between two of the thread's snapshots, whole on both sides (#553), writing nothing. */
+  readPromptRunFileTexts: ThreadPromptRunReads['readPromptRunFileTexts']
   /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
@@ -412,6 +419,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     storedSession,
     storeOf,
   })
+  const { threadPromptRuns, readPromptRunChanges, readPromptRunFileTexts } = createThreadPromptRunReads({
+    environment,
+    liveLogs,
+    storedSession,
+    storeOf,
+  })
   const { threadDeleted, deleteThread, previewThreadDelete, listTrees } = createThreadDelete({
     projectsDir,
     environment,
@@ -522,6 +535,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       readCopyChanges({ directory: store, tree: record.path, base: record.base, environment }),
     readCopyFileTexts: ({ record, store }, paths) =>
       readCopyFileTexts({ directory: store, tree: record.path, base: record.base, environment, paths }),
+    threadPromptRuns,
+    readPromptRunChanges,
+    readPromptRunFileTexts,
     deleteThread,
     threadDeleted,
     previewThreadDelete,

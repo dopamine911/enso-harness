@@ -94,11 +94,10 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  * Re-measured for #810 (the server's route groups, on top of #801's host modules — 272 owned
  * sources): the 80% bound asks for 217, and ~10% under gives 245.
  *
- * Re-measured 2026-10-14 (#924 merged with main's #970 and #976 — the web_fetch allowlist and
- * Settings › Web tools over the permission record and tool views): the 80% bound asks for 248, and
- * ~10% under gives 279.
+ * Re-measured 2026-10-15 (#553's prompt runs and Diff Viewer merged with #970's permission rules
+ * and #976's tool views — 312 owned sources): the 80% bound asks for 249, and ~10% under gives 281.
  */
-export const MINIMUM_REPORTED_FILES = 279
+export const MINIMUM_REPORTED_FILES = 281
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 

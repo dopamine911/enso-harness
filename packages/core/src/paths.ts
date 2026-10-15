@@ -112,7 +112,8 @@ function fileBehindLinks(path: string): string {
  * Replace the file at `path` with `text` (or bytes — a file put back as it was, #945) in one step:
  * written beside the file it names, then renamed over it — a reader sees the old file or the new
  * one, never half of one. Settings' writes go through here: the permission policy and Enso's rule
- * record beside it (#474, #945), `config.json` (#924, #933) and `secrets.env` (#933).
+ * record beside it (#474, #945), `config.json` (#924, #933), `secrets.env` (#933) and the project
+ * config approvals (#753).
  *
  * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config file kept as a symlink (into a dotfiles repo,
  * say) stays a link, and the file behind it changes — or is made, when the link points at a file
@@ -673,6 +674,30 @@ export function threadTreeRoot(projectsDir: string, path: string): string | unde
   return projectId !== undefined && /^[0-9a-f]{16}$/.test(projectId) && trees === 'trees' && threadId !== undefined
     ? join(resolve(projectsDir), projectId, trees, threadId)
     : undefined
+}
+
+/**
+ * The project a cwd belongs to, by id: the one a minted tree's path names, else the cwd's own (its
+ * canonical path, hashed — `projectIdOf`). ⚠ A THREAD ON A TREE RUNS IN A DIRECTORY THAT IS NO
+ * PROJECT: everything filed or served by project — the session directory, the snapshot store, the
+ * server's projects, the approved project config (#753) — asks this first.
+ *
+ * @group Workspace paths
+ */
+export function projectIdOfCwd(projectsDir: string, cwd: string): string {
+  return treeProjectId(projectsDir, cwd) ?? projectIdOf(realpathOrSelf(cwd))
+}
+
+/**
+ * The project config tiers the operator approved (#753): `<projectsDir>/<id>/config-approvals.json`,
+ * the contents of the project's `.enso/config.json` and `.enso/config.local.json` as approved on
+ * its page. ⚠ Under `ENSO_HOME`, beside the project's sessions, never in the project: the agent
+ * works in the project, and the approval is what stands between its writes there and what applies.
+ *
+ * @group Workspace paths
+ */
+export function projectConfigApprovalsPath(projectsDir: string, projectId: string): string {
+  return join(projectsDir, projectId, 'config-approvals.json')
 }
 
 /**
