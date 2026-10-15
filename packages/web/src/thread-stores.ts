@@ -25,6 +25,7 @@ import { createModeLines, type ModeLines } from './mode-lines.ts'
 import { createModelStore, type ModelStore } from './model-state.tsx'
 import { createNotificationsStore, type NotificationAction, type NotificationsStore } from './notifications.tsx'
 import { createPermissionModeStore, type PermissionModeStore } from './permission-mode.tsx'
+import type { RunHeadline } from './run-status.ts'
 import { createStore, type Store, type WritableStore } from './store.ts'
 import { fetchThreadHistory } from './stored-threads.ts'
 
@@ -49,8 +50,8 @@ import { fetchThreadHistory } from './stored-threads.ts'
  * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
  * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
  * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
- * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
- * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * thread, which closes its follow. Neither a thread with a run in flight nor one ON
+ * SCREEN — the focused pane, or one beside it (#938) — is ever the victim: a follow the page is showing or streaming is not spare
  * capacity — so a page made only of those goes over budget and records it. The session is
  * the server's, not the page's, so a dropped thread comes back through the rail's earlier threads —
  * the rail and `popstate` already resume a thread this page does not hold.
@@ -127,16 +128,17 @@ export interface ThreadStores {
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
    * moment. Set by `follow-ended`; cleared by the next `status` or `snapshot` frame, which only a live
-   * follow delivers. While true the status bar says `disconnected` and no stop is offered,
+   * follow delivers. While true the status bar says `live view lost` (#914) and no stop is offered,
    * whatever the run flag still holds: the page cannot know what the server is doing.
    */
   readonly disconnected: WritableStore<boolean>
   /**
    * What waits behind the run in flight (#75): the texts, the interrupting ones first,
-   * from every `queue` frame — one list for every follower, so a second tab sees what
-   * the first queued. Empty when nothing waits. Rendered above the composer; a stop hands
-   * these back to the composer through the abort receipt, not from here (the frame that
-   * empties this can beat the receipt).
+   * from the snapshot a follow opens on and every `queue` frame after it (#917) — one list
+   * for every follower, so a second tab, even one opened after, sees what the first queued.
+   * Never in the transcript until pi delivers it. Empty when nothing waits. Rendered above the
+   * composer; a stop hands these back to the composer through the abort receipt, not from here
+   * (the frame that empties this can beat the receipt).
    */
   readonly queue: WritableStore<readonly string[]>
   /**
@@ -193,6 +195,11 @@ export interface ThreadStores {
    * nothing is discarded when the page leaves it (`discardEmptyDraft`).
    */
   readonly typed: WritableStore<boolean>
+  /**
+   * The words the composer holds, as typed (#938): a pane beside the focused one shows them where its
+   * composer is, so what you were writing there is in sight while you type in another.
+   */
+  readonly draft: WritableStore<string>
   /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has
@@ -340,6 +347,7 @@ function createThreadStores(
     toolResultDescriptors,
     launch: createStore(false),
     typed: createStore(false),
+    draft: createStore(''),
     branchCompacted: createStore(0),
     runStops: createStore(0),
     login: createStore<EnsoLoginInProgress | undefined>(undefined),
@@ -454,6 +462,12 @@ export interface ThreadSummary {
   readonly waiting: boolean
   /** Which project's group the rail lists it under — `ThreadStores.projectId`. */
   readonly projectId: string | undefined
+  /**
+   * The thread's status as its bar last said it (#914) — the state, its word and one detail, no
+   * clock — for the rail's row and the page header. Written by the thread's status bar, which every
+   * mounted pane keeps (#472), so a thread off screen says it too; absent until the bar has said one.
+   */
+  readonly headline?: RunHeadline
 }
 
 /**
@@ -489,35 +503,50 @@ function publishThreadList(): void {
 export const MAX_LIVE_THREADS = 4
 
 /**
- * The pane the user is looking at. Undefined only while a URL-named thread is being adopted
- * and nothing is on screen (`chat-screen.tsx`).
+ * The pane the user is looking at — the focused one of several (#938). Undefined only while a
+ * URL-named thread is being adopted and nothing is on screen (`chat-screen.tsx`).
  */
 let activeThreadId: string | undefined
 
+/** The panes on screen beside the focused one (#938): each is shown, so none is spare capacity either. */
+let besideThreadIds: ReadonlySet<string> = new Set()
+
 /**
- * The active pane changed.
+ * The panes on screen changed: `threadId` is the focused one, `beside` the others shown with it
+ * (#938) — at most two, so the page's three panes stay inside the budget of four.
  *
- * Two effects, and the first is the load-bearing one: the visible thread stops
- * being a drop candidate, and its clock restarts so it is not the first to go the moment the
+ * Two effects, and the first is the load-bearing one: the visible threads stop
+ * being drop candidates, and their clocks restart so none is the first to go the moment the
  * user switches away.
  *
  * ⚠ Reading a thread is activity. `updateThreadSummary` only fires on a title or a busy
  * transition, so without this a thread the user is READING — finished reply, idle, not busy —
  * ages like an abandoned one.
  */
-export function markThreadActive(threadId: string | undefined): void {
+export function markThreadActive(threadId: string | undefined, beside: readonly string[] = []): void {
   activeThreadId = threadId
-  if (threadId === undefined) return
-  const current = summaries.get(threadId)
-  if (current === undefined) return
-  summaries.set(threadId, { ...current, lastActivityAt: new Date() })
-  publishThreadList()
+  besideThreadIds = new Set(beside)
+  const now = new Date()
+  let changed = false
+  for (const shown of [...(threadId === undefined ? [] : [threadId]), ...beside]) {
+    const current = summaries.get(shown)
+    if (current === undefined) continue
+    summaries.set(shown, { ...current, lastActivityAt: now })
+    changed = true
+  }
+  if (changed) publishThreadList()
+}
+
+/** The thread on screen, as `markThreadActive` last set it — what a page-wide error names (#919). */
+export function threadOnScreen(): string | undefined {
+  return activeThreadId
 }
 
 /**
  * The drop candidate: the least recently active thread that is neither running nor on screen.
  *
- * ⚠ THE ACTIVE PANE IS NEVER A CANDIDATE. Recency alone does not protect it:
+ * ⚠ NO PANE ON SCREEN IS EVER A CANDIDATE — the focused one, nor one beside it (#938). Recency alone
+ * does not protect them:
  * open a thread, read its finished reply, then open four more, and the one being read was the
  * least recently active of them. Dropping it unmounts the pane under the user — `active`
  * resolves to undefined, the header falls back to the untitled label, the content area goes
@@ -527,7 +556,7 @@ export function markThreadActive(threadId: string | undefined): void {
 function leastRecentlyActiveIdle(): ThreadSummary | undefined {
   let oldest: ThreadSummary | undefined
   for (const summary of summaries.values()) {
-    if (summary.busy || summary.threadId === activeThreadId) continue
+    if (summary.busy || summary.threadId === activeThreadId || besideThreadIds.has(summary.threadId)) continue
     if (oldest === undefined || summary.lastActivityAt < oldest.lastActivityAt) oldest = summary
   }
   return oldest
@@ -778,6 +807,19 @@ export function updateThreadSummary(threadId: string, patch: Pick<ThreadSummary,
   publishThreadList()
 }
 
+/**
+ * Called by a thread's status bar when what it says changed (#914). Not activity: a step that
+ * changes is the run going on, which `busy` already marks, and the rail's age stays the thread's.
+ */
+export function updateThreadHeadline(threadId: string, headline: RunHeadline): void {
+  const current = summaries.get(threadId)
+  if (current === undefined) return
+  const { headline: said } = current
+  if (said?.state === headline.state && said.word === headline.word && said.detail === headline.detail) return
+  summaries.set(threadId, { ...current, headline })
+  publishThreadList()
+}
+
 export const threadListStore: Store<readonly ThreadSummary[]> = threadList
 
 /** One line, from the first user message's text — deepseek-harness titles its sessions exactly this way. A prompt's name in a dialog is cut here. */
@@ -855,5 +897,6 @@ export function clearThreadsForTest(): void {
   threads.clear()
   summaries.clear()
   activeThreadId = undefined
+  besideThreadIds = new Set()
   publishThreadList()
 }

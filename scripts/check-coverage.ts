@@ -96,6 +96,9 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  *
  * Re-measured 2026-10-15 (#553's prompt runs and Diff Viewer merged with #970's permission rules
  * and #976's tool views — 312 owned sources): the 80% bound asks for 249, and ~10% under gives 281.
+ *
+ * Re-measured 2026-10-15 again (#919's health checks, fault banner and draft-keeping reload merged
+ * onto that — 318 owned sources): the 80% bound asks for 254, so 281 still holds.
  */
 export const MINIMUM_REPORTED_FILES = 281
 

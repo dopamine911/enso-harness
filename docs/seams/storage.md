@@ -595,7 +595,9 @@ fire (no loaded extension handles it). The host is tested against the real sessi
 
 **Consumed by the server.** The server's route groups own the read routes (#810):
 `GET /api/stored-threads` → `respondWithStoredThreads` (`server/literal-routes.ts`) maps each `StoredThread` to a `EnsoStoredThread`,
-marking `busy` by peeking the registry, `waiting` when that live thread's runtime has a question open (`openDialogs()`, #876), and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
+marking `busy` by peeking the registry, `waiting` when that live thread's runtime has a question open (`openDialogs()`, #876), and carrying a fork's `parentThreadId`.
+Those two flags are as of the read; `GET /api/run-states` (`server/run-states-route.ts`, #911) streams them again for every live thread at each take, release
+or drop (`ThreadRegistry.watchRunStates`), so a page clears the row of a run it has not opened when the server releases it. `POST …/fork` (`server/thread-control-routes.ts`) asks
 `host.forkThread` (409 while a run holds the source); `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and

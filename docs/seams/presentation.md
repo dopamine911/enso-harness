@@ -126,6 +126,30 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * the bubble before a rotation the same batch made.
    */
   readonly streamMessageId: () => string | undefined
+  /**
+   * When this page last applied the follow (#919), `Date.now()`: the client took back the last
+   * chunk handed to it, or a frame that passed the wire check and queued none was observed with
+   * nothing waiting. Undefined while no follow is open, and from the moment the server closes one —
+   * nothing is being applied, and a dropped follow is said otherwise.
+   * What the page's server check compares the server's listing against (`page-behind-check.ts`).
+   */
+  readonly appliedAt: () => number | undefined
+  /** Whether this page is receiving the thread's updates (#914) — see {@link LiveView}. */
+  readonly liveView: Store<LiveView>
+  /**
+   * When the follow last carried the run's output (#914), `Date.now()`: an observation, never a
+   * keepalive, a snapshot or a status, nor an extension's fire-and-forget UI request (`carriesOutput`).
+   * Undefined before the first. What "no output for 3 min" is measured from.
+   */
+  readonly outputAt: () => number | undefined
+  /** What the follow says of the run now (#914) — see {@link RunPulse}. */
+  readonly pulse: () => RunPulse
+  /**
+   * Give up on a SILENT follow (#914): its socket closes and it ends as one the server closed
+   * would — the run's error, `follow-ended`, `disconnected`. The page's live-view check calls it
+   * once it knows a reload is the way back. Nothing while the follow is live or already ended.
+   */
+  readonly abandon: () => void
 }
 ```
 
@@ -184,8 +208,8 @@ thread on the page gets its own:
  * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
  * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
  * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
- * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
- * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * thread, which closes its follow. Neither a thread with a run in flight nor one ON
+ * SCREEN — the focused pane, or one beside it (#938) — is ever the victim: a follow the page is showing or streaming is not spare
  * capacity — so a page made only of those goes over budget and records it. The session is
  * the server's, not the page's, so a dropped thread comes back through the rail's earlier threads —
  * the rail and `popstate` already resume a thread this page does not hold.
@@ -262,16 +286,17 @@ export interface ThreadStores {
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
    * moment. Set by `follow-ended`; cleared by the next `status` or `snapshot` frame, which only a live
-   * follow delivers. While true the status bar says `disconnected` and no stop is offered,
+   * follow delivers. While true the status bar says `live view lost` (#914) and no stop is offered,
    * whatever the run flag still holds: the page cannot know what the server is doing.
    */
   readonly disconnected: WritableStore<boolean>
   /**
    * What waits behind the run in flight (#75): the texts, the interrupting ones first,
-   * from every `queue` frame — one list for every follower, so a second tab sees what
-   * the first queued. Empty when nothing waits. Rendered above the composer; a stop hands
-   * these back to the composer through the abort receipt, not from here (the frame that
-   * empties this can beat the receipt).
+   * from the snapshot a follow opens on and every `queue` frame after it (#917) — one list
+   * for every follower, so a second tab, even one opened after, sees what the first queued.
+   * Never in the transcript until pi delivers it. Empty when nothing waits. Rendered above the
+   * composer; a stop hands these back to the composer through the abort receipt, not from here
+   * (the frame that empties this can beat the receipt).
    */
   readonly queue: WritableStore<readonly string[]>
   /**
@@ -328,6 +353,11 @@ export interface ThreadStores {
    * nothing is discarded when the page leaves it (`discardEmptyDraft`).
    */
   readonly typed: WritableStore<boolean>
+  /**
+   * The words the composer holds, as typed (#938): a pane beside the focused one shows them where its
+   * composer is, so what you were writing there is in sight while you type in another.
+   */
+  readonly draft: WritableStore<string>
   /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has

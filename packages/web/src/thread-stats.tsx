@@ -1,6 +1,7 @@
 import { EnsoThreadStats, type EnsoToolCallStats } from '@enso/core'
 import { lazy, Suspense, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
+import { IN_FLIGHT_ESTIMATE_TITLE, type LiveRun, runningEmptyText, runningTurnWords } from './live-request.ts'
 import { useThreadReadable } from './model-state.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
@@ -104,10 +105,13 @@ function ContextSection({
   stats,
   data,
   onTurn,
+  empty,
 }: {
   stats: EnsoThreadStats
   data: readonly TurnPoint[]
   onTurn: OnTurn
+  /** What an empty chart says: what it waits for, or that a run is in progress (#913). */
+  empty: string
 }): React.ReactNode {
   const { usage } = stats
   const context = usage.context
@@ -142,7 +146,7 @@ function ContextSection({
         ))}
       </dl>
       {data.length === 0 ? (
-        <Empty>tokens appear after the first response</Empty>
+        <Empty>{empty}</Empty>
       ) : (
         <Suspense fallback={CHART_LOADING}>
           <TokenChart data={data} onTurn={onTurn} />
@@ -182,10 +186,12 @@ function CostPerTurn({
   headline,
   data,
   onTurn,
+  empty,
 }: {
   readonly headline: StatsHeadline
   readonly data: readonly TurnPoint[]
   readonly onTurn: OnTurn
+  readonly empty: string
 }): React.ReactNode {
   const noTurn = headline.turnCount === 0
   let body: React.ReactNode = (
@@ -193,7 +199,7 @@ function CostPerTurn({
       <CostChart data={data} onTurn={onTurn} />
     </Suspense>
   )
-  if (noTurn) body = <Empty>costs appear after the first response</Empty>
+  if (noTurn) body = <Empty>{empty}</Empty>
   else if (headline.pricing === 'unpriced') body = <Empty>no price for this model, so no cost to chart</Empty>
   return (
     <Section
@@ -403,17 +409,45 @@ export function missedText(target: StatsTarget): string {
  */
 const NO_REFUSALS: RefusedCalls = new Map()
 
+/**
+ * The turn in flight (#913): its time and its output so far, said as estimates and kept out of
+ * every total above — the provider counts it when it completes, and only then is it a turn here.
+ */
+function RunningTurn({ turn, live }: { turn: number; live: LiveRun | undefined }): React.ReactNode {
+  if (live === undefined) return null
+  const { head, figures, note } = runningTurnWords(turn, live)
+  return (
+    <p
+      data-running-turn=""
+      className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground"
+      title={live.request === undefined ? undefined : IN_FLIGHT_ESTIMATE_TITLE}
+    >
+      <b className="font-medium text-foreground">{head}</b>
+      <span className="font-mono tabular-nums">{figures}</span> — {note}
+    </p>
+  )
+}
+
+/** What an empty section says: what it waits for, or — while a run is in flight (#913) — that it runs. */
+function emptyWhile(live: LiveRun | undefined, noTurn: boolean, waiting: string): string {
+  if (live === undefined) return waiting
+  return runningEmptyText(noTurn && live.request !== undefined, live.request?.startedAt ?? live.runSince, live.now)
+}
+
 export function ThreadStatsView({
   outcome,
   onNavigate,
   missed,
   refused = NO_REFUSALS,
+  live,
 }: {
   readonly outcome: StatsOutcome
   readonly onNavigate?: ((target: StatsTarget) => void) | undefined
   readonly missed?: string | undefined
   /** The calls something refused (#387, #523) — the thread's `refusals`; none in a static render. */
   readonly refused?: RefusedCalls
+  /** The run in flight (#913), undefined at rest: its turn is shown apart, never counted in. */
+  readonly live?: LiveRun | undefined
 }): React.ReactNode {
   if (outcome.kind === 'reading')
     return <p className="p-3 text-xs text-muted-foreground">reading the thread's stats…</p>
@@ -429,6 +463,7 @@ export function ThreadStatsView({
   const unpriced = unpricedPrompts(stats.turnStats)
   const noTurn = headline.turnCount === 0
   const onTurn = onNavigate === undefined ? undefined : (turn: number): void => onNavigate({ kind: 'turn', turn })
+  const emptyUntil = (waiting: string): string => emptyWhile(live, noTurn, waiting)
   return (
     <section aria-label="thread stats" className="@container grid grid-cols-1 gap-4 p-6">
       <Card
@@ -440,6 +475,7 @@ export function ThreadStatsView({
             {missed}
           </p>
         )}
+        <RunningTurn turn={(stats.turnStats.at(-1)?.turn ?? 0) + 1} live={live} />
         <dl className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
           <Metric
             label="total cost"
@@ -472,8 +508,18 @@ export function ThreadStatsView({
         ) : null}
       </Card>
       <div className="grid grid-cols-1 items-start gap-4 @4xl:grid-cols-2">
-        <ContextSection stats={stats} data={data} onTurn={onTurn} />
-        <CostPerTurn headline={headline} data={data} onTurn={onTurn} />
+        <ContextSection
+          stats={stats}
+          data={data}
+          onTurn={onTurn}
+          empty={emptyUntil('tokens appear after the first response')}
+        />
+        <CostPerTurn
+          headline={headline}
+          data={data}
+          onTurn={onTurn}
+          empty={emptyUntil('costs appear after the first response')}
+        />
         <ToolUsage tools={tools} />
         <CostliestCalls calls={stats.callStats} refused={refused} onNavigate={onNavigate} />
         {tools.length === 0 ? null : (
@@ -501,7 +547,7 @@ export function ThreadStatsView({
         )}
         <Section title="Costliest prompts" aside="cost">
           {costliest.length === 0 ? (
-            <Empty>costs appear after the first response</Empty>
+            <Empty>{emptyUntil('costs appear after the first response')}</Empty>
           ) : (
             <ol className="-mx-2">
               {costliest.map((prompt) => (
@@ -555,7 +601,13 @@ export function ThreadStatsView({
  * (`read-on-usage.ts`). `onNavigate` is the pane's (`chat-layout.tsx`): it finds the target in
  * that pane's transcript and says whether it could.
  */
-export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: RevealStatsTarget }): React.ReactNode {
+export function ThreadStatsDrawer({
+  onNavigate,
+  live,
+}: {
+  readonly onNavigate?: RevealStatsTarget
+  readonly live?: LiveRun | undefined
+}): React.ReactNode {
   // #659: no request until the thread can answer — a never-run thread's 404s were console errors.
   const outcome = useReadOnUsage<StatsOutcome>(useThreadReadable() ? readThreadStats : readNothingRan, ANALYSIS_READING)
   const [missed, setMissed] = useState<string | undefined>(undefined)
@@ -564,5 +616,5 @@ export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: Reveal
       ? undefined
       : (target: StatsTarget): void => setMissed(onNavigate(target, outcome.payload) ? undefined : missedText(target))
   const refused = useStore(useThreadStores().refusals)
-  return <ThreadStatsView outcome={outcome} onNavigate={navigate} missed={missed} refused={refused} />
+  return <ThreadStatsView outcome={outcome} onNavigate={navigate} missed={missed} refused={refused} live={live} />
 }
