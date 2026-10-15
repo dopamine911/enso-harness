@@ -102,6 +102,12 @@ export interface AgentHost {
    */
   readCopyChanges(copy: ThreadTreePlace): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
   /**
+   * One of a copy's changed files whole, on both sides (#461), read from its store and the copy
+   * under the host's environment, writing nothing (`readCopyFileTexts`). The paths are the caller's
+   * to hold to the copy.
+   */
+  readCopyFileTexts(copy: ThreadTreePlace, paths: ChangedFilePaths): Promise<ChangedFileTexts>
+  /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
    * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the

@@ -266,6 +266,7 @@ async function mountLaunch(options: MountOptions = {}): Promise<Mounted> {
   const actions: LaunchActions = {
     openThread: (thread): void => void opened.push(thread.threadId),
     manageProjects: (): void => void managed.push(1),
+    openSettings: (): void => undefined,
   }
   const container = document.createElement('div')
   document.body.appendChild(container)

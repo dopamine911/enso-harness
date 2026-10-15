@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   type EnsoAddableProvider,
@@ -21,6 +21,7 @@ import {
 import { readTextIfPresent } from '@enso/core/paths'
 import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
+import { writeAtomically } from '../host/atomic-file.ts'
 import type { HostAuthQuestion } from '../host/host-flow-runs.ts'
 import { authEventText, isFlowCancelled, loginCodeQuestion } from '../host/host-flows.ts'
 import type { HostProviderFacts, HostProviders } from '../host/provider-settings.ts'
@@ -90,14 +91,10 @@ function writeSection(configPath: string, models: EnsoModelsConfig): SectionRead
   const next = Object.keys(models).length === 0 ? others : { ...others, models }
   const checked = parseEnsoConfig(JSON.stringify(next))
   if (checked.kind === 'unreadable') return { kind: 'refused', reason: checked.reason }
-  const temporary = `${configPath}.${process.pid}.tmp`
   // The rename installs the temporary file's inode, so it carries the mode: the file's own, else
   // 0600 — never the umask's default, which would open the user's config from the second save on.
-  // Set after the write: a mode given to the write is cut by the umask, and ignored for a file left over.
   const mode = existsSync(configPath) ? statSync(configPath).mode & 0o777 : 0o600
-  writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode })
-  chmodSync(temporary, mode)
-  renameSync(temporary, configPath)
+  writeAtomically(configPath, `${JSON.stringify(next, null, 2)}\n`, mode)
   return { kind: 'read', models }
 }
 

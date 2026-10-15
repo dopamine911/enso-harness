@@ -36,7 +36,12 @@ export const EnsoUsage = Type.Object({
 export type EnsoUsage = Static<typeof EnsoUsage>
 
 /**
- * A streaming text delta. ⚠ `usage` rides along on EVERY one — see `message_update`.
+ * A streaming text delta: the characters, and nothing else.
+ *
+ * ⚠ No `usage` (#915). pi attaches the in-flight message's CUMULATIVE usage to every
+ * `message_update`; carried, it was ~350 bytes of envelope on a delta of a few characters — most of
+ * the follow while a model streams — and nothing read it. The message's accounting is its
+ * `message-end`, and the thread's is `session-usage`.
  *
  * @group Observations
  * @category Message stream
@@ -45,10 +50,11 @@ export const EnsoTextDelta = Type.Object({
   kind: Type.Literal('text-delta'),
   contentIndex: Type.Integer({ minimum: 0 }),
   delta: Type.String(),
-  usage: Type.Optional(EnsoUsage),
 })
 
 /**
+ * A streaming thinking delta; like {@link EnsoTextDelta}, without pi's per-delta usage.
+ *
  * @group Observations
  * @category Message stream
  */
@@ -56,7 +62,6 @@ export const EnsoThinkingDelta = Type.Object({
   kind: Type.Literal('thinking-delta'),
   contentIndex: Type.Integer({ minimum: 0 }),
   delta: Type.String(),
-  usage: Type.Optional(EnsoUsage),
 })
 
 /**

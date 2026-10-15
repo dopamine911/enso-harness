@@ -477,7 +477,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
   (`follow-connection.ts#finishRunsThrough`) or opens an `external-<generation>` run another client started; a `settled`
   observation closes the runs through the server's generation, and a `prompt-rejected` closes
   the run it names with `RUN_ERROR` (both in `follow-connection.ts#observe`); the follow ending closes every open run
-  (`follow-connection.ts#subscribe`). The one
+  (`follow-connection.ts#followClosed`). The one
   place a returning POST touches a run is `follow-connection.ts#send`, and only when admission failed — an image
   refused on this side before any request, the fetch that threw, a status that is not 202, a receipt that fails its schema —
   or when the receipt lands on a run the follow has already spoken for: a rejection that crossed it,
