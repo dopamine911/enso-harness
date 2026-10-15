@@ -1,9 +1,12 @@
 import {
   ENSO_CATCH_ALL,
   ENSO_DRAFTED_RULE_GROUPS,
+  ENSO_EMPTY_RULE_RECORD,
   ENSO_MODE_PRESETS,
   ENSO_PERMISSION_MODES,
+  type EnsoDisabledRule,
   type EnsoDraftedRuleGroup,
+  type EnsoGroupAddedRule,
   type EnsoGuardCheck,
   type EnsoPermissionAction,
   type EnsoPermissionMap,
@@ -11,12 +14,12 @@ import {
   type EnsoPermissionPolicyRead,
   type EnsoPermissionPolicyRefusal,
   type EnsoPolicyRow,
+  type EnsoRuleRecord,
   decisionAction,
   effectiveRows,
   hasRule,
   permissionOf,
   policyKnobs,
-  policyRows,
   withoutRule,
   withRule,
   withRuleMoved,
@@ -31,7 +34,7 @@ import { FieldError } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { PAGE_BUTTON, PAGE_INPUT, PAGE_OUTLINE_BUTTON, SAVE_BAR, SUB_TITLE } from './page-styles.ts'
-import { BehaviourPart, YOLO_ROW_ID } from './permissions-behaviour.tsx'
+import { BehaviourPart, Switch, YOLO_ROW_ID } from './permissions-behaviour.tsx'
 import {
   checkPermission,
   fetchPermissionPolicy,
@@ -48,13 +51,29 @@ import {
   policyDiff,
   rowsBySurface,
   checkSurfaces,
+  decisionAt,
   surfaceChoices,
   withAction,
-  withGroup,
   type SettingEdits,
   withPatternRenamed,
   withSettings,
 } from './permissions-draft.ts'
+import {
+  disabledAt,
+  groupEdits,
+  groupIsOn,
+  type Placement,
+  type RuleDraft,
+  ruleDraftOf,
+  savedWrite,
+  type ShownRow,
+  shownRows,
+  withDisabledRemoved,
+  withGroupOff,
+  withGroupOn,
+  withRuleDisabled,
+  withRuleEnabled,
+} from './permissions-record.ts'
 
 /**
  * Settings' Permissions section (#474): the rules pi runs under, from `ENSO_HOME/permissions.json`
@@ -105,19 +124,38 @@ export interface PolicyEditor {
   readonly draft: EnsoPermissionMap | undefined
   /** The Behaviour part's edits to the keys beside `permission` (#935); `undefined` while none is edited. */
   readonly settings: SettingEdits | undefined
-  /** Anything unsaved: a rule or a setting. Both go in the one save, under the one ETag. */
+  /** Enso's record beside the file, as switched here (#945); `undefined` while nothing is switched. */
+  readonly record: EnsoRuleRecord | undefined
+  /** Anything unsaved: a rule, a switch or a setting. All go in the one save, under the one ETag. */
   readonly dirty: boolean
   readonly working: boolean
   readonly problem: PolicyProblem | undefined
   /** Where a reset kept the file it replaced. */
   readonly backup: string | undefined
   readonly edit: (change: (permission: EnsoPermissionMap) => EnsoPermissionMap) => void
+  /** Switch a rule or a group off or on: the rules and Enso's record change together (#945). */
+  readonly switchRules: (change: (draft: RuleDraft) => RuleDraft) => void
   /** Set a key beside the rules; `undefined` takes it off the file, the engine's default in force. */
   readonly setSetting: (key: string, value: unknown) => void
   readonly discard: () => void
   readonly save: (overwrite: boolean) => void
   readonly reload: () => void
   readonly reset: () => void
+}
+
+/** One kind of unsaved edit: its state, a ref that reads it as it is now, and its setter for both. */
+function useHeldEdit<Edit>(): {
+  readonly value: Edit | undefined
+  readonly now: React.RefObject<Edit | undefined>
+  readonly change: (next: Edit | undefined) => void
+} {
+  const [value, setValue] = useState<Edit | undefined>(undefined)
+  const now = useRef<Edit | undefined>(undefined)
+  const change = useCallback((next: Edit | undefined): void => {
+    now.current = next
+    setValue(next)
+  }, [])
+  return { value, now, change }
 }
 
 /**
@@ -130,28 +168,25 @@ export interface PolicyEditor {
  */
 export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefined): PolicyEditor {
   const [state, setState] = useState<PolicyState>({ kind: 'loading' })
-  const [draft, setDraft] = useState<EnsoPermissionMap | undefined>(undefined)
-  const [settings, setSettings] = useState<SettingEdits | undefined>(undefined)
   const [working, setWorking] = useState(false)
   const [problem, setProblem] = useState<PolicyProblem | undefined>(undefined)
   const [backup, setBackup] = useState<string | undefined>(undefined)
   const [generation, setGeneration] = useState(0)
-  // Refs beside the state: a save's answer compares against the draft as it is THEN, and a
-  // double-click on Save must not send twice.
-  const draftNow = useRef<EnsoPermissionMap | undefined>(undefined)
-  const settingsNow = useRef<SettingEdits | undefined>(undefined)
+  // Each edit held with a ref beside it: a save's answer compares against the draft as it is THEN,
+  // and a double-click on Save must not send twice.
+  const { value: draft, now: draftNow, change: changeDraft } = useHeldEdit<EnsoPermissionMap>()
+  const { value: settings, now: settingsNow, change: changeSettings } = useHeldEdit<SettingEdits>()
+  const { value: record, now: recordNow, change: changeRecord } = useHeldEdit<EnsoRuleRecord>()
   const inFlight = useRef(false)
-  const changeDraft = useCallback((next: EnsoPermissionMap | undefined): void => {
-    draftNow.current = next
-    setDraft(next)
-  }, [])
-  const changeSettings = useCallback((next: SettingEdits | undefined): void => {
-    settingsNow.current = next
-    setSettings(next)
-  }, [])
+  const clearEdits = (): void => {
+    changeDraft(undefined)
+    changeSettings(undefined)
+    changeRecord(undefined)
+  }
 
   useEffect(() => {
-    if (!open || draftNow.current !== undefined || settingsNow.current !== undefined) return
+    if (!open || draftNow.current !== undefined || settingsNow.current !== undefined || recordNow.current !== undefined)
+      return
     let current = true
     void fetchPermissionPolicy(fetchImpl).then((read) => {
       if (current) setState(read)
@@ -159,7 +194,8 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     return (): void => {
       current = false
     }
-  }, [open, fetchImpl, generation])
+    // The refs are `useHeldEdit`'s, the same objects every render: named so the lint can see it.
+  }, [open, fetchImpl, generation, draftNow, settingsNow, recordNow])
 
   const loaded = state.kind === 'loaded' ? state.policy : undefined
 
@@ -176,37 +212,42 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     changeSettings({ ...settingsNow.current, [key]: value })
   }
 
+  const switchRules: PolicyEditor['switchRules'] = (change) => {
+    if (loaded?.kind !== 'ok') return
+    setBackup(undefined)
+    const next = change(ruleDraftOf(loaded, draftNow.current, recordNow.current))
+    changeDraft(next.permission)
+    changeRecord(next.record)
+  }
+
   /**
    * What a save writes over, and under which version (#519). A plain save: the file as read, under its
-   * ETag. An overwrite after a 412: the file as it is on disk NOW, re-read, under ITS ETag, so only the
-   * draft's rules and the settings edited here replace anything, and a setting edited by hand in the
+   * ETag. An overwrite after a 412: the files as they are on disk NOW, re-read, under THEIR ETag, so only the
+   * draft's rules, its switches and the settings edited here replace anything, and a setting edited by hand in the
    * meantime (`permissionReviewLog: false`) stays. It used to send the file as first read with
    * `If-Match: *`, reverting such a setting silently. A file that cannot be read now is overwritten as before.
    */
   const saveBase = async (
-    file: PolicyFile,
-    etag: string,
+    read: Extract<EnsoPermissionPolicyRead, { kind: 'ok' }>,
     overwrite: boolean,
-  ): Promise<{ file: PolicyFile; etag: string }> => {
-    if (!overwrite) return { file, etag }
+  ): Promise<{ file: PolicyFile; etag: string; record: EnsoRuleRecord }> => {
+    if (!overwrite) return read
     const now = await fetchPermissionPolicy(fetchImpl)
-    return now.kind === 'loaded' && now.policy.kind === 'ok'
-      ? { file: now.policy.file, etag: now.policy.etag }
-      : { file, etag: '*' }
+    return now.kind === 'loaded' && now.policy.kind === 'ok' ? now.policy : { ...read, etag: '*' }
   }
 
   const save = async (overwrite: boolean): Promise<void> => {
     const sent = draftNow.current
     const sentSettings = settingsNow.current
-    if (loaded?.kind !== 'ok' || (sent === undefined && sentSettings === undefined) || inFlight.current) return
+    const sentRecord = recordNow.current
+    const nothing = sent === undefined && sentSettings === undefined && sentRecord === undefined
+    if (loaded?.kind !== 'ok' || nothing || inFlight.current) return
     inFlight.current = true
     setWorking(true)
     let outcome: PolicySave
     try {
-      const base = await saveBase(loaded.file, loaded.etag, overwrite)
-      // One file, one save (#935): the settings edited, then the rules — the file's own where none is edited.
-      const file = withSettings(base.file, sentSettings ?? {})
-      const write = { file: sent === undefined ? file : { ...file, permission: sent } }
+      const base = await saveBase(loaded, overwrite)
+      const write = savedWrite(base, { permission: sent, settings: sentSettings, record: sentRecord })
       outcome = await savePermissionPolicy(write, base.etag, fetchImpl)
     } finally {
       inFlight.current = false
@@ -221,6 +262,7 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     // Edits made while the save was in flight are still unsaved: they stay the draft.
     if (draftNow.current === sent) changeDraft(undefined)
     if (settingsNow.current === sentSettings) changeSettings(undefined)
+    if (recordNow.current === sentRecord) changeRecord(undefined)
   }
 
   const reset = async (): Promise<void> => {
@@ -241,29 +283,28 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     setState({ kind: 'loaded', policy: outcome.reset.policy })
     setBackup(outcome.reset.backup)
     setProblem(undefined)
-    changeDraft(undefined)
-    changeSettings(undefined)
+    clearEdits()
   }
 
   return {
     state,
     draft,
     settings,
-    dirty: draft !== undefined || settings !== undefined,
+    record,
+    dirty: draft !== undefined || settings !== undefined || record !== undefined,
     working,
     problem,
     backup,
     edit,
+    switchRules,
     setSetting,
     discard: (): void => {
-      changeDraft(undefined)
-      changeSettings(undefined)
+      clearEdits()
       setProblem(undefined)
     },
     save: (overwrite: boolean): void => void save(overwrite),
     reload: (): void => {
-      changeDraft(undefined)
-      changeSettings(undefined)
+      clearEdits()
       setProblem(undefined)
       setState({ kind: 'loading' })
       setGeneration((count) => count + 1)
@@ -339,8 +380,16 @@ interface RowEdits {
   readonly onRename: (to: string) => string | undefined
   readonly onMove: (direction: -1 | 1) => void
   readonly onRemove: () => void
+  /** Out of the file, kept in Enso's record to switch back on (#945). */
+  readonly onSwitchOff: () => void
   readonly canMoveUp: boolean
   readonly canMoveDown: boolean
+}
+
+/** What a rule switched off can do (#945): go back in force where it was, or go for good. */
+interface DisabledEdits {
+  readonly onSwitchOn: () => void
+  readonly onRemove: () => void
 }
 
 /** Each decision's segment, tinted when picked as the prototype's `.decision-group` (#417). */
@@ -459,10 +508,25 @@ function PatternCell({
   )
 }
 
+/** A row's switch (#945): on while the rule is in force. Enso's `**` has none, as it has no remove: a mode needs it. */
+function RowSwitch({ row, on, onChange }: { row: EnsoPolicyRow; on: boolean; onChange: () => void }): React.ReactNode {
+  if (row.pattern === ENSO_CATCH_ALL) return null
+  return <Switch on={on} label={`in force: ${row.surface} ${row.pattern}`} onChange={onChange} />
+}
+
+/** A row's remove, for a rule that is the user's to take out. */
+function RemoveButton({ name, onRemove }: { name: string; onRemove: () => void }): React.ReactNode {
+  return (
+    <Button variant="ghost" size="icon" className={ROW_ICON_BUTTON} aria-label={`remove ${name}`} onClick={onRemove}>
+      <XIcon />
+    </Button>
+  )
+}
+
 /**
- * One rule as a row of the prototype's table (#417): its number, its surface, its pattern and tag,
- * its decision, its order, and its remove. ⚠ Enso's `**` takes a decision change only: a mode needs
- * it where it is (#499).
+ * One rule as a row of the prototype's table (#417): its number, its switch (#945), its surface, its
+ * pattern and tag, its decision, its order, and its remove. ⚠ Enso's `**` takes a decision change
+ * only: a mode needs it where it is (#499).
  */
 function RuleRow({
   row,
@@ -477,10 +541,14 @@ function RuleRow({
 }): React.ReactNode {
   const name = `${row.surface} ${row.pattern}`
   const action = decisionAction(row.decision)
-  const removable = edits !== undefined && row.pattern !== ENSO_CATCH_ALL
   return (
     <tr aria-label={name} className={row.owner === 'mode' ? 'text-muted-foreground' : undefined}>
       <td className={`${BODY_CELL} text-right font-mono text-xs text-muted-foreground tabular-nums`}>{number}</td>
+      {edits === undefined ? null : (
+        <td className={BODY_CELL}>
+          <RowSwitch row={row} on onChange={edits.onSwitchOff} />
+        </td>
+      )}
       <td className={`${BODY_CELL} whitespace-nowrap`}>{row.surface}</td>
       <PatternCell row={row} mode={mode} edits={edits} />
       <td className={BODY_CELL}>
@@ -497,23 +565,71 @@ function RuleRow({
         <OrderControls row={row} edits={edits} />
       </td>
       <td className={`${BODY_CELL} text-right`}>
-        {removable ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={ROW_ICON_BUTTON}
-            aria-label={`remove ${name}`}
-            onClick={edits.onRemove}
-          >
-            <XIcon />
-          </Button>
+        {edits !== undefined && row.pattern !== ENSO_CATCH_ALL ? (
+          <RemoveButton name={name} onRemove={edits.onRemove} />
         ) : null}
       </td>
     </tr>
   )
 }
 
-/** The edits a written row can make on the draft; the surface's rows decide where it may move. */
+/**
+ * A rule switched off (#945), greyed where switching it on puts it back: no number, since the engine
+ * does not read it, and tagged `disabled`. A rule whose neighbour has left the file says it will go
+ * last on its surface.
+ */
+function DisabledRuleRow({ shown, edits }: { shown: Required<ShownRow>; edits: DisabledEdits }): React.ReactNode {
+  const { row, disabled } = shown
+  const name = `${row.surface} ${row.pattern}`
+  const action = decisionAction(row.decision)
+  const reason = typeof row.decision === 'object' ? row.decision.reason : undefined
+  const { placement } = disabled
+  return (
+    <tr aria-label={name} data-disabled="" className="bg-muted/40 text-muted-foreground">
+      <td className={`${BODY_CELL} text-right font-mono text-xs tabular-nums`}>
+        <span aria-hidden="true">–</span>
+      </td>
+      <td className={BODY_CELL}>
+        <RowSwitch row={row} on={false} onChange={edits.onSwitchOn} />
+      </td>
+      <td className={`${BODY_CELL} whitespace-nowrap`}>{row.surface}</td>
+      <td className={`${BODY_CELL} min-w-48`}>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <code className="px-1.5 font-mono text-sm break-all">{row.pattern}</code>
+          <RuleTag title="Switched off: kept by Enso, out of permissions.json, so pi does not apply it">
+            disabled
+          </RuleTag>
+        </span>
+        {reason === undefined ? null : <span className="block px-1.5 text-xs">told the agent: {reason}</span>}
+        <NeighbourGone rule={disabled.rule} placement={placement} />
+      </td>
+      <td className={BODY_CELL}>
+        <span data-decision={action} className="font-mono text-xs font-semibold">
+          {action}
+        </span>
+      </td>
+      <td className={BODY_CELL}>
+        <span className="text-xs whitespace-nowrap">not in force</span>
+      </td>
+      <td className={`${BODY_CELL} text-right`}>
+        <RemoveButton name={name} onRemove={edits.onRemove} />
+      </td>
+    </tr>
+  )
+}
+
+/** Where a rule switched off goes back when the rule it came after has left the file (#945). */
+function NeighbourGone({ rule, placement }: { rule: EnsoDisabledRule; placement: Placement }): React.ReactNode {
+  if (placement.kind !== 'gone' || rule.whole === true) return null
+  return (
+    <span className="block px-1.5 text-xs">
+      It came after <code className="font-mono">{placement.neighbour}</code>, which is no longer in the file: switched
+      on, it goes last on {rule.surface}.
+    </span>
+  )
+}
+
+/** The edits a written row can make on the draft; the surface's rules in force decide where it may move. */
 function rowEdits(
   row: EnsoPolicyRow,
   siblings: readonly EnsoPolicyRow[],
@@ -521,47 +637,102 @@ function rowEdits(
   editing: RuleEditing,
 ): RowEdits {
   const { surface, pattern } = row
-  const { permission, onEdit } = editing
+  const { draft, onEdit, onSwitch } = editing
   const previous = siblings[position - 1]
   return {
     onAction: (action) => onEdit((current) => withAction(current, surface, pattern, action)),
     onRename: (to) => {
-      const renamed = withPatternRenamed(permission, surface, pattern, to)
+      if (disabledAt(draft.record, surface, to) !== undefined) {
+        return `${surface} has ${to} switched off: switch it on in the list`
+      }
+      const renamed = withPatternRenamed(draft.permission, surface, pattern, to)
       if ('refusal' in renamed) return renamed.refusal
       onEdit(() => renamed.permission)
       return undefined
     },
     onMove: (direction) => onEdit((current) => withRuleMoved(current, surface, pattern, direction)),
     onRemove: () => onEdit((current) => withoutRule(current, surface, pattern)),
+    onSwitchOff: () => onSwitch((current) => withRuleDisabled(current, surface, pattern)),
     canMoveUp: previous !== undefined && previous.pattern !== ENSO_CATCH_ALL,
     canMoveDown: position < siblings.length - 1,
   }
 }
 
-/** The draft the rows edit, as shown, and how to change it. */
+/** The draft the rows edit, as shown, and how to change it: a rule's own edits, and its switch. */
 interface RuleEditing {
-  readonly permission: EnsoPermissionMap
+  readonly draft: RuleDraft
   readonly onEdit: PolicyEditor['edit']
+  readonly onSwitch: PolicyEditor['switchRules']
 }
 
 /** A column head of the rule table, as the prototype's `.data-table th`. */
 const HEAD_CELL = `px-3 py-2 text-left whitespace-nowrap ${TABLE_HEAD}`
 
+/** One surface's rows: the rules in force numbered down the table from `first`, the ones switched off in place. */
+function SurfaceRows({
+  surface,
+  rows,
+  first,
+  mode,
+  editing,
+}: {
+  surface: string
+  rows: readonly ShownRow[]
+  first: number
+  mode: EnsoPermissionModeName | undefined
+  editing: RuleEditing | undefined
+}): React.ReactNode {
+  const live = rows.flatMap((shown) => (shown.disabled === undefined ? [shown.row] : []))
+  return (
+    <tbody aria-label={`surface ${surface}`}>
+      {rows.map((shown) => {
+        const { row, disabled } = shown
+        if (disabled !== undefined) {
+          if (editing === undefined) return null
+          const { rule } = disabled
+          return (
+            <DisabledRuleRow
+              key={row.pattern}
+              shown={{ row, disabled }}
+              edits={{
+                onSwitchOn: () => editing.onSwitch((current) => withRuleEnabled(current, rule)),
+                onRemove: () => editing.onSwitch((current) => withDisabledRemoved(current, rule)),
+              }}
+            />
+          )
+        }
+        const position = live.indexOf(row)
+        return (
+          <RuleRow
+            key={row.pattern}
+            row={row}
+            number={first + position}
+            mode={mode}
+            edits={editing === undefined ? undefined : rowEdits(row, live, position, editing)}
+          />
+        )
+      })}
+    </tbody>
+  )
+}
+
 /**
  * The rules in the engine's order, one table (#417): a row per rule, numbered down the table, each
- * surface's rows together in a group of their own. Editable when `editing` is given.
+ * surface's rows together in a group of their own, and the rules switched off greyed where they
+ * would go back (#945). Editable when `editing` is given.
  */
 function RuleList({
   rows,
   mode,
   editing,
 }: {
-  rows: readonly EnsoPolicyRow[]
+  rows: readonly ShownRow[]
   mode: EnsoPermissionModeName | undefined
   editing: RuleEditing | undefined
 }): React.ReactNode {
   const groups = rowsBySurface(rows)
-  const firsts = groups.map((_, index) => groups.slice(0, index).reduce((count, group) => count + group.rows.length, 1))
+  const inForce = groups.map((group) => group.rows.filter((shown) => shown.disabled === undefined).length)
+  const firsts = inForce.map((_, index) => inForce.slice(0, index).reduce((count, rules) => count + rules, 1))
   return (
     <div className="overflow-x-auto rounded-sm border bg-card">
       <table aria-labelledby="permissions-rules-label" className="w-full border-collapse text-sm">
@@ -570,6 +741,11 @@ function RuleList({
             <th scope="col" className={`${HEAD_CELL} w-10 text-right`}>
               #
             </th>
+            {editing === undefined ? null : (
+              <th scope="col" className={HEAD_CELL}>
+                On
+              </th>
+            )}
             <th scope="col" className={HEAD_CELL}>
               Tool
             </th>
@@ -588,17 +764,14 @@ function RuleList({
           </tr>
         </thead>
         {groups.map((group, index) => (
-          <tbody key={group.surface} aria-label={`surface ${group.surface}`}>
-            {group.rows.map((row, position) => (
-              <RuleRow
-                key={row.pattern}
-                row={row}
-                number={(firsts[index] ?? 1) + position}
-                mode={mode}
-                edits={editing === undefined ? undefined : rowEdits(row, group.rows, position, editing)}
-              />
-            ))}
-          </tbody>
+          <SurfaceRows
+            key={group.surface}
+            surface={group.surface}
+            rows={group.rows}
+            first={firsts[index] ?? 1}
+            mode={mode}
+            editing={editing}
+          />
         ))}
       </table>
     </div>
@@ -673,13 +846,8 @@ function HeadFacts({
 }
 
 /** A new rule: last on its surface, after `**`, so it is yours and holds in every mode. */
-function AddRule({
-  permission,
-  onEdit,
-}: {
-  permission: EnsoPermissionMap
-  onEdit: PolicyEditor['edit']
-}): React.ReactNode {
+function AddRule({ draft, onEdit }: { draft: RuleDraft; onEdit: PolicyEditor['edit'] }): React.ReactNode {
+  const { permission } = draft
   const surfaces = surfaceChoices(permission)
   const [surface, setSurface] = useState(surfaces[0] ?? 'bash')
   const [pattern, setPattern] = useState('')
@@ -687,7 +855,10 @@ function AddRule({
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const add = (): void => {
     const typed = pattern.trim()
-    const refused = newRuleRefusal(permission, surface, typed)
+    const refused =
+      disabledAt(draft.record, surface, typed) === undefined
+        ? newRuleRefusal(permission, surface, typed)
+        : `${surface} has ${typed} switched off: switch it on in the list`
     setRefusal(refused)
     if (refused !== undefined) return
     onEdit((current) => withRule(current, surface, typed, action))
@@ -731,109 +902,122 @@ function AddRule({
   )
 }
 
-/** Why a group's switch, once on, does not turn off. */
-const GROUP_ON_WORDS =
-  "On: its rules are in your table. Remove them there — Enso can't tell a group's rule from your own identical one."
-
-/**
- * A rule group's switch, the prototype's `.switch` (#417). Off, turning it on adds the group's rules
- * not already in force; on, it stays on: a group's rules leave from the table, one by one.
- */
-function GroupSwitch({
-  on,
-  labelledBy,
-  onTurnOn,
-}: {
-  on: boolean
-  labelledBy: string
-  onTurnOn: () => void
-}): React.ReactNode {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-labelledby={labelledBy}
-      disabled={on}
-      title={on ? GROUP_ON_WORDS : undefined}
-      onClick={onTurnOn}
-      className="group relative mt-0.5 h-6 w-10 shrink-0 rounded-full bg-border-strong transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed aria-checked:bg-primary"
-    >
-      <span
-        aria-hidden="true"
-        className="absolute top-0.75 left-0.75 size-4.5 rounded-full bg-foreground transition-transform group-aria-checked:translate-x-4 group-aria-checked:bg-primary-foreground"
-      />
-    </button>
-  )
-}
-
 /**
  * One rule group, the prototype's `.group-card` (#417): what it stops or allows, its rules as chips
- * (`bash · npm publish* · deny`, a tick on one already in force), and its switch.
+ * (`bash · npm publish* · deny`, a tick on one in force), and its switch. On adds its rules and
+ * Enso's record of which it added (#945); off takes only those out — a rule you had already stays
+ * yours — and asks first when one has been changed since. A group whose rules are all in force with
+ * no record of adding them (turned on before #945, or written by hand) is off, and says its rules
+ * are yours: the switch owns none of them.
  */
 function RuleGroup({
   group,
-  permission,
-  onEdit,
+  draft,
+  onSwitch,
 }: {
   group: EnsoDraftedRuleGroup
-  permission: EnsoPermissionMap
-  onEdit: PolicyEditor['edit']
+  draft: RuleDraft
+  onSwitch: PolicyEditor['switchRules']
 }): React.ReactNode {
-  const present = group.rules.map((rule) => hasRule(permission, rule.surface, rule.pattern, rule.decision))
+  const [asking, setAsking] = useState<readonly EnsoGroupAddedRule[] | undefined>(undefined)
+  const present = group.rules.map((rule) => hasRule(draft.permission, rule.surface, rule.pattern, rule.decision))
+  const on = groupIsOn(draft.record, group)
   const titleId = `rule-group-${group.id}`
+  const turnOff = (takeEdited: boolean): void => {
+    setAsking(undefined)
+    onSwitch((current) => withGroupOff(current, group, takeEdited))
+  }
+  const toggle = (): void => {
+    if (!on) {
+      onSwitch((current) => withGroupOn(current, group))
+      return
+    }
+    const edited = groupEdits(draft, group)
+    if (edited.length === 0) turnOff(false)
+    else setAsking(edited)
+  }
   return (
-    <section
-      aria-label={`rule group ${group.title}`}
-      className="flex items-start gap-3 rounded-sm border bg-card px-4 py-3"
-    >
-      <div className="grid min-w-0 flex-1 gap-0.5">
-        <span id={titleId} className="font-semibold">
-          {group.title}
-        </span>
-        <p className={PAGE_NOTE}>{group.note}</p>
-        <ul className="mt-1.5 flex flex-wrap gap-1">
-          {group.rules.map((rule, position) => (
-            <li
-              key={`${rule.surface} ${rule.pattern}`}
-              title={present[position] === true ? 'already in force' : undefined}
-              className="inline-flex items-center gap-1 rounded-sm border px-2 py-px font-mono text-meta whitespace-nowrap text-muted-foreground"
-            >
-              {rule.surface} · {rule.pattern} ·{' '}
-              <span className={`font-semibold ${DECISION_TEXT[rule.decision]}`}>{rule.decision}</span>
-              {present[position] === true ? (
-                <>
-                  <CheckIcon aria-hidden="true" className="size-3 text-ok" />
-                  <span className="sr-only">already in force</span>
-                </>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+    <section aria-label={`rule group ${group.title}`} className="grid gap-3 rounded-sm border bg-card px-4 py-3">
+      <div className="flex items-start gap-3">
+        <div className="grid min-w-0 flex-1 gap-0.5">
+          <span id={titleId} className="font-semibold">
+            {group.title}
+          </span>
+          <p className={PAGE_NOTE}>{group.note}</p>
+          {!on && present.every(Boolean) ? (
+            <p className={PAGE_NOTE}>
+              Its rules are all in force already, as yours: turning it on adds none, and turning it off takes none out.
+            </p>
+          ) : null}
+          <ul className="mt-1.5 flex flex-wrap gap-1">
+            {group.rules.map((rule, position) => (
+              <li
+                key={`${rule.surface} ${rule.pattern}`}
+                title={present[position] === true ? 'in force' : undefined}
+                className="inline-flex items-center gap-1 rounded-sm border px-2 py-px font-mono text-meta whitespace-nowrap text-muted-foreground"
+              >
+                {rule.surface} · {rule.pattern} ·{' '}
+                <span className={`font-semibold ${DECISION_TEXT[rule.decision]}`}>{rule.decision}</span>
+                {present[position] === true ? (
+                  <>
+                    <CheckIcon aria-hidden="true" className="size-3 text-ok" />
+                    <span className="sr-only">in force</span>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <Switch on={on} labelledBy={titleId} onChange={toggle} />
       </div>
-      <GroupSwitch
-        on={present.every(Boolean)}
-        labelledBy={titleId}
-        onTurnOn={() => onEdit((current) => withGroup(current, group))}
-      />
+      {asking === undefined ? null : (
+        <div
+          role="alert"
+          aria-label={`turn ${group.title} off`}
+          className="grid gap-2 rounded-sm border border-chart-3 bg-background p-3 text-sm"
+        >
+          <p>
+            {asking.length === 1
+              ? 'You changed this rule since the group added it. Turning the group off removes it too, unless you keep it:'
+              : 'You changed these rules since the group added them. Turning the group off removes them too, unless you keep them:'}
+          </p>
+          <ul className="font-mono text-xs">
+            {asking.map((rule) => (
+              <li key={`${rule.surface} ${rule.pattern}`}>
+                {rule.surface} · {rule.pattern} · now{' '}
+                {decisionAction(decisionAt(draft.permission, rule.surface, rule.pattern) ?? rule.decision)} (the
+                group's: {rule.decision})
+              </li>
+            ))}
+          </ul>
+          <span className="flex flex-wrap gap-2">
+            <Button variant="destructive" className={PAGE_BUTTON} onClick={() => turnOff(true)}>
+              Remove them too
+            </Button>
+            <Button variant="outline" className={PAGE_OUTLINE_BUTTON} onClick={() => turnOff(false)}>
+              Keep them as mine
+            </Button>
+            <Button variant="ghost" className={PAGE_BUTTON} onClick={() => setAsking(undefined)}>
+              Cancel
+            </Button>
+          </span>
+        </div>
+      )}
     </section>
   )
 }
 
-function RuleGroups({
-  permission,
-  onEdit,
-}: {
-  permission: EnsoPermissionMap
-  onEdit: PolicyEditor['edit']
-}): React.ReactNode {
+function RuleGroups({ draft, onSwitch }: { draft: RuleDraft; onSwitch: PolicyEditor['switchRules'] }): React.ReactNode {
   return (
     <div className="grid gap-3">
       <h3 className={SUB_TITLE}>Rule groups</h3>
-      <p className={PAGE_NOTE}>Ready-made rules Enso suggests. Turning a group on adds its rules to yours.</p>
+      <p className={PAGE_NOTE}>
+        Ready-made rules Enso suggests. Turning a group on adds its rules to yours; turning it off takes out only the
+        ones it added.
+      </p>
       <div className="grid gap-2">
         {ENSO_DRAFTED_RULE_GROUPS.map((group) => (
-          <RuleGroup key={group.id} group={group} permission={permission} onEdit={onEdit} />
+          <RuleGroup key={group.id} group={group} draft={draft} onSwitch={onSwitch} />
         ))}
       </div>
       <p className={PAGE_NOTE}>
@@ -847,12 +1031,29 @@ function RuleGroups({
  * Save and Discard, and whether there is anything to save: the prototype's `.save-bar` (#417),
  * pinned to the bottom of what scrolls only while there is something unsaved.
  */
-function SaveBar({ editor, path }: { editor: PolicyEditor; path: string }): React.ReactNode {
+function SaveBar({
+  editor,
+  path,
+  disabled,
+}: {
+  editor: PolicyEditor
+  path: string
+  /** How many rules are switched off (#945): a deny or an ask switched off is a looser policy, said here. */
+  disabled: number
+}): React.ReactNode {
   const { dirty } = editor
   return (
     <div className={dirty ? SAVE_BAR : 'flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3'}>
       <span className="min-w-50 flex-1 text-sm">
-        <strong className="block">{dirty ? 'unsaved changes' : 'saved'}</strong>
+        <strong className="block">
+          {dirty ? 'unsaved changes' : 'saved'}
+          {disabled === 0 ? null : (
+            <span aria-label="rules switched off" className="font-normal text-muted-foreground">
+              {' '}
+              · {disabled} rule{disabled === 1 ? '' : 's'} disabled, not in force
+            </span>
+          )}
+        </strong>
         <span className="font-mono text-meta text-muted-foreground">Saves to {path}</span>
       </span>
       <Button
@@ -1222,7 +1423,8 @@ function ViewCards({ view, onView }: { view: ViewMode; onView: (view: ViewMode) 
  * The prototype's order (#417): the modes, the rule groups, then the rules — as written (editable),
  * or as the picked mode runs them (read-only: the mode's rules are not yours) — and Add rule.
  */
-function RulesView({ permission, editor }: { permission: EnsoPermissionMap; editor: PolicyEditor }): React.ReactNode {
+function RulesView({ draft, editor }: { draft: RuleDraft; editor: PolicyEditor }): React.ReactNode {
+  const { permission } = draft
   const [view, setView] = useState<ViewMode>('written')
   const mode = view === 'written' ? undefined : view
   return (
@@ -1237,7 +1439,7 @@ function RulesView({ permission, editor }: { permission: EnsoPermissionMap; edit
         </p>
         <ViewCards view={view} onView={setView} />
       </div>
-      <RuleGroups permission={permission} onEdit={editor.edit} />
+      <RuleGroups draft={draft} onSwitch={editor.switchRules} />
       <div className="grid gap-3">
         <h3 id="permissions-rules-label" className={SUB_TITLE}>
           Rules, in order
@@ -1249,13 +1451,17 @@ function RulesView({ permission, editor }: { permission: EnsoPermissionMap; edit
         </p>
         {mode === undefined ? (
           <>
-            <RuleList rows={policyRows(permission)} mode={undefined} editing={{ permission, onEdit: editor.edit }} />
-            <AddRule permission={permission} onEdit={editor.edit} />
+            <RuleList
+              rows={shownRows(draft)}
+              mode={undefined}
+              editing={{ draft, onEdit: editor.edit, onSwitch: editor.switchRules }}
+            />
+            <AddRule draft={draft} onEdit={editor.edit} />
           </>
         ) : (
           <>
             <ReplacedSurfaces permission={permission} mode={mode} />
-            <RuleList rows={effectiveRows(permission, mode)} mode={mode} editing={undefined} />
+            <RuleList rows={effectiveRows(permission, mode).map((row) => ({ row }))} mode={mode} editing={undefined} />
           </>
         )}
       </div>
@@ -1306,7 +1512,10 @@ export function PermissionsSection({
     )
   }
   const { policy } = state
-  const permission = editor.draft ?? (policy.kind === 'ok' ? permissionOf(policy.file) : {})
+  // The rules as edited, and Enso's record beside the file (#945); an unreadable file has neither.
+  const read = policy.kind === 'ok' ? policy : { file: {}, record: ENSO_EMPTY_RULE_RECORD }
+  const draft = ruleDraftOf(read, editor.draft, editor.record)
+  const { permission } = draft
   const tryCommand = (
     <TryCommand threadId={threadId} surfaces={checkSurfaces(permission)} unsaved={editor.dirty} fetch={fetchImpl} />
   )
@@ -1319,6 +1528,12 @@ export function PermissionsSection({
         {policy.kind === 'unreadable' ? null : (
           <HeadFacts file={policy.file} reviewLogDirectory={policy.reviewLogDirectory} />
         )}
+        {policy.kind === 'ok' && policy.recordProblem !== undefined ? (
+          <p role="alert" aria-label="record unreadable" className="max-w-reading text-sm text-refuse">
+            Enso's record of the rules switched off, <code>{policy.recordPath}</code>, cannot be read (
+            {policy.recordProblem}): no rule is shown switched off, and switching one here and saving replaces the file.
+          </p>
+        ) : null}
         {editor.backup === undefined ? null : (
           <p role="status" className="text-sm">
             Enso's policy is in force; the file it replaced is kept at <code>{editor.backup}</code>.
@@ -1334,7 +1549,7 @@ export function PermissionsSection({
         </>
       ) : (
         <>
-          <RulesView permission={permission} editor={editor} />
+          <RulesView draft={draft} editor={editor} />
           {tryCommand}
           <BehaviourPart
             file={withSettings(policy.file, editor.settings ?? {})}
@@ -1343,7 +1558,7 @@ export function PermissionsSection({
           />
           <ResetPanel policy={policy} editor={editor} />
           <ProblemNotice editor={editor} />
-          <SaveBar editor={editor} path={policy.path} />
+          <SaveBar editor={editor} path={policy.path} disabled={draft.record.disabled.length} />
         </>
       )}
     </div>

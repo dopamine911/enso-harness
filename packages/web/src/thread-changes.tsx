@@ -1,6 +1,6 @@
 import { type EnsoGitFileChange, type EnsoGitRepository, EnsoThreadChanges } from '@enso/core'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import {
   type Expansion,
@@ -469,28 +469,84 @@ function toggled(set: ReadonlySet<string>, path: string): ReadonlySet<string> {
 }
 
 /**
+ * The file a tool card asked the Diff view to show (#920), as the call named it — relative to the
+ * thread's folder or absolute — and a fresh object per ask, so asking for the same file again shows it
+ * again. Provided by the views' box (`chat-layout.tsx`).
+ */
+export const DiffFocusContext = createContext<{ readonly path: string } | undefined>(undefined)
+
+/**
+ * Where the changed files' paths start from: `root`, the absolute folder they are relative to (a
+ * repository's top level, a copy's tree), and `scope`, the thread's folder within it (`''` at the
+ * top, else `/`-ended) — what a call's relative path is relative to.
+ */
+interface FilesPlace {
+  readonly root: string
+  readonly scope: string
+}
+
+/**
+ * The changed file a call's path names (#920). The path is first read as pi's tools read it: a
+ * leading `@` (pi's mention mark) dropped. A path that then places cleanly under `place.root` — an
+ * absolute one under the root loses it, a relative one without a `..` gains the thread's `scope` —
+ * names exactly the file at that path, or none: a same-named file elsewhere is a different file,
+ * even when the named one is missing from the list (truncated, or written back to its baseline).
+ * Only a path that cannot be placed here falls back to a shared suffix, and then the longest such
+ * file: one pi expands on the host (`~`, `~/…`, a `file:` URL — this page knows no home folder),
+ * a root reached through a symlink, a `..`.
+ */
+function namedFile(
+  ordered: readonly EnsoGitFileChange[],
+  named: string,
+  place: FilesPlace,
+): EnsoGitFileChange | undefined {
+  const asked = named.replace(/^@/, '').replace(/^\.\//, '')
+  const rootPrefix = `${place.root.replace(/\/$/, '')}/`
+  const absolute = asked.startsWith('/')
+  const expandedByPi = asked === '~' || asked.startsWith('~/') || asked.startsWith('file:')
+  const placeable = !expandedByPi && (!absolute || asked.startsWith(rootPrefix))
+  if (placeable && !asked.split('/').includes('..')) {
+    const relative = absolute ? asked.slice(rootPrefix.length) : `${place.scope}${asked}`
+    return ordered.find((change) => change.path === relative)
+  }
+  const sharing = ordered.filter((change) => asked.endsWith(`/${change.path}`) || change.path.endsWith(`/${asked}`))
+  return sharing.reduce<EnsoGitFileChange | undefined>(
+    (longest, change) => (longest === undefined || change.path.length > longest.path.length ? change : longest),
+    undefined,
+  )
+}
+
+/**
  * The Diff header — `description` says what the files are compared with — then the changed files
  * as a tree and the chosen file's diff: a repository's and a copy's alike.
  */
 function ChangedFiles({
   description,
+  place,
   files,
   truncated,
   nothingText,
   readFile,
 }: {
   readonly description: React.ReactNode
+  readonly place: FilesPlace
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
   readonly nothingText: string
   readonly readFile: ReadChangedFile | undefined
 }): React.ReactNode {
+  const focus = useContext(DiffFocusContext)
   const [chosen, setChosen] = useState<string | undefined>(undefined)
+  // A tool card's "open in Diff" (#920) asks for its file afresh: a click in the tree before it yields.
+  useEffect(() => setChosen(undefined), [focus])
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
   const tree = buildFileTree(files)
   const ordered = filesInOrder(tree)
-  // The chosen file while it still differs; otherwise the first in the tree.
-  const shown = ordered.find((change) => change.path === chosen) ?? ordered[0]
+  // The chosen file while it still differs; else the asked-for file; otherwise the first in the tree.
+  const shown =
+    ordered.find((change) => change.path === chosen) ??
+    (focus === undefined ? undefined : namedFile(ordered, focus.path, place)) ??
+    ordered[0]
   const added = files.reduce((sum, change) => sum + (change.added ?? 0), 0)
   const removed = files.reduce((sum, change) => sum + (change.removed ?? 0), 0)
   return (
@@ -566,6 +622,7 @@ function RepositoryChanges({
           )}
         </>
       }
+      place={repository}
       files={files}
       truncated={truncated}
       readFile={readFile}
@@ -576,16 +633,19 @@ function RepositoryChanges({
 
 /**
  * A thread's copy of its project (#650): no repository, so no branch, baseline or ahead/behind —
- * the files changed since the copy was made, off its snapshot store.
+ * the files changed since the copy was made, off its snapshot store, relative to the copy's tree:
+ * the thread's folder, `cwd`.
  */
 function CopyChanges({
   project,
+  cwd,
   files,
   truncated,
   readFile,
   running,
 }: {
   readonly project: string
+  readonly cwd: string
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
   readonly readFile: ReadChangedFile | undefined
@@ -600,6 +660,7 @@ function CopyChanges({
           Changes in this thread&apos;s copy of {name} since the copy was made
         </span>
       }
+      place={{ root: cwd, scope: '' }}
       files={files}
       truncated={truncated}
       readFile={readFile}
@@ -701,10 +762,17 @@ function ChangesBody({
   if (outcome.kind === 'failed') {
     return <p className="px-4 py-6 text-sm text-refuse">The changes could not be read: {outcome.problem}</p>
   }
-  const { git, files, truncated, copy } = outcome.payload
+  const { cwd, git, files, truncated, copy } = outcome.payload
   if (copy !== null) {
     return (
-      <CopyChanges project={copy.project} files={files} truncated={truncated} readFile={readFile} running={running} />
+      <CopyChanges
+        project={copy.project}
+        cwd={cwd}
+        files={files}
+        truncated={truncated}
+        readFile={readFile}
+        running={running}
+      />
     )
   }
   if (git.kind === 'not-a-repository') {
