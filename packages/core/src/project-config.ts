@@ -166,8 +166,9 @@ export function changeProjectWebTools(
   const path = projectConfigPath(project)
   // ⚠ Never through a link: a project's own `.enso/config.json` linked to another config — the
   // user's — would change that one. A link found now is refused; one put at the file later is
-  // refused at the read (O_NOFOLLOW) or replaced by the write, never followed (`replaceLink`). A `.enso/` swapped for a link between
-  // this check and the write is not caught: the check on the directory is best-effort.
+  // refused at the read (O_NOFOLLOW) or replaced by the write, never followed (`replaceLink`).
+  // A `.enso/` swapped for a link between this check and the write is not caught: the check on
+  // the directory is best-effort.
   const linked = lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() === true
   const directoryThere = lstatSync(dirname(path), { throwIfNoEntry: false }) !== undefined
   if (linked || (directoryThere && realpathSync(dirname(path)) !== dirname(projectConfigPath(realpathSync(project)))))

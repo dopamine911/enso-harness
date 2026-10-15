@@ -79,7 +79,8 @@ function nested(path: readonly string[], value: unknown): unknown {
 /**
  * Change one key of the user's file at `path`: `plan` reads the config as the file holds it and
  * names the edit. A missing file is written whole; an unreadable one is refused. `write` is how
- * the file is replaced (`replaceFileText`): only a write happens through it.
+ * the file is replaced (`replaceFileText`); with `replaceLink` the read does not follow a link at
+ * `path` either, and such a link is refused.
  *
  * @group Configuration
  */
