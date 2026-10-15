@@ -5,12 +5,17 @@ import { summarizeToolInput } from '@enso/core'
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
 import { TextPart } from '@tanstack/ai-react/ui'
 import { CheckIcon, ChevronRightIcon, CircleDashedIcon, CircleSlashIcon, type LucideIcon, XIcon } from 'lucide-react'
+import { useState } from 'react'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
 import { cn } from './lib/utils.ts'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 import { PILL } from './step-pill.ts'
 import { ToolRefusal, useToolRefusal } from './tool-refusal.tsx'
+import { bashExitCode, ToolInput, toolTextView } from './tool-views.tsx'
+
+/** The raw view's renderers: none, so a result prints as its text (#920). */
+const NO_RENDERERS: EnsoRendererMap = {}
 
 /**
  * The call's input as an object. TanStack parses it onto the selected part once the
@@ -55,13 +60,16 @@ const STEP_PILL: Record<
   error: { tone: 'text-refuse', Glyph: XIcon, word: 'error' },
 }
 
-/** A step's state pill — {@link STEP_PILL}. */
-function StepPill({ status }: { status: ToolResultState['status'] }): React.ReactNode {
-  const { tone, Glyph, word } = STEP_PILL[status]
+/**
+ * A step's state pill — {@link STEP_PILL}. A failed `bash` says how it ended (#920): `exited 1`, not
+ * just `error` — what the exit means is the output's business.
+ */
+function StepPill({ status, word }: { status: ToolResultState['status']; word?: string | undefined }): React.ReactNode {
+  const pill = STEP_PILL[status]
   return (
-    <span className={cn(PILL, tone)}>
-      <Glyph aria-hidden="true" className="size-2.5" />
-      {word}
+    <span className={cn(PILL, pill.tone)}>
+      <pill.Glyph aria-hidden="true" className="size-2.5" />
+      {word ?? pill.word}
     </span>
   )
 }
@@ -86,7 +94,11 @@ function ToolCallRow({
 }): React.ReactNode {
   const input = readToolInput(selected)
   const summary = summarizeToolInput(input)
-  const { status } = toolResultState(selected.result, runOpen)
+  const state = toolResultState(selected.result, runOpen)
+  const { status } = state
+  // The model's JSON and the result's text as they came, one click away (#920) — never the default.
+  const [raw, setRaw] = useState(false)
+  const exitCode = state.status === 'error' && selected.part.name === 'bash' ? bashExitCode(state.error) : undefined
   // Something refused it (#387, #523): a receipt, drawn as one — not a failed step with the word `error`.
   const refusal = useToolRefusal(selected.part.id)
   if (refusal !== undefined) {
@@ -130,21 +142,43 @@ function ToolCallRow({
         {/* `min-w-0`: a flex child's default `min-width: auto` never shrinks below its
 				    content, so without it `truncate` cannot engage. */}
         <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{summary}</span>
-        <StepPill status={status} />
+        <StepPill status={status} word={exitCode === undefined ? undefined : `exited ${exitCode}`} />
       </summary>
-      <dl className="grid grid-cols-label-value border-t font-mono text-xs leading-relaxed text-muted-foreground ink:bg-card">
+      <dl className="relative grid grid-cols-label-value border-t font-mono text-xs leading-relaxed text-muted-foreground ink:bg-card">
         <dt className="px-3 py-3 font-semibold uppercase">in</dt>
-        <dd className="min-w-0 py-3 pr-3">
-          <pre className="max-h-60 overflow-y-auto break-words whitespace-pre-wrap">
-            {input === undefined ? selected.part.arguments : JSON.stringify(input, null, 2)}
-          </pre>
+        {/* `pr-14`: clear of the `raw` switch in the corner. */}
+        <dd className="min-w-0 py-3 pr-14">
+          <button
+            type="button"
+            aria-pressed={raw}
+            onClick={() => setRaw(!raw)}
+            className={cn(
+              'absolute top-2 right-3 rounded-xs border px-1.5 text-detail hover:text-foreground',
+              raw ? 'border-border-strong text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            raw
+          </button>
+          {raw || input === undefined ? (
+            <pre data-enso-tool-input="raw" className="max-h-60 overflow-y-auto break-words whitespace-pre-wrap">
+              {input === undefined ? selected.part.arguments : JSON.stringify(input, null, 2)}
+            </pre>
+          ) : (
+            <ToolInput name={selected.part.name} input={input} />
+          )}
         </dd>
         <dt className="border-t border-dashed px-3 py-3 font-semibold uppercase">out</dt>
         {/* ⚠ THE INTEGRATION POINT #18 EXISTS FOR. Every tool result renders through
 				    `EnsoToolResult`: the descriptor is read from the result's metadata, and an
-				    absent result (the call is still in flight) renders the visible pending state. */}
+				    absent result (the call is still in flight) renders the visible pending state.
+				    Raw: no renderer and no tool view, so the result's text prints as it came. */}
         <dd className="min-w-0 border-t border-dashed py-3 pr-3">
-          <EnsoToolResult result={selected.result} runOpen={runOpen} renderers={renderers} />
+          <EnsoToolResult
+            result={selected.result}
+            runOpen={runOpen}
+            renderers={raw ? NO_RENDERERS : renderers}
+            view={raw ? undefined : toolTextView(selected.part.name)}
+          />
         </dd>
       </dl>
     </details>

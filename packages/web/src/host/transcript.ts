@@ -27,9 +27,9 @@ function enriched(entry: EnsoTranscriptEntry, raw: unknown): EnsoTranscriptEntry
     return refusal === undefined ? entry : { ...entry, refusal }
   }
   if (entry.kind === 'tool-result') {
-    const details =
-      typeof stored === 'object' && stored !== null ? (stored as { details?: unknown }).details : undefined
-    const descriptor = descriptorFrom(entry.toolName, details)
+    const { details, content } =
+      typeof stored === 'object' && stored !== null ? (stored as { details?: unknown; content?: unknown }) : {}
+    const descriptor = descriptorFrom(entry.toolName, details, content)
     return descriptor === undefined ? entry : { ...entry, descriptor }
   }
   return entry
