@@ -2,6 +2,7 @@ import { type Static, Type } from 'typebox'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoSessionIncidents } from './session-incident.ts'
 import { EnsoSessionRiskChange } from './session-risk.ts'
+import { EnsoSnapshotHash } from './thread-tree-record.ts'
 import { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
@@ -317,10 +318,7 @@ export type EnsoRestoreRequest = Static<typeof EnsoRestoreRequest>
  * safety, so a notice of an older restore can never undo a later one.
  * @group Thread inspection
  */
-export const EnsoRestoreUndoRequest = Type.Object(
-  { safety: Type.String({ pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' }) },
-  { additionalProperties: false },
-)
+export const EnsoRestoreUndoRequest = Type.Object({ safety: EnsoSnapshotHash }, { additionalProperties: false })
 /** @group Thread inspection */
 export type EnsoRestoreUndoRequest = Static<typeof EnsoRestoreUndoRequest>
 

@@ -5,8 +5,8 @@ import {
   type EnsoTranscriptEntry,
   type ThreadTreeRecord,
 } from '@enso/core'
-import { projectIdOf, projectSessionsDir, projectTreesDir } from '@enso/core/paths'
-import { projectIdOfCwd, sessionDirectoryFor, snapshotAtEntry, treeRecordOf } from '../thread-trees.ts'
+import { projectIdOf, projectIdOfCwd, projectSessionsDir, projectTreesDir } from '@enso/core/paths'
+import { sessionDirectoryFor, snapshotAtEntry, treeRecordOf } from '../thread-trees.ts'
 
 /**
  * The host's reads for #551: which snapshot a turn began with, which tree a thread runs on, which

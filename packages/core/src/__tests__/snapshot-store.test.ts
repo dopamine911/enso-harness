@@ -23,6 +23,9 @@ import {
   materializeSnapshot,
   migrateSnapshotStores,
   openSnapshotStore,
+  readSnapshotChanges,
+  readSnapshotFileTexts,
+  readSnapshotTrees,
   type SnapshotStore,
   type SnapshotTaken,
   snapshotPaths,
@@ -874,4 +877,69 @@ test("⚠ a store an unmigrated fork's alternates still name is never released: 
   expect(released).toMatchObject({ kind: 'refused', reason: expect.stringContaining(fork) })
   expect(lstatSync(join(parent, 'objects')).isSymbolicLink()).toBe(true)
   expect(holds(fork, parentAt)).toBe(true)
+})
+
+/** Every file under `directory`, by relative path, as its bytes — a symlink as `link`, a directory as `directory`. */
+function bytesUnder(directory: string): Record<string, string> {
+  const found: Record<string, string> = {}
+  for (const entry of readdirSync(directory, { recursive: true, withFileTypes: true })) {
+    const path = join(entry.parentPath, entry.name)
+    const kind = entry.isSymbolicLink() ? 'link' : 'directory'
+    found[path.slice(directory.length)] = entry.isFile() ? readFileSync(path).toString('base64') : kind
+  }
+  return found
+}
+
+// #553: the Diff Viewer compares two snapshots, never the live tree, and browsing writes nothing.
+test('⚠ two snapshots compare as they were taken, whatever the tree holds since — an idle pair is one tree, a hash the store lacks is absent — and neither the store nor the tree is written (#553)', async () => {
+  const tree = checkout()
+  const store = await opened(tree)
+  const before = await taken(store)
+  writeFileSync(join(tree, 'src.ts'), 'export const one = 2\n')
+  writeFileSync(join(tree, 'new.ts'), 'export const two = 2\n')
+  rmSync(join(tree, 'README.md'))
+  const after = await taken(store)
+  // A second commit of the same files: one tree, as a fork's first run snapshots its inherited files.
+  const again = git(store.directory, 'commit-tree', `${after.hash}^{tree}`, '-m', 'same files')
+  // The tree moves on after the turn: none of it is in either snapshot.
+  writeFileSync(join(tree, 'src.ts'), 'export const one = 3\n')
+  writeFileSync(join(tree, 'later.ts'), 'later\n')
+  const storeBytes = bytesUnder(dirname(store.directory))
+  const treeBytes = bytesUnder(tree)
+
+  const read = await readSnapshotChanges({ directory: store.directory, from: before.hash, to: after.hash, environment })
+  expect(read.truncated).toBe(false)
+  expect(read.files.map((file) => [file.path, file.status, file.added, file.removed])).toEqual([
+    ['README.md', 'deleted', 0, 1],
+    ['new.ts', 'added', 1, 0],
+    ['src.ts', 'modified', 1, 1],
+  ])
+  expect(read.files.find((file) => file.path === 'src.ts')?.patch).toContain('+export const one = 2')
+  expect(
+    await readSnapshotFileTexts({
+      directory: store.directory,
+      from: before.hash,
+      to: after.hash,
+      environment,
+      paths: { path: 'src.ts', oldPath: null },
+    }),
+  ).toEqual({
+    oldText: { kind: 'text', text: 'export const one = 1\n' },
+    newText: { kind: 'text', text: 'export const one = 2\n' },
+  })
+  const missing = 'f'.repeat(40)
+  const trees = await readSnapshotTrees({
+    directory: store.directory,
+    hashes: [before.hash, after.hash, again, missing],
+    environment,
+  })
+  expect(trees.get(after.hash)).toBe(trees.get(again))
+  expect(trees.get(before.hash)).not.toBe(trees.get(after.hash))
+  expect(trees.has(missing)).toBe(false)
+  await expect(
+    readSnapshotChanges({ directory: store.directory, from: missing, to: after.hash, environment }),
+  ).rejects.toThrow(/bad object|unknown revision|bad revision/i)
+
+  expect(bytesUnder(dirname(store.directory))).toEqual(storeBytes)
+  expect(bytesUnder(tree)).toEqual(treeBytes)
 })

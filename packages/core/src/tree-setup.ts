@@ -9,9 +9,10 @@ import type { EnsoProjectThreadSettings, EnsoTreeSetupOutcome, EnsoTreeSetupStep
  * gitignored files (`copy`) and what its install step makes (`setup`) — so a build, a test or the
  * project's pre-commit hook can run in it (#749).
  *
- * ⚠ ACCEPTED RISK until #753: the commands come from config trusted by PATH (the project's own
- * tiers, read only when the project is trusted), not from contents the operator approved. They run
- * as Enso, like its own git calls, not as pi's tool calls: no permission rule sees them.
+ * ⚠ ONLY APPROVED CONTENTS (#753): the commands come from the project's own tiers as the operator
+ * approved them (`@enso/core/project-config`), read only when the project is trusted — never from
+ * a file changed since. They run as Enso, like its own git calls, not as pi's tool calls: no
+ * permission rule sees them.
  */
 
 /**
