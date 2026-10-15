@@ -1454,7 +1454,12 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
 
   // Stop: pi is told, its queue is cleared (the frame every follower reads), and the words
-  // come back to THIS composer — clear-and-restore, pi's TUI's behaviour.
+  // come back to THIS composer — clear-and-restore, pi's TUI's behaviour — AFTER what the user
+  // has typed since, which stays (PR #988 review: an empty draft could not tell append from replace).
+  await flush(async () => {
+    typeInto(pane.composer(), 'half a thought')
+    await tick()
+  })
   const stop = pane.stopButton()
   if (stop === null) throw new Error('expected the stop button during the run')
   await flush(async () => {
@@ -1463,7 +1468,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
   await eventually(() => {
     expect(pane.server.abortCount()).toBe(1)
-    expect(pane.composer().value).toBe('by the button, mid-run')
+    expect(pane.composer().value).toBe('half a thought\n\nby the button, mid-run')
   })
   await pane.settle({ type: 'observation', seq: 2, observation: { kind: 'queue', interrupting: [], enqueued: [] } })
   await eventually(() => {
@@ -1571,6 +1576,29 @@ test('⚠ a page opening on a run another page queued behind lists the same queu
   // A later snapshot that lists nothing waiting clears a stale list (a resync is complete).
   await pane.settle({ ...SNAPSHOT_IDLE, queue: { interrupting: [], enqueued: ['stale'] } }, SNAPSHOT_IDLE)
   await eventually(() => expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull())
+  await pane.unmount()
+})
+
+// PR #988 review item 2(b): this page follows an idle thread and another page starts a run. Its
+// opening prompt — and one pi steers in right after it — arrive before any assistant message, so
+// each ends the assistant message the run opened with nothing in it. Neither draws an empty bubble.
+test('⚠ a run another page started draws its opening prompt and a back-to-back one, then one reply bubble — no empty bubble ahead (#917)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await pane.settle(
+    { type: 'status', live: true, busy: true, generation: 1 },
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'user', text: 'from the other page' } },
+    { type: 'observation', seq: 2, observation: { kind: 'message-start', role: 'user', text: 'and steered in' } },
+    { type: 'observation', seq: 3, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 4, observation: { kind: 'text-delta', contentIndex: 0, delta: 'OTHER-REPLY' } },
+  )
+  await eventually(() => {
+    expect(userBubbles(pane)).toEqual([
+      expect.stringContaining('from the other page'),
+      expect.stringContaining('and steered in'),
+    ])
+    expect(assistantBubbles(pane)).toEqual([expect.stringContaining('OTHER-REPLY')])
+  })
   await pane.unmount()
 })
 

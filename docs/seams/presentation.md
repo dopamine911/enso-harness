@@ -278,9 +278,9 @@ export interface ThreadStores {
    * What waits behind the run in flight (#75): the texts, the interrupting ones first,
    * from the snapshot a follow opens on and every `queue` frame after it (#917) — one list
    * for every follower, so a second tab, even one opened after, sees what the first queued.
-   * Never in the transcript until pi delivers it. Empty when nothing waits. Rendered above the composer; a stop hands
-   * these back to the composer through the abort receipt, not from here (the frame that
-   * empties this can beat the receipt).
+   * Never in the transcript until pi delivers it. Empty when nothing waits. Rendered above the
+   * composer; a stop hands these back to the composer through the abort receipt, not from here
+   * (the frame that empties this can beat the receipt).
    */
   readonly queue: WritableStore<readonly string[]>
   /**

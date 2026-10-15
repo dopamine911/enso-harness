@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
-import type { EnsoFollowFrame } from '@enso/core'
+import type { EnsoFollowFrame, EnsoObservation } from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { StreamChunk } from '@tanstack/ai'
@@ -674,6 +674,115 @@ test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistan
     delta: string
   }
   expect(lastDelta).toMatchObject({ messageId: secondMessageId, delta: 'two' })
+  server.abort()
+})
+
+/**
+ * The run and message chunks TanStack sees, one line each, a message named by its order of first
+ * appearance (`m1`, `m2`, …) so an end is read against its start.
+ */
+function messageShape(chunks: readonly StreamChunk[]): string[] {
+  const names = new Map<string, string>()
+  const nameOf = (id: string): string => {
+    const known = names.get(id)
+    if (known !== undefined) return known
+    const named = `m${names.size + 1}`
+    names.set(id, named)
+    return named
+  }
+  return chunks.flatMap((chunk) => {
+    if (chunk.type === EventType.RUN_STARTED || chunk.type === EventType.RUN_FINISHED) return [chunk.type]
+    if (chunk.type === EventType.TEXT_MESSAGE_START) return [`${chunk.type} ${nameOf(chunk.messageId)} ${chunk.role}`]
+    if (chunk.type === EventType.TEXT_MESSAGE_CONTENT)
+      return [`${chunk.type} ${nameOf(chunk.messageId)} "${chunk.delta}"`]
+    if (chunk.type === EventType.TEXT_MESSAGE_END) return [`${chunk.type} ${nameOf(chunk.messageId)}`]
+    return []
+  })
+}
+
+/** Write `observations` as consecutive follow frames from `seq` 1, then wait for the delta `last` to cross. */
+async function deliver(server: ScriptedServer, observations: readonly EnsoObservation[], last: string): Promise<void> {
+  for (const [index, observation] of observations.entries())
+    server.frame({ type: 'observation', seq: index + 1, observation })
+  const crossed = (): boolean =>
+    server.chunks.some((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT && chunk.delta === last)
+  while (!crossed()) await server.untilChunks(server.chunks.length + 1)
+}
+
+const userStart = (text: string): EnsoObservation => ({ kind: 'message-start', role: 'user', text })
+const assistantStart: EnsoObservation = { kind: 'message-start', role: 'assistant' }
+const textDelta = (delta: string): EnsoObservation => ({ kind: 'text-delta', contentIndex: 0, delta })
+
+// PR #988 review item 1: pi delivers queued prompts back to back — the steering it polls at the
+// loop's start goes out right after the run's own prompt, before any assistant message
+// (`pi-agent-core` `runAgentLoop` → `runLoop`), and `steeringMode`/`followUpMode: "all"` send
+// every queued one at once. Each delivered prompt is drawn; only the run's own opening one is not.
+test('⚠ a prompt pi delivers right after this page’s own, before any reply, is drawn — the opening prompt alone is skipped (#917)', async () => {
+  const server = scripted()
+  server.frame(SNAPSHOT_IDLE)
+  await server.untilChunks(1)
+  await send(server, 'first')
+  await server.untilChunks(3)
+  await deliver(server, [userStart('first'), userStart('steered'), assistantStart, textDelta('REPLY')], 'REPLY')
+  expect(messageShape(server.chunks)).toEqual([
+    'RUN_STARTED',
+    'TEXT_MESSAGE_START m1 assistant',
+    'TEXT_MESSAGE_END m1',
+    'TEXT_MESSAGE_START m2 user',
+    'TEXT_MESSAGE_CONTENT m2 "steered"',
+    'TEXT_MESSAGE_END m2',
+    'TEXT_MESSAGE_START m3 assistant',
+    'TEXT_MESSAGE_CONTENT m3 "REPLY"',
+  ])
+  server.abort()
+})
+
+// PR #988 review item 2(b): a page following an idle thread when another page starts a run. The
+// opening prompt is delivered with no assistant message begun; the bubble `openRun` opened ends
+// empty, which the transcript does not draw (`transcript-selection.ts` `hidden`, pinned in the pane).
+test('⚠ a run another page started: its opening prompt, and one delivered right after it, are drawn before the reply (#917)', async () => {
+  const server = scripted()
+  server.frame(SNAPSHOT_IDLE)
+  await server.untilChunks(1)
+  server.frame({ type: 'status', live: true, busy: true, generation: 1 })
+  await server.untilChunks(3)
+  await deliver(server, [userStart('elsewhere'), userStart('steered'), assistantStart, textDelta('REPLY')], 'REPLY')
+  expect(messageShape(server.chunks)).toEqual([
+    'RUN_STARTED',
+    'TEXT_MESSAGE_START m1 assistant',
+    'TEXT_MESSAGE_END m1',
+    'TEXT_MESSAGE_START m2 user',
+    'TEXT_MESSAGE_CONTENT m2 "elsewhere"',
+    'TEXT_MESSAGE_END m2',
+    'TEXT_MESSAGE_START m3 assistant',
+    'TEXT_MESSAGE_END m3',
+    'TEXT_MESSAGE_START m4 user',
+    'TEXT_MESSAGE_CONTENT m4 "steered"',
+    'TEXT_MESSAGE_END m4',
+    'TEXT_MESSAGE_START m5 assistant',
+    'TEXT_MESSAGE_CONTENT m5 "REPLY"',
+  ])
+  server.abort()
+})
+
+// PR #988 review item 2(a): a page that joins mid-reply never saw that reply's message begin, so
+// the queued prompt pi claims next arrives with no assistant message counted — and is drawn.
+test('⚠ a page that joined mid-reply draws the prompt pi claims next, between the reply and its answer (#917)', async () => {
+  const server = scripted()
+  server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
+  await server.untilChunks(3)
+  await deliver(server, [textDelta('MID'), userStart('queued'), assistantStart, textDelta('NEXT')], 'NEXT')
+  expect(messageShape(server.chunks)).toEqual([
+    'RUN_STARTED',
+    'TEXT_MESSAGE_START m1 assistant',
+    'TEXT_MESSAGE_CONTENT m1 "MID"',
+    'TEXT_MESSAGE_END m1',
+    'TEXT_MESSAGE_START m2 user',
+    'TEXT_MESSAGE_CONTENT m2 "queued"',
+    'TEXT_MESSAGE_END m2',
+    'TEXT_MESSAGE_START m3 assistant',
+    'TEXT_MESSAGE_CONTENT m3 "NEXT"',
+  ])
   server.abort()
 })
 

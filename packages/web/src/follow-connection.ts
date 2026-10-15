@@ -124,19 +124,26 @@ export interface FollowConnectionOptions {
 interface OpenRun {
   readonly runId: string
   /**
-   * The assistant message the view is streaming into. Rotates when pi claims a queued prompt (#75),
-   * and when pi starts a new attempt after a refused one (#382).
+   * The assistant message the view is streaming into. Rotates on every assistant message after the
+   * run's first (#921), when pi delivers a prompt (#75, #917), and when pi starts a new attempt
+   * after a refused one (#382).
    */
   messageId: string
   /** The receipt's `messageId` — how a `prompt-rejected` names this run. Undefined for a run another client started. */
   promptMessageId: string | undefined
   generation: number | undefined
   /**
-   * Assistant messages pi has begun in this run since its last prompt. Every one after the first
-   * is a new model turn and gets its own bubble (#921), as the stored history draws it. A USER
-   * `message-start` after the first of them is a queued prompt being CLAIMED (#75), not the
-   * prompt that opened the run — the view then ends the current assistant bubble, draws the
-   * prompt's own bubble (#917), and starts a new one, so the reply lands after its question rather than inside the previous answer.
+   * A run THIS page sent, whose opening prompt pi has not yet delivered: TanStack already drew
+   * that one, so its `message-start` adds nothing. Every other USER `message-start` is a prompt
+   * pi delivers — queued behind the run, steered in right after its opening prompt, or the
+   * opening prompt of a run another client started — and is drawn (#917). Cleared also by the
+   * first assistant message: past it, the opening prompt is behind the run.
+   */
+  awaitingOwnOpeningPrompt: boolean
+  /**
+   * Assistant messages pi has begun in this run since the last prompt it delivered. Every one
+   * after the first is a new model turn and gets its own bubble (#921), as the stored history
+   * draws it.
    */
   assistantMessages: number
   /**
@@ -469,12 +476,18 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     wake = undefined
   }
 
-  function openRun(runId: string, promptMessageId: string | undefined, generation: number | undefined): OpenRun {
+  function openRun(
+    runId: string,
+    promptMessageId: string | undefined,
+    generation: number | undefined,
+    origin: 'this-page' | 'another-client',
+  ): OpenRun {
     const run: OpenRun = {
       runId,
       messageId: crypto.randomUUID(),
       promptMessageId,
       generation,
+      awaitingOwnOpeningPrompt: origin === 'this-page',
       assistantMessages: 0,
       refused: false,
     }
@@ -536,11 +549,12 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    *   keyed by the bubble's id, so in one bubble each turn's thinking appended to the run's first
    *   thinking part, above every later tool row. One bubble per assistant message is what the
    *   stored history draws, so the live view and a reload read the same;
-   * - a USER message pi delivers after an assistant message has begun: pi claimed a queued prompt
-   *   (#75). Its bubble goes in there (#917), and the reply lands after its question rather than
-   *   inside the previous answer. So does the opening prompt of a run another page started — this
-   *   page never had it. A run THIS page sent already holds its prompt (TanStack put it there), so
-   *   its own opening prompt adds nothing;
+   * - a USER message pi delivers: a queued prompt pi claimed (#75), one it steered in right after
+   *   the run's opening prompt (pi polls its queue as the loop begins; in `"all"` mode it sends
+   *   every waiting prompt back to back), or the opening prompt of a run another page started.
+   *   Its bubble goes in there (#917), and the reply lands after its question rather than inside
+   *   the previous answer. Only the opening prompt of a run THIS page sent adds nothing: TanStack
+   *   already put it there (`awaitingOwnOpeningPrompt`);
    * - an ASSISTANT message after a refused attempt: pi's retry (#382). Without it the refused
    *   attempt and the reply that got through share one bubble, and a line said between them has
    *   nowhere to go but after both.
@@ -548,14 +562,20 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   function observeMessageStart(observation: EnsoMessageStart): void {
     if (current === undefined) return
     if (observation.role === 'assistant') {
-      // Whatever began before the refusal — the attempt's own message, or none when the provider
-      // refused before pi started one — stays in the bubble the refusal's lines follow.
+      // Any assistant message after one already begun is a new model turn, with its own bubble
+      // (#921). After a refusal, so is the retry even when this view saw no message begin before
+      // it (a page that joined mid-attempt): the refused attempt keeps the bubble the refusal's
+      // lines follow. Both at once rotate once.
       if (current.refused || current.assistantMessages > 0) rotateMessage(current)
       current.assistantMessages += 1
+      current.awaitingOwnOpeningPrompt = false
       return
     }
     if (observation.role !== 'user') return
-    if (current.assistantMessages === 0 && !current.runId.startsWith(EXTERNAL_RUN)) return
+    if (current.awaitingOwnOpeningPrompt) {
+      current.awaitingOwnOpeningPrompt = false
+      return
+    }
     deliverPrompt(current, observation.text ?? '')
     current.assistantMessages = 0
   }
@@ -607,7 +627,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     for (const run of runs.values()) {
       if (run.generation === generation || run.generation === undefined) return
     }
-    openRun(`${EXTERNAL_RUN}${generation}`, undefined, generation)
+    openRun(`${EXTERNAL_RUN}${generation}`, undefined, generation, 'another-client')
   }
 
   async function declineUnreadable(id: string): Promise<void> {
@@ -926,7 +946,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     signal?: AbortSignal,
     runContext?: RunAgentInputContext,
   ): Promise<void> {
-    const run = openRun(runContext?.runId ?? crypto.randomUUID(), undefined, undefined)
+    const run = openRun(runContext?.runId ?? crypto.randomUUID(), undefined, undefined, 'this-page')
     const parts = latestUserParts(messages)
     const message = textOf(parts)
     const { images, refused } = imagesOf(parts)
