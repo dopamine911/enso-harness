@@ -162,8 +162,8 @@ export function refuseWith(
 /** A strong entity tag as the library quotes one: a file's sha256, hex. */
 export const PROMPT_ETAG = /^"[0-9a-f]{64}"$/
 
-/** What a conditional write names in its refusals: a library prompt (#443), or the permission policy (#474). */
-type WriteSubject = 'prompt' | 'permission policy'
+/** What a conditional write names in its refusals: a library prompt (#443), the permission policy (#474), or the security settings (#933). */
+type WriteSubject = 'prompt' | 'permission policy' | 'security settings'
 
 /** Why a write or delete does not say what it expects: the one line `refuseWith` sends. */
 function missingPrecondition(what: 'write' | 'delete', subject: WriteSubject): string {
@@ -197,6 +197,27 @@ export function writeConditionOf(
   return PROMPT_ETAG.test(match)
     ? { kind: 'matches', etag: match }
     : { status: 400, reason: `\`If-Match\` takes \`*\` or the one ETag a read of this ${subject} answered` }
+}
+
+/**
+ * The write's precondition (`writeConditionOf`), or `undefined` once a missing or malformed one has
+ * been answered and the request closed: the settings files' writes (#474, #933) all open this way.
+ */
+export function conditionOrRefuse(
+  request: IncomingMessage,
+  response: ServerResponse,
+  subject: WriteSubject,
+): WriteCondition | undefined {
+  const condition = writeConditionOf(request, 'write', subject)
+  if (!('status' in condition)) return condition
+  endAndClose(request, response, condition.status, condition.reason)
+  return undefined
+}
+
+/** A 200 with `body` as JSON and the `ETag` of the file it read, when there is one (#474, #933). */
+export function answerWithEtag(response: ServerResponse, body: unknown, etag: string | undefined): void {
+  response.writeHead(200, { 'Content-Type': 'application/json', ...(etag === undefined ? {} : { ETag: etag }) })
+  response.end(JSON.stringify(body))
 }
 
 /** A body that carries a prompt's text — a library write or a draft — under the prompt cap. */

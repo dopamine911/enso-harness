@@ -73,7 +73,10 @@ export interface ThreadReadDeps {
 
 /** One thread as of this read: what a pane mounts with, and what the follow's snapshot says. */
 export interface ThreadMount {
-  /** Does the server hold this id at all — a live thread or a file? `false` is `/history`'s 404. */
+  /**
+   * Does the server hold this id at all — a live thread or a file? `false` is `/history`'s 404,
+   * unless a page named the thread for a project: then a draft of that project (#897).
+   */
   readonly present: boolean
   /**
    * The directory of this id's session file when that directory is no project here (#378):

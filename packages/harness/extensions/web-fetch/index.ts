@@ -22,8 +22,10 @@ import { ensoConfigPath, ensoHome, readTextIfPresent } from '@enso/core/paths'
 import {
   isFetchableContentType,
   isHostAllowed,
+  isHtmlContentType,
   isPublicIpAddress,
   parseWebFetchUrl,
+  readableTextOfHtml,
   runUnderDeadline,
   type SessionConfigContext,
   type SessionEnsoConfig,
@@ -52,7 +54,9 @@ import {
  * 3. **Bounded response handling** — http(s) only, no credentials in URLs, redirects
  *    REPORTED but never followed, textual content types only, body capped at
  *    {@link WEB_FETCH_MAX_RESPONSE_BYTES} bytes, whole call capped at
- *    {@link WEB_FETCH_TIMEOUT_MS}. A docs-reader, not a browser.
+ *    {@link WEB_FETCH_TIMEOUT_MS}. A docs-reader, not a browser: an HTML page comes back as
+ *    its readable text (#927, `core/html-text.ts`), the header saying so and how much of the
+ *    page that was; every other type comes back as it was sent.
  *
  * The pure policy (URL gate, host match, content-type gate, the ADVISORY public-address
  * classifier and its stated SSRF non-coverage) lives in `core/web-fetch-policy.ts`.
@@ -176,6 +180,8 @@ function registerWebFetch(
     description:
       `Fetch one absolute http(s) URL and return the response body as text (capped at ` +
       `${WEB_FETCH_MAX_RESPONSE_BYTES} bytes; redirects are reported, never followed). ` +
+      `An HTML page comes back as its readable text: headings, paragraphs, lists, links as "text <url>", ` +
+      `code and tables, without scripts, styles, navigation or hidden elements. ` +
       `Only hosts on the config's allowlist are fetchable` +
       (allowedHosts.length > 0 ? ` (currently: ${allowedHosts.join(', ')})` : ` — and it is currently EMPTY`) +
       `; a refusal names the file a human can extend.`,
@@ -362,24 +368,43 @@ async function renderResponse(url: URL, rawUrl: string, response: Response): Pro
   }
 
   const body = await readBodyUpTo(response, WEB_FETCH_MAX_RESPONSE_BYTES)
+  const page = pageText(contentType, body.text, url)
   auditLine(
     'fetched',
     rawUrl,
-    `HTTP ${response.status}, ${body.text.length} chars${body.truncated ? ' (truncated)' : ''}`,
+    `HTTP ${response.status}, ${body.text.length} chars${body.truncated ? ' (truncated)' : ''}` +
+      (page.text === body.text ? '' : ` → ${page.text.length} chars of text`),
   )
   return {
     content: [
       {
         type: 'text',
         text:
-          `Fetched ${url.href} — HTTP ${response.status}, ${contentType}` +
+          `Fetched ${url.href} — HTTP ${response.status}, ${page.description}` +
           (body.truncated ? `, TRUNCATED at ${WEB_FETCH_MAX_RESPONSE_BYTES} bytes` : '') +
-          `.\n\n${EXTERNAL_WEB_CONTENT_NOTICE}\n\n${body.text}`,
+          `.\n\n${EXTERNAL_WEB_CONTENT_NOTICE}\n\n${page.text}`,
       },
     ],
     details: undefined,
   }
 }
+
+/**
+ * What the model reads of the body, and the header's words for it. An HTML page is its readable
+ * text (#927), and the header names the conversion and the raw size, so a page that extracts
+ * badly shows as a small share; any other type is the body as it came, under its content type.
+ */
+function pageText(contentType: string | null, body: string, url: URL): { text: string; description: string } {
+  if (!isHtmlContentType(contentType)) return { text: body, description: `${contentType}` }
+  const text = readableTextOfHtml(body, url)
+  const share = body.length === 0 ? 0 : (text.length / body.length) * PERCENT
+  return {
+    text,
+    description: `${contentType} → text (${share.toFixed(1)}% of ${body.length.toLocaleString('en-US')} chars)`,
+  }
+}
+
+const PERCENT = 100
 
 const log = ensoLogger('extension', 'web-fetch')
 

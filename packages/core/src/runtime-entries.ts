@@ -68,6 +68,39 @@ export function contentToText(content: unknown): string {
     .join('')
 }
 
+/**
+ * pi's shell tools — `bash`, and `powershell`, built by the same factory (`bash.js`,
+ * `powershell.js`) — and the status they append when a command exits non-zero: `Command exited
+ * with code N`, alone or after the output and a blank line. A timeout, an abort, a kill without an
+ * exit code and a spawn error are thrown instead, so their text never ends this way.
+ */
+const SHELL_TOOLS: Readonly<Record<string, true>> = { bash: true, powershell: true }
+const SHELL_EXIT_STATUS = /(?:^|\n\n)Command exited with code (\d+)$/
+
+/**
+ * The exit code of a shell result whose command ran and exited non-zero (#928), or undefined for
+ * any other result — a success, another tool's error, or a shell call that broke (timed out,
+ * aborted, could not start).
+ *
+ * ⚠ pi marks every non-zero exit `isError`: `grep` with no match, `test -f`, `diff` with
+ * differences. That is the command answering, not the tool failing, so a tally of failures leaves
+ * these out and counts them apart. pi 1.1 returns the code as `structuredContent.exit_code` too,
+ * but the session does not keep it: the stored `toolResult` carries `content`, `details`, `usage`,
+ * `isError` and `durationMs` only (`agent-loop.js` `createToolResultMessage`). The appended status
+ * is what survives, so it is read here, in the one module that names the runtime's shapes.
+ *
+ * @group Transcript
+ */
+export function shellExitCodeOf(result: {
+  readonly toolName: string
+  readonly isError: boolean
+  readonly text: string
+}): number | undefined {
+  if (!result.isError || !Object.hasOwn(SHELL_TOOLS, result.toolName)) return undefined
+  const matched = SHELL_EXIT_STATUS.exec(result.text)
+  return matched?.[1] === undefined ? undefined : Number(matched[1])
+}
+
 type PartNarrower = (raw: RuntimeContentPart) => EnsoTranscriptPart | undefined
 
 /**

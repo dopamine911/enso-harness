@@ -1,11 +1,20 @@
 import { expect, test } from 'bun:test'
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Check } from 'typebox/value'
-import { type GitRunner, readGitChanges, readGitState, runGitIn, UNTRACKED_DIFF_CONCURRENCY } from '../git.ts'
-import { EnsoGitFileChange, EnsoGitState } from '../index.ts'
+import {
+  type ChangedFileTexts,
+  type GitRunner,
+  readFileTexts,
+  readGitChanges,
+  readGitFileTexts,
+  readGitState,
+  runGitIn,
+  UNTRACKED_DIFF_CONCURRENCY,
+} from '../git.ts'
+import { EnsoGitFileChange, EnsoGitFileText, EnsoGitState } from '../index.ts'
 import { findRepoRoot } from '../paths.ts'
 
 /**
@@ -506,6 +515,39 @@ test('⚠ an external diff or textconv program the repository configures does no
   expect(files.find((file) => file.path === 'README.md')?.patch).toContain('+changed')
 })
 
+test('⚠ a clean or process filter the repository configures does not run on a read, wherever an attribute names it (#901)', async () => {
+  const directory = repository()
+  const ran = join(scratch('filter-program'), 'ran')
+  const program = join(directory, 'filter-program.sh')
+  writeFileSync(program, `#!/bin/sh\ntouch '${ran}'\ncat\n`, { mode: 0o755 })
+  // Two drivers, both required: a clean filter the tree's own .gitattributes names, and a long-running
+  // process filter with a dotted name that .git/info/attributes names — a file `--attr-source` leaves in force.
+  git(directory, 'config', 'filter.plain.clean', program)
+  git(directory, 'config', 'filter.plain.required', 'true')
+  git(directory, 'config', 'filter.long.running.process', program)
+  git(directory, 'config', 'filter.long.running.required', 'true')
+  writeFileSync(join(directory, '.gitattributes'), 'README.md filter=plain\n')
+  const info = join(git(directory, 'rev-parse', '--absolute-git-dir').trim(), 'info')
+  mkdirSync(info, { recursive: true })
+  writeFileSync(join(info, 'attributes'), 'new.txt filter=long.running\n')
+  // The same size as 'one\n': `status` can't tell it changed without hashing it through the filter.
+  writeFileSync(join(directory, 'README.md'), 'two\n')
+  writeFileSync(join(directory, 'new.txt'), 'new\n')
+  // The config really is live: git as a person runs each program (and fails on the process filter's
+  // missing handshake, which is why its exit is not asserted).
+  for (const args of [['status', '--porcelain'], ['diff'], ['diff', '--no-index', '--', '/dev/null', 'new.txt']]) {
+    spawnSync('git', args, { cwd: directory, env: environment })
+    expect(existsSync(ran)).toBe(true)
+    unlinkSync(ran)
+  }
+  expect((await repositoryAt(directory)).kind).toBe('repository')
+  expect(existsSync(ran)).toBe(false)
+  const { files } = await changesAt(directory)
+  expect(existsSync(ran)).toBe(false)
+  expect(files.find((file) => file.path === 'README.md')?.patch).toContain('+two')
+  expect(files.find((file) => file.path === 'new.txt')?.patch).toContain('+new')
+})
+
 test('a nested repository is not listed as a file', async () => {
   const directory = repository()
   const nested = join(directory, 'vendor')
@@ -557,4 +599,138 @@ test('a diff too large to hold still lists every file with its counts, its patch
     ['README.md', 2, 0, null, 'unavailable'],
     ['b.md', 1, 1, null, 'unavailable'],
   ])
+})
+
+// ── One changed file, whole (#461) ─────────────────────────────────────────────────────────────
+
+async function textsAt(cwd: string, path: string, oldPath: string | null = null): Promise<ChangedFileTexts> {
+  const texts = await readGitFileTexts(runGit, await repositoryAt(cwd), { path, oldPath })
+  for (const side of [texts.oldText, texts.newText]) expect(Check(EnsoGitFileText, side)).toBe(true)
+  return texts
+}
+
+test('a changed file is read whole: the baseline’s text and the work tree’s, a rename’s old side at its old path, nothing where a side has no file', async () => {
+  const directory = repository()
+  commit(directory, 'app.ts', 'one\ntwo\nthree\n')
+  commit(directory, 'old-name.ts', 'kept\n')
+  commit(directory, 'gone.ts', 'going\n')
+  writeFileSync(join(directory, 'app.ts'), 'one\nTWO\nthree\n')
+  git(directory, 'mv', 'old-name.ts', 'new-name.ts')
+  git(directory, 'rm', '--quiet', 'gone.ts')
+  writeFileSync(join(directory, 'fresh.ts'), 'new\n')
+  expect(await textsAt(directory, 'app.ts')).toEqual({
+    oldText: { kind: 'text', text: 'one\ntwo\nthree\n' },
+    newText: { kind: 'text', text: 'one\nTWO\nthree\n' },
+  })
+  expect((await textsAt(directory, 'new-name.ts', 'old-name.ts')).oldText).toEqual({ kind: 'text', text: 'kept\n' })
+  expect(await textsAt(directory, 'fresh.ts')).toEqual({
+    oldText: { kind: 'none' },
+    newText: { kind: 'text', text: 'new\n' },
+  })
+  expect(await textsAt(directory, 'gone.ts')).toEqual({
+    oldText: { kind: 'text', text: 'going\n' },
+    newText: { kind: 'none' },
+  })
+  // Before the first commit there is no old side at all.
+  const unborn = scratch('unborn')
+  git(unborn, 'init', '--quiet', '-b', 'main')
+  writeFileSync(join(unborn, 'first.ts'), 'first\n')
+  expect((await textsAt(unborn, 'first.ts')).oldText).toEqual({ kind: 'none' })
+})
+
+test('⚠ the work tree side never follows a symbolic link out, never reads an ignored file, and a file past the cap is too large', async () => {
+  const directory = repository()
+  const outside = scratch('outside')
+  writeFileSync(join(outside, 'secret.txt'), 'SECRET=hunter2\n')
+  symlinkSync(join(outside, 'secret.txt'), join(directory, 'link.txt'))
+  symlinkSync(outside, join(directory, 'linked-dir'))
+  git(directory, 'add', 'link.txt')
+  writeFileSync(join(directory, '.gitignore'), 'local.env\n')
+  writeFileSync(join(directory, 'local.env'), 'TOKEN=abc\n')
+  for (const path of ['link.txt', 'linked-dir/secret.txt', 'local.env']) {
+    const { newText } = await textsAt(directory, path)
+    expect(newText.kind).toBe('unavailable')
+    expect(JSON.stringify(newText)).not.toMatch(/hunter2|TOKEN/)
+  }
+  // Past the 512 KiB a patch may be, on either side: too large, with its size, and never read.
+  const large = 'x'.repeat(600 * 1024)
+  commit(directory, 'large.txt', large)
+  writeFileSync(join(directory, 'large.txt'), `${large}y`)
+  expect(await textsAt(directory, 'large.txt')).toEqual({
+    oldText: { kind: 'too-large', bytes: large.length },
+    newText: { kind: 'too-large', bytes: large.length + 1 },
+  })
+  commit(directory, 'blob.bin', 'a\0b')
+  expect((await textsAt(directory, 'blob.bin')).oldText).toEqual({ kind: 'binary' })
+})
+
+test('⚠ reading a file whole runs no textconv or filter program the repository configures', async () => {
+  const directory = repository()
+  const ran = join(scratch('read-program'), 'ran')
+  const program = join(directory, 'program.sh')
+  writeFileSync(program, `#!/bin/sh\ntouch '${ran}'\ncat\n`, { mode: 0o755 })
+  git(directory, 'config', 'diff.shout.textconv', program)
+  git(directory, 'config', 'filter.plain.clean', program)
+  git(directory, 'config', 'filter.plain.smudge', program)
+  git(directory, 'config', 'filter.plain.required', 'true')
+  writeFileSync(join(directory, '.gitattributes'), 'README.md diff=shout filter=plain\n')
+  writeFileSync(join(directory, 'README.md'), 'two\n')
+  expect(await textsAt(directory, 'README.md')).toEqual({
+    oldText: { kind: 'text', text: 'one\n' },
+    newText: { kind: 'text', text: 'two\n' },
+  })
+  expect(existsSync(ran)).toBe(false)
+})
+
+test('a nested file is read whole by its path from the top: the committed blob found without `-r`, the work tree beside it', async () => {
+  const directory = repository()
+  mkdirSync(join(directory, 'src', 'deep'), { recursive: true })
+  commit(directory, 'src/deep/x.ts', 'one\n')
+  // A sibling whose name the path starts with is not the file.
+  commit(directory, 'src/deep/x.ts.bak', 'not it\n')
+  writeFileSync(join(directory, 'src', 'deep', 'x.ts'), 'two\n')
+  expect(await textsAt(join(directory, 'src'), 'src/deep/x.ts')).toEqual({
+    oldText: { kind: 'text', text: 'one\n' },
+    newText: { kind: 'text', text: 'two\n' },
+  })
+})
+
+test('a listing that failed is said in its own words, never as an ignored file', async () => {
+  const directory = repository()
+  writeFileSync(join(directory, 'README.md'), 'two\n')
+  const failingList: GitRunner = (args, cwd) =>
+    args[0] === 'ls-files'
+      ? Promise.resolve({ code: 128, stdout: '', stderr: 'fatal: index file corrupt\n' })
+      : runGit(args, cwd)
+  const { newText } = await readGitFileTexts(failingList, await repositoryAt(directory), {
+    path: 'README.md',
+    oldPath: null,
+  })
+  expect(newText).toEqual({
+    kind: 'unavailable',
+    reason: 'whether the changes list it is unknown: fatal: index file corrupt',
+  })
+})
+
+test('⚠ a directory on the way swapped for a symbolic link between the check and the open is caught after the open', async () => {
+  const directory = repository()
+  mkdirSync(join(directory, 'dir'))
+  commit(directory, 'dir/f.txt', 'mine\n')
+  const outside = scratch('swapped-outside')
+  writeFileSync(join(outside, 'f.txt'), 'SECRET=hunter2\n')
+  const { newText } = await readFileTexts(
+    runGit,
+    {
+      root: directory,
+      base: null,
+      // The agent's move, made while the listing is out: `dir` becomes a link to elsewhere.
+      listed: () => {
+        renameSync(join(directory, 'dir'), join(directory, 'dir-was'))
+        symlinkSync(outside, join(directory, 'dir'))
+        return Promise.resolve('listed')
+      },
+    },
+    { path: 'dir/f.txt', oldPath: null },
+  )
+  expect(newText).toEqual({ kind: 'unavailable', reason: 'a symbolic link, which is not followed' })
 })

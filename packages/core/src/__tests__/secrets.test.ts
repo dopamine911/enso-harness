@@ -104,6 +104,15 @@ test('⚠ the quarantine removes secret-shaped and file-defined names, and nothi
   expect(environment.PATH).toBe('/usr/bin')
 })
 
+test('installed, with no checkout (#950): the quarantine still removes secret-shaped names, and no root `.env` is judged', () => {
+  const home = scratchRepoRoot()
+  const environment: Record<string, string | undefined> = { PATH: '/usr/bin', GH_TOKEN: 'ghp' }
+  const report = quarantineSecrets(environment, { repoRoot: undefined, home })
+  expect(report.removed).toEqual(['GH_TOKEN'])
+  expect(report.misplaced).toEqual([])
+  expect(Object.keys(environment)).toEqual(['PATH'])
+})
+
 // ⚠ THE RESIDUAL bun AUTOLOAD. A root `.env` reaches every bun child from the cwd no matter
 // what the parent scrubbed (verified with `env -i`). Its secret-shaped names are scrubbed
 // from THIS process and named as misplaced so the operator moves them — and its NON-secret
