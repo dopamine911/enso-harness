@@ -9,6 +9,7 @@ import {
   type EnsoThreadDeletePreview,
   type EnsoTreesListing,
 } from '@enso/core'
+import type { ChangedFilePaths, ChangedFileTexts } from '@enso/core/git'
 import {
   checkoutRootOfPackage,
   ensoHome,
@@ -18,7 +19,7 @@ import {
 } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { quarantineSecrets } from '@enso/core/secrets'
-import { readCopyChanges } from '@enso/core/snapshot-store'
+import { readCopyChanges, readCopyFileTexts } from '@enso/core/snapshot-store'
 import type { BranchRequestDetail } from './branch-context.ts'
 import type { BranchEval } from './branch-eval.ts'
 import type { BranchIncidentHistory } from './branch-incident-history.ts'
@@ -234,6 +235,12 @@ export interface AgentHost {
    * environment and writing nothing (`readCopyChanges`); throws when the store cannot be read.
    */
   readCopyChanges(copy: ThreadTreePlace): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
+  /**
+   * One of a copy's changed files whole, on both sides (#461), read from its store and the copy
+   * under the host's environment, writing nothing (`readCopyFileTexts`). The paths are the caller's
+   * to hold to the copy.
+   */
+  readCopyFileTexts(copy: ThreadTreePlace, paths: ChangedFilePaths): Promise<ChangedFileTexts>
   /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
@@ -513,6 +520,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     threadTree,
     readCopyChanges: ({ record, store }) =>
       readCopyChanges({ directory: store, tree: record.path, base: record.base, environment }),
+    readCopyFileTexts: ({ record, store }, paths) =>
+      readCopyFileTexts({ directory: store, tree: record.path, base: record.base, environment, paths }),
     deleteThread,
     threadDeleted,
     previewThreadDelete,
