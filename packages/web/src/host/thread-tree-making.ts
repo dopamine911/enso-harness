@@ -4,17 +4,24 @@ import {
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_SETUP_ENTRY,
   type EnsoProjectThreadSettings,
+  type EnsoProjectTierPending,
   type EnsoTreeSetupOutcome,
   type ThreadTreeKind,
   type ThreadTreeRecord,
 } from '@enso/core'
-import { ensoHome, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
+import { ensoHome, projectIdOfCwd, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import { knownSecretValues } from '@enso/core/secrets'
 import { mintThreadTree, treeKindFor } from '@enso/core/thread-tree'
 import { prepareThreadTree } from '@enso/core/tree-setup'
 import { movedLog, type ThreadLog } from './thread-log.ts'
-import { projectIdOfCwd, treeLocation, treeRecordOf } from './thread-trees.ts'
+import { treeLocation, treeRecordOf } from './thread-trees.ts'
 import { type ProjectThreadSettingsSource, resolveProjectThreadSettings, treeSetupOf } from './tree-setup.ts'
+
+/** A project's new-tree settings, and its own tiers that are not the version approved (#753). */
+interface TreeSettings {
+  readonly threads: EnsoProjectThreadSettings
+  readonly pending: readonly EnsoProjectTierPending[]
+}
 
 /**
  * A thread's own tree (#551), made and prepared (#754): minted at the checkout or at a parent's snapshot,
@@ -25,8 +32,8 @@ import { type ProjectThreadSettingsSource, resolveProjectThreadSettings, treeSet
 const log = ensoLogger('host')
 
 /** The tree kind a project's settings give its new threads (#551): none for `off`, or no settings. */
-function treeKindIn(settings: EnsoProjectThreadSettings | undefined): ThreadTreeKind | undefined {
-  const chosen = settings?.tree.value
+function treeKindIn(settings: TreeSettings | undefined): ThreadTreeKind | undefined {
+  const chosen = settings?.threads.tree.value
   return chosen === undefined || chosen === 'off' ? undefined : chosen
 }
 
@@ -62,13 +69,14 @@ export function createTreeMaking(host: TreeMakingHost): TreeMaking {
   const { projectsDir, agentDir, environment, threadSettings } = host
 
   /**
-   * `project`'s new-tree settings by tier (#754), read fresh — an edit applies to the next tree; none
-   * when this host mints no trees (no projects folder to put them in, or no settings to read).
+   * `project`'s new-tree settings by tier (#754), as approved (#753), read fresh — an edit or an
+   * approval applies to the next tree; none when this host mints no trees (no projects folder to put
+   * them in, or no settings to read).
    */
-  const threadSettingsOf = (project: string): EnsoProjectThreadSettings | undefined =>
+  const threadSettingsOf = (project: string): TreeSettings | undefined =>
     projectsDir === undefined || threadSettings === undefined
       ? undefined
-      : resolveProjectThreadSettings(realpathOrSelf(project), threadSettings, agentDir).threads
+      : resolveProjectThreadSettings(realpathOrSelf(project), threadSettings, agentDir)
 
   /** The tree kind new threads in `project` get (#551), or none. */
   const treeKindOf = (project: string): ThreadTreeKind | undefined => treeKindIn(threadSettingsOf(project))
@@ -122,23 +130,32 @@ export function createTreeMaking(host: TreeMakingHost): TreeMaking {
   /**
    * A new tree prepared (#754): the project's files to copy copied in, its setup commands run there
    * as Enso — in the quarantined environment pi's `bash` gets, their output redacted with the
-   * user's secret values — and the outcome. ⚠ LONG SETUPS HOLD THE THREAD'S FIRST RUN, which waits
-   * on its move; that is intended, the thread shows it is moving. A failure is warned, naming the
-   * command, and the thread still opens: the operator fixes it from there.
+   * user's secret values — and the outcome. ⚠ ONLY FROM APPROVED CONTENTS (#753): `settings` is the
+   * approved resolution, and a tier that is not the version approved is named on the outcome, so the
+   * thread says what was used — recorded even when there was nothing else to set up. ⚠ LONG SETUPS
+   * HOLD THE THREAD'S FIRST RUN, which waits on its move; that is intended, the thread shows it is
+   * moving. A failure is warned, naming the command, and the thread still opens: the operator fixes
+   * it from there.
    */
   async function prepareTree(
     threadId: string,
     tree: ThreadTreeRecord,
-    settings: EnsoProjectThreadSettings,
+    settings: TreeSettings,
   ): Promise<EnsoTreeSetupOutcome | undefined> {
-    const outcome = await prepareThreadTree({
+    const prepared = await prepareThreadTree({
       project: tree.project,
       tree: tree.path,
-      threads: settings,
+      threads: settings.threads,
       environment,
       secretValues: knownSecretValues(ensoHome(environment), environment),
     })
-    if (outcome === undefined) return undefined
+    const pending = settings.pending.length === 0 ? {} : { pending: [...settings.pending] }
+    const tiers = { setup: settings.threads.setup.tier, copy: settings.threads.copy.tier }
+    if (prepared === undefined && settings.pending.length === 0) return undefined
+    const outcome: EnsoTreeSetupOutcome =
+      prepared === undefined
+        ? { ok: true, copied: [], missing: [], steps: [], tiers, ...pending }
+        : { ...prepared, ...pending }
     if (outcome.ok) {
       log.info('thread {threadId}: its tree {tree} is set up (#754)', { threadId, tree: tree.path })
       return outcome

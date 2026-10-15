@@ -4,18 +4,21 @@ import {
   type EnsoConfig,
   type EnsoProjectSettings,
   type EnsoProjectThreadSettings,
+  type EnsoProjectTierPending,
   type EnsoTranscriptEntry,
   EnsoTreeSetupOutcome,
   ensoLogger,
 } from '@enso/core'
+import { projectConfigApprovalsPath, projectIdOf } from '@enso/core/paths'
 import { readProjectThreadSettings } from '@enso/core/project-config'
 import { Compile } from 'typebox/compile'
 import { projectTrusted } from './project-trust.ts'
 
 /**
  * The host's side of #754: a project's tree settings resolved by tier under pi's trust for the
- * project, and the setup outcome a thread's branch records. The tiers, the files and the setup run
- * are `@enso/core/project-config` and `@enso/core/tree-setup`; this module adds the trust decision.
+ * project and the operator's approval of its files (#753), and the setup outcome a thread's branch
+ * records. The tiers, the files, the approvals and the setup run are `@enso/core/project-config` and
+ * `@enso/core/tree-setup`; this module adds the trust decision.
  */
 
 const log = ensoLogger('host')
@@ -23,20 +26,28 @@ const log = ensoLogger('host')
 /**
  * What a project's tree settings resolve against (#754): the user's config — its `threads` is the
  * user tier — read afresh at each call, so a save in Settings › Projects & threads (#934) applies to
- * the next tree and the next project page; the file it came from, named on the project page; and how
- * its project keys are canonicalized (`~/code/app`, a trailing slash, a symlink: `canonicalConfigPath`).
+ * the next tree and the next project page; the file it came from, named on the project page; how
+ * its project keys are canonicalized (`~/code/app`, a trailing slash, a symlink: `canonicalConfigPath`);
+ * and the project folders (`ENSO_HOME/projects`), where each project's approved tiers are kept (#753).
  */
 export interface ProjectThreadSettingsSource {
   readonly readUser: () => EnsoConfig
   readonly userPath: string
   readonly canonical: (key: string) => string
+  readonly projectsDir: string
+}
+
+/** Where `project`'s (a canonical path) approved tiers are kept (#753). */
+export function approvalsPathOf(source: ProjectThreadSettingsSource, project: string): string {
+  return projectConfigApprovalsPath(source.projectsDir, projectIdOf(project))
 }
 
 /**
- * `project`'s new-tree settings (a canonical path) and whether its own tiers were read: pi's trust
- * for the project's path (#502), as a new tree asks it (`projectTrusted`). ⚠ Read fresh on every
- * call: an edit, or a trust set or revoked (#873), applies to the next tree. An unreadable tier is
- * logged and resolved without (fails closed).
+ * `project`'s new-tree settings (a canonical path), whether its own tiers were read — pi's trust for
+ * the project's path (#502), as a new tree asks it (`projectTrusted`) — and which of them are not the
+ * version approved (#753), whose approved version was read instead, or nothing. ⚠ Read fresh on every
+ * call: an edit, an approval, or a trust set or revoked (#873), applies to the next tree. An approved
+ * version that no longer reads is logged and resolved without (fails closed).
  */
 export function resolveProjectThreadSettings(
   project: string,
@@ -46,16 +57,29 @@ export function resolveProjectThreadSettings(
   readonly threads: EnsoProjectThreadSettings
   readonly trusted: boolean
   readonly unreadable: EnsoProjectSettings['unreadable']
+  readonly pending: readonly EnsoProjectTierPending[]
 } {
   const trusted = projectTrusted(project, agentDir)
-  const read = readProjectThreadSettings({ project, user: source.readUser(), canonical: source.canonical, trusted })
+  const read = readProjectThreadSettings({
+    project,
+    user: source.readUser(),
+    canonical: source.canonical,
+    trusted,
+    approvals: approvalsPathOf(source, project),
+  })
   for (const unreadable of read.unreadable) {
-    log.warn('{path}, the {tier} tier of {project}, is unreadable and was not read (#754): {reason}', {
+    log.warn('{path}, the {tier} tier of {project}, as approved does not read and was not applied (#753): {reason}', {
       project,
       ...unreadable,
     })
   }
-  return { threads: read.threads, trusted, unreadable: [...read.unreadable] }
+  for (const pending of read.pending) {
+    log.warn('{path}, the {tier} tier of {project}, is {state}: only what was approved of it applies (#753)', {
+      project,
+      ...pending,
+    })
+  }
+  return { threads: read.threads, trusted, unreadable: [...read.unreadable], pending: read.pending }
 }
 
 const setupOutcomeValidator = Compile(EnsoTreeSetupOutcome)

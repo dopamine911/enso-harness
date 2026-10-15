@@ -1,6 +1,8 @@
 import {
   EnsoDirectoryListing,
   EnsoProject,
+  type EnsoProjectConfigApproval,
+  EnsoProjectConfigReview,
   EnsoProjectSettings,
   type EnsoProjectSettingsUpdate,
   EnsoProjectTrust,
@@ -200,11 +202,15 @@ export async function removeProject(
 }
 
 /**
- * One of a project's own resources — its `settings` (#754) or its `trust` (#873) — read, or with
- * `update` written by a PUT, and the answer checked against `schema`.
+ * One of a project's own resources — its `settings` (#754), its `trust` (#873) or its
+ * `config-approval` (#753) — read, or with `update` written by a PUT, and the answer checked against `schema`.
  */
 async function projectResource<Schema extends TSchema>(
-  request: { readonly projectId: string; readonly resource: 'settings' | 'trust'; readonly update?: unknown },
+  request: {
+    readonly projectId: string
+    readonly resource: 'settings' | 'trust' | 'config-approval'
+    readonly update?: unknown
+  },
   schema: Schema,
   fetchImpl: FetchLike,
 ): Promise<ProjectRequestOutcome<Static<Schema>>> {
@@ -252,4 +258,24 @@ export function requestProjectTrust(
   return projectResource({ projectId, resource: 'trust', update }, EnsoProjectTrust, fetchImpl).catch(
     (error: unknown) => ({ kind: 'refused', reason: `the trust request did not reach the server: ${String(error)}` }),
   )
+}
+
+/**
+ * `GET /api/projects/:id/config-approval` (#753) with no `approval`: each of the project's own config
+ * files against the version approved, with its diff. With one, `PUT`: approve that file as reviewed.
+ * Either way the review as it now stands; a request that never reached the server is a refusal.
+ */
+export function requestProjectConfigReview(
+  projectId: string,
+  approval: EnsoProjectConfigApproval | undefined,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectRequestOutcome<EnsoProjectConfigReview>> {
+  return projectResource(
+    { projectId, resource: 'config-approval', update: approval },
+    EnsoProjectConfigReview,
+    fetchImpl,
+  ).catch((error: unknown) => ({
+    kind: 'refused',
+    reason: `the approval request did not reach the server: ${String(error)}`,
+  }))
 }

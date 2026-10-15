@@ -602,6 +602,30 @@ export function threadTreeRoot(projectsDir: string, path: string): string | unde
 }
 
 /**
+ * The project a cwd belongs to, by id: the one a minted tree's path names, else the cwd's own (its
+ * canonical path, hashed — `projectIdOf`). ⚠ A THREAD ON A TREE RUNS IN A DIRECTORY THAT IS NO
+ * PROJECT: everything filed or served by project — the session directory, the snapshot store, the
+ * server's projects, the approved project config (#753) — asks this first.
+ *
+ * @group Workspace paths
+ */
+export function projectIdOfCwd(projectsDir: string, cwd: string): string {
+  return treeProjectId(projectsDir, cwd) ?? projectIdOf(realpathOrSelf(cwd))
+}
+
+/**
+ * The project config tiers the operator approved (#753): `<projectsDir>/<id>/config-approvals.json`,
+ * the contents of the project's `.enso/config.json` and `.enso/config.local.json` as approved on
+ * its page. ⚠ Under `ENSO_HOME`, beside the project's sessions, never in the project: the agent
+ * works in the project, and the approval is what stands between its writes there and what applies.
+ *
+ * @group Workspace paths
+ */
+export function projectConfigApprovalsPath(projectsDir: string, projectId: string): string {
+  return join(projectsDir, projectId, 'config-approvals.json')
+}
+
+/**
  * What `migrateSessionsIntoProjects` did: files moved, files left because the target held one,
  * directories whose cwd is gone.
  *
