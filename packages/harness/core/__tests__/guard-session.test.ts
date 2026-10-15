@@ -62,7 +62,11 @@ function startedSession(runtime: GuardRuntime, transcript: readonly EnsoTranscri
     commandJudge: () => undefined,
     judgeSecretValues: () => [],
   })
-  session.start({ recordDirectory: () => join(WORKSPACE, 'sessions'), transcript: () => transcript })
+  session.start({
+    recordDirectory: () => join(WORKSPACE, 'sessions'),
+    transcript: () => transcript,
+    project: () => ({ cwd: WORKSPACE, trusted: false }),
+  })
   return session
 }
 
@@ -168,7 +172,9 @@ test('a start whose record directory and transcript cannot be read does not thro
   const unreadable = (): never => {
     throw new Error('gone')
   }
-  expect(() => session.start({ recordDirectory: unreadable, transcript: unreadable })).not.toThrow()
+  expect(() =>
+    session.start({ recordDirectory: unreadable, transcript: unreadable, project: unreadable }),
+  ).not.toThrow()
   expect(call(session, 'write', { path: '.bashrc', content: 'x' })).toMatchObject({ kind: 'refused' })
 })
 

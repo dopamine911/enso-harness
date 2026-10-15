@@ -194,6 +194,109 @@ test('after a shell refusal, a script written and then run is a tool substitutio
   ])
 })
 
+// #753's last acceptance item: an attempted write to a config tier raises a signal — with no refusal
+// before it, and whether the guard refused it (a write into `.enso/`) or could not read it (an
+// interpreter one-liner the guard lets through).
+test('⚠ a write, edit or write-shaped shell command reaching a config tier is a signal on its own, refused or not (#753)', () => {
+  expect(
+    signalsOf(
+      oneCallEach(
+        [['c1', 'write', { path: '.enso/config.json', content: '{}' }], guardDenied('c1', 'persistence-write')],
+        [['c2', 'edit', { path: '/srv/app/.enso/config.local.json', oldText: 'a', newText: 'b' }]],
+        [bash('c3', `python3 -c "open('.enso/config.json', 'w').write('{}')"`)],
+        [bash('c4', `echo '{}' > ~/.enso/config.json`), guardDenied('c4', 'persistence-write')],
+        [bash('c5', 'cat .enso/config.json.bak docs/config.json')],
+        [['c6', 'write', { path: 'src/enso/config.json', content: '{}' }]],
+        [bash('c7', `echo '{}' | tee .enso/config.local.json`)],
+        [bash('c8', `sed -i 's/a/b/' .enso/config.json`)],
+        [bash('c9', 'cp /tmp/evil.json .enso/config.json')],
+      ),
+    ).filter(([signal]) => signal === 'config-tier-touch'),
+  ).toEqual([
+    ['config-tier-touch', 'c1'],
+    ['config-tier-touch', 'c2'],
+    ['config-tier-touch', 'c3'],
+    ['config-tier-touch', 'c4'],
+    ['config-tier-touch', 'c7'],
+    ['config-tier-touch', 'c8'],
+    ['config-tier-touch', 'c9'],
+  ])
+})
+
+// Review of ff0207b1: the signal is the only backstop for the routes the guard cannot read, so the
+// in-place flags in every spelling, `dd of=`, and a write behind `VAR=`/`env`/`xargs`/`command`
+// count as the bare forms do.
+test('in-place, dd and prefixed writes to a config tier are signals; a dd read from one is none', () => {
+  expect(
+    signalsOf(
+      oneCallEach(
+        [bash('c1', `sed -Ei 's/a/b/' .enso/config.json`)],
+        [bash('c2', `sed -ni 's/a/b/p' .enso/config.json`)],
+        [bash('c3', `sed --in-place 's/a/b/' .enso/config.local.json`)],
+        [bash('c4', `perl -pi -e 's/a/b/' .enso/config.json`)],
+        [bash('c5', `echo '{}' | dd of=.enso/config.json`)],
+        [bash('c6', `echo '{}' | env FOO=1 tee .enso/config.json`)],
+        [bash('c7', 'FOO=1 cp /tmp/evil.json .enso/config.json')],
+        [bash('c8', `echo '{}' | xargs tee .enso/config.local.json`)],
+        [bash('c9', 'command cp /tmp/evil.json .enso/config.json')],
+        [bash('c10', 'dd if=.enso/config.json of=/tmp/backup.json')],
+        [bash('c11', 'env FOO=1 cat .enso/config.json')],
+      ),
+    ).filter(([signal]) => signal === 'config-tier-touch'),
+  ).toEqual([
+    ['config-tier-touch', 'c1'],
+    ['config-tier-touch', 'c2'],
+    ['config-tier-touch', 'c3'],
+    ['config-tier-touch', 'c4'],
+    ['config-tier-touch', 'c5'],
+    ['config-tier-touch', 'c6'],
+    ['config-tier-touch', 'c7'],
+    ['config-tier-touch', 'c8'],
+    ['config-tier-touch', 'c9'],
+  ])
+})
+
+// Review of 1d095ec3: a runner flag that takes a value (`sudo -u root`, `nice -n 10`, `xargs -n 1`,
+// `timeout 5`), a `|` inside a quoted sed script and the `sed -i.bak` in-place spelling must not hide
+// the write. Review of 80c002f1: neither may `timeout -s KILL 5` / `timeout -k 1 5`, nor an escaped
+// or unterminated quote before the separator.
+test.each([
+  ['behind sudo -u root', 'echo x | sudo -u root tee .enso/config.json'],
+  ['behind sudo -n', 'echo x | sudo -n tee .enso/config.json'],
+  ['behind nice -n 10', 'nice -n 10 cp /tmp/evil.json .enso/config.json'],
+  ['behind xargs -n 1', 'echo x | xargs -n 1 tee .enso/config.json'],
+  ['behind timeout 5', 'timeout 5 cp /tmp/evil.json .enso/config.json'],
+  ['behind timeout -s KILL 5', 'timeout -s KILL 5 cp /tmp/evil.json .enso/config.json'],
+  ['behind timeout -k 1 5', 'timeout -k 1 5 cp /tmp/evil.json .enso/config.json'],
+  ['with a quoted alternation', `sed -E -i 's/(a|b)/c/' .enso/config.json`],
+  ['with sed -i.bak', `sed -i.bak 's/a/b/' .enso/config.json`],
+  ['after an escaped double quote', 'echo \\"; cp /tmp/evil.json .enso/config.json'],
+  ['after an escaped single quote', "echo it\\'s; tee .enso/config.json"],
+  ['after an unterminated quote', 'echo "oops; cp /tmp/evil.json .enso/config.json'],
+])('a write %s to a config tier is a signal', (_route, command) => {
+  expect(signalsOf(oneCallEach([bash('c1', command)])).filter(([signal]) => signal === 'config-tier-touch')).toEqual([
+    ['config-tier-touch', 'c1'],
+  ])
+})
+
+// Review of #987: signals stay in the session, so a read or a mention of a tier file must not be
+// one — five of them (this repo names its own `.enso/config.json` routinely) would open an incident.
+test('a read or a mention of a config tier in a shell command is no signal', () => {
+  expect(
+    signalsOf(
+      oneCallEach(
+        [bash('c1', 'cat .enso/config.json'), guardDenied('c1', 'secret-path')],
+        [bash('c2', 'git log -- .enso/config.json')],
+        [bash('c3', `rg '.enso/config.json' docs`)],
+        [bash('c4', 'git commit -m "config(#753): approve .enso/config.json"')],
+        [bash('c5', 'cp .enso/config.json /tmp/backup.json')],
+        [bash('c6', 'git diff .enso/config.local.json 2>&1 | less')],
+        [bash('c7', 'echo "a; tee b" .enso/config.json')],
+      ),
+    ).filter(([signal]) => signal === 'config-tier-touch'),
+  ).toEqual([])
+})
+
 test("⚠ the engine's refusals count: a person's No repeated, and an auto block followed by a one-liner (#464, #496)", () => {
   expect(
     signalsOf(
@@ -329,6 +432,7 @@ test("⚠ after a refusal, the thread's own tree is its work, not the harness's 
     'policy-introspection@sibling-prefix',
     'policy-introspection@climbs-out',
     'policy-introspection@policy',
+    // A read of a config tier is introspection after a refusal, not a tier touch (review of #987).
     'policy-introspection@home-config',
     'policy-introspection@project-config',
   ])

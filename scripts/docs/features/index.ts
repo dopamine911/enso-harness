@@ -1,6 +1,7 @@
 import { CHAT } from './chat.ts'
 import { CONTEXT_BROWSER } from './context-browser.ts'
 import { CONTEXT } from './context.ts'
+import { DIFF_VIEWER } from './diff-viewer.ts'
 import { DIFF } from './diff.ts'
 import { GUARDS_AND_RECEIPTS } from './guards-and-receipts.ts'
 import { INCIDENTS } from './incidents.ts'
@@ -35,6 +36,7 @@ export const FEATURE_SPECS: readonly FeatureSpec[] = [
   STATS,
   SESSION_EVAL,
   DIFF,
+  DIFF_VIEWER,
   LOGS_AND_DEBUGGING,
   SETTINGS,
   PROMPTS,
