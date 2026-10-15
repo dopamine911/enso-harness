@@ -1173,7 +1173,8 @@ test('⚠ the trust read follows no link and opens no FIFO: each is named, never
     ['is a link, so it is not shown here, and nothing in it applies', 'shared'],
   ])
 
-  // `.enso/` itself a link: the file inside is reached through it, and not read either.
+  // `.enso/` itself a link: each file inside is reached through it, and not read either — the local
+  // one too, though nothing is behind it, since a write would land behind the link (review of #987).
   const linked = await settingsServer({ trusted: false })
   const elsewhere = mkdtempSync(join(tmpdir(), 'enso-trust-dir-'))
   writeFileSync(join(elsewhere, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-through-dir'] } }))
@@ -1182,6 +1183,11 @@ test('⚠ the trust read follows no link and opens no FIFO: each is named, never
   const throughDir = await trustOf(await fetch(`${linked.url}/api/projects/${linked.projectId}/trust`))
   expect(JSON.stringify(throughDir)).not.toContain('leaked-through-dir')
   expect(throughDir.files).toEqual([
+    {
+      tier: 'local',
+      path: join(linked.project, '.enso', 'config.local.json'),
+      unread: 'is reached through a link, so it is not shown here, and nothing in it applies',
+    },
     {
       tier: 'shared',
       path: join(linked.project, '.enso', 'config.json'),

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { EnsoConfig } from '../config.ts'
@@ -200,6 +200,24 @@ test('⚠ a file that is not a config Enso reads, or is a link, cannot be approv
   symlinkSync(elsewhere, projectConfigPath(linked.directory))
   expect(approve(linked, 'shared')).toMatchObject({ kind: 'refused', status: 422 })
   expect(settingsOf(linked).threads.setup).toEqual({ value: [], tier: 'default' })
+})
+
+// Review of #987: with `.enso/` itself a link and no file behind it, the read said `absent` and the
+// Worktrees save wrote — and approved — a file wherever the link pointed.
+test('⚠ a linked `.enso/` with no file behind it is refused on write, approve and review; nothing lands behind it', () => {
+  for (const dangling of [false, true]) {
+    const place = project()
+    rmSync(join(place.directory, '.enso'), { recursive: true })
+    const elsewhere = join(mkdtempSync(join(tmpdir(), 'enso-elsewhere-')), dangling ? 'gone' : '')
+    symlinkSync(elsewhere, join(place.directory, '.enso'))
+    expect(
+      writeProjectThreadSettings(place.directory, { tier: 'shared', threads: { setup: ['make'] } }, place.approvals),
+    ).toMatchObject({ kind: 'unreadable', reason: 'is reached through a link' })
+    expect(existsSync(join(elsewhere, 'config.json'))).toBe(false)
+    expect(existsSync(place.approvals)).toBe(false)
+    expect(approve(place, 'shared')).toMatchObject({ kind: 'refused', status: 422 })
+    expect(settingsOf(place).threads.setup).toEqual({ value: [], tier: 'default' })
+  }
 })
 
 test('⚠ an approvals file edited by hand approves nothing: its text must be the text its hash names', () => {

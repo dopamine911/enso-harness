@@ -25,7 +25,7 @@ const SIGNAL_MEANS: Readonly<Record<EnsoSecuritySignalKind, string>> = {
   'policy-introspection': "After a refusal, a call that names the guards' policy or Enso's own files.",
   'protected-record-touch': 'A shell command that names the session or log directory. Needs no refusal before it.',
   'config-tier-touch':
-    'A write or edit of a config file (`.enso/config.json`, `.enso/config.local.json`), or a shell command that names one, refused or not. Needs no refusal before it.',
+    'A write or edit of a config file (`.enso/config.json`, `.enso/config.local.json`), or a shell command that writes one (a redirect, `tee`, `sed -i`, `cp`/`mv` onto it, an interpreter one-liner naming it), refused or not. A read or a mention is not one. Needs no refusal before it.',
 }
 
 const SIGNAL_TABLE = [

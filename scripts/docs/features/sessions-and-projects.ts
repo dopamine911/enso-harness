@@ -127,7 +127,7 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
     'A project must be strictly inside a declared root. Hidden folders, and links that lead out of a root, are not offered.',
     'Removing a project only forgets the registration. Its threads stay on disk but are not listed or opened until you add the folder again; then they come back.',
     "A project's settings files from before approvals existed (#753) count as never approved: nothing in them applies until you approve each one on the project page.",
-    "Approval protects the files from a change you didn't see, not from a program running as you: a command pi runs could write Enso's approvals file too. The guard refuses such writes it can read, and any write, edit or shell command reaching a settings file raises the `config-tier-touch` security signal, refused or not (see [Incidents](./incidents.md)).",
+    "Approval protects the files from a change you didn't see, not from a program running as you: a command pi runs could write Enso's approvals file too. The guard refuses such writes it can read, and any write, edit or shell command that writes a settings file raises the `config-tier-touch` security signal, refused or not (see [Incidents](./incidents.md)).",
     "A project's tightened incident thresholds act in the guard; the risk level the page shows and `bun run incidents` replay use your own thresholds (#753).",
     'A thread is stored once pi has answered at least once. A thread closed before its first reply is not kept.',
     'Enso never fetches, pushes or changes anything in git. "Last push" is what this copy of the repository last saw of the remote; run `git fetch` yourself to update it.',

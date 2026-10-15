@@ -226,7 +226,7 @@ export function readEnsoToolRefusalMetadata(
  *   after a refusal;
  * - `protected-record-touch` — a shell command naming the session or log directory (#466);
  * - `config-tier-touch` — a write or edit of a config tier file (`.enso/config.json`,
- *   `.enso/config.local.json`), or a shell command naming one (#753).
+ *   `.enso/config.local.json`), or a write-shaped shell command naming one (#753).
  *
  * The last two need no refusal before them.
  *
@@ -503,20 +503,49 @@ function withSignal(signals: EnsoSecuritySignal[], signal: EnsoSecuritySignal): 
 
 /**
  * ⚠ The call signal that needs no earlier refusal (#753), as `protected-record-touch` needs none: a
- * write or edit of a config tier file, or a shell command naming one, is itself the observation —
- * refused or not, since the guard cannot read every route to the file (an interpreter one-liner).
+ * write or edit of a config tier file, or a write-shaped shell command naming one (`shellWritesTier`),
+ * is itself the observation — refused or not, since the guard cannot read every route to the file (an
+ * interpreter one-liner). A read or a mention (`cat`, `git log --`, a commit message) is none: signals
+ * stay in the session, so five harmless mentions would otherwise open an incident (review of #987).
  */
 function configTierTouch(call: RecentCall): EnsoSecuritySignal | undefined {
   let target: string | undefined
-  if (WRITE_TOOLS.has(call.tool)) target = call.path
-  else if (SHELL_TOOLS.has(call.tool)) target = call.command
-  if (target === undefined || !CONFIG_TIER.test(target)) return undefined
+  if (WRITE_TOOLS.has(call.tool))
+    target = call.path !== undefined && CONFIG_TIER.test(call.path) ? call.path : undefined
+  else if (SHELL_TOOLS.has(call.tool) && call.command !== undefined && shellWritesTier(call.command))
+    target = call.command
+  if (target === undefined) return undefined
   return {
     signal: 'config-tier-touch',
     toolCallId: call.toolCallId,
     detail: `${call.tool} reached a config tier file: ${firstLine(target)}`,
     after: [],
   }
+}
+
+/** A redirect (`>`, `>>`, `>|`) whose target is a config tier file. */
+const TIER_REDIRECT = /\d?>[>|]?\s*['"]?[^\s'";&|]*\.enso[/\\]config(?:\.local)?\.json(?![\w.-])/i
+/** Commands that write the file named among their arguments (`tee`, `truncate`, `sed -i`, `perl -i`). */
+const WRITES_ARGUMENT = /^(?:sudo\s+)?(?:tee|truncate|(?:sed|perl)\s+(?:[^|;&]*\s)?-i)\b/
+/** Commands whose last argument is the destination (`cp`, `mv`, `ln`, `install`, `rsync`). */
+const WRITES_LAST_ARGUMENT = /^(?:sudo\s+)?(?:cp|mv|ln|install|rsync)\s/
+
+/**
+ * Whether a shell command names a config tier file in a write-shaped way: an interpreter one-liner
+ * naming it (the guard cannot read what it does), a redirect into it, `tee`/`truncate`/`sed -i` with
+ * it as an argument, or `cp`/`mv`/`ln`/`install`/`rsync` with it as the destination.
+ */
+function shellWritesTier(command: string): boolean {
+  if (!CONFIG_TIER.test(command)) return false
+  if (ONE_LINER.test(command) || TIER_REDIRECT.test(command)) return true
+  return command.split(/[;&|\n]+/).some((segment) => {
+    const words = segment.trim()
+    if (!CONFIG_TIER.test(words)) return false
+    if (WRITES_ARGUMENT.test(words)) return true
+    if (!WRITES_LAST_ARGUMENT.test(words)) return false
+    const last = words.split(/\s+/).at(-1) ?? ''
+    return CONFIG_TIER.test(` ${last.replace(/^['"]|['"]$/g, '')}`)
+  })
 }
 
 /** The signals a call raises: a config tier reached, and what it does against the refusals before it in the window. */

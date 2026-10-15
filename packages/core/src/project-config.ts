@@ -3,6 +3,7 @@ import {
   closeSync,
   constants,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readSync,
@@ -46,9 +47,10 @@ import { unifiedPatch } from './text-patch.ts'
  * tree settings are the PROJECT's files — the checkout's path — never a thread's tree.
  *
  * ⚠ READ AS UNTRUSTED INPUT (#873), approved or not: a tier file is read only when it is a regular
- * file of at most 64 KiB in the directory's own `.enso/`. A link (the file, or `.enso/` itself) is
- * named and never followed, since it could point at a file an agent may not read, which the page
- * would then show; a FIFO would hold the server. Such a file can be neither shown nor approved.
+ * file of at most 64 KiB in the directory's own `.enso/`. A link (the file, or `.enso/` itself, even
+ * with no file behind it) is named and never followed, on read or write, since it could point at a
+ * file an agent may not read, which the page would then show, or one a write would land in; a FIFO
+ * would hold the server. Such a file can be neither shown, written nor approved.
  */
 
 /** The largest tier file Enso reads; a project's config is a few hundred bytes. */
@@ -272,8 +274,8 @@ function recordApproval(path: string, tier: EnsoProjectTier, text: string | unde
  *
  * ⚠ NEVER OVER WHAT IS NOT APPROVED: a file that changed since its approval, or was never approved,
  * is refused (`pending`) — written over, its change would be approved unseen. ⚠ Nor over a file that
- * is there and unreadable — a link, not JSON, not a config this version reads: the reason comes
- * back, and the operator fixes the file.
+ * is unreadable — a link (the file, or `.enso/` itself, whether or not a file is behind it), not JSON,
+ * not a config this version reads: the reason comes back, and the operator fixes the file.
  *
  * @group Project settings
  */
@@ -301,7 +303,15 @@ export function writeProjectThreadSettings(
   const next = Object.keys(threads).length === 0 ? Object.fromEntries(others) : { ...read.config, threads }
   const text = `${JSON.stringify(next, null, 2)}\n`
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, text)
+  // ⚠ Checked again once `.enso/` exists, and the file opened without following a link: the write
+  // must land in the project's own `.enso/`, never where a link planted since the read points.
+  if (reachedThroughLink(project, path)) return { kind: 'unreadable', path, reason: LINKED }
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW)
+  try {
+    writeFileSync(descriptor, text)
+  } finally {
+    closeSync(descriptor)
+  }
   recordApproval(approvals, update.tier, text)
   return { kind: 'written' }
 }
@@ -427,7 +437,8 @@ function readTierText(directory: string, path: string): TierText {
     descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   } catch (error: unknown) {
     const code = (error as NodeJS.ErrnoException).code
-    if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'absent' }
+    if (code === 'ENOENT' || code === 'ENOTDIR')
+      return reachedThroughLink(directory, path) ? { kind: 'unreadable', reason: LINKED } : { kind: 'absent' }
     if (code === 'ELOOP') return { kind: 'unreadable', reason: 'is a link' }
     return { kind: 'unreadable', reason: `could not be opened (${code ?? 'error'})` }
   }
@@ -440,10 +451,30 @@ function readTierText(directory: string, path: string): TierText {
   }
 }
 
+/** Why a tier file whose `.enso/` is not the directory's own is refused (the module header). */
+const LINKED = 'is reached through a link'
+
+/**
+ * Whether `path`'s `.enso/` is a link — to a directory elsewhere, or dangling — rather than the
+ * directory's own. Asked when the file is absent too, since a write would land where the link points.
+ */
+function reachedThroughLink(directory: string, path: string): boolean {
+  const parent = dirname(path)
+  try {
+    return realpathSync(parent) !== dirname(projectConfigPath(realpathSync(directory)))
+  } catch {
+    try {
+      lstatSync(parent)
+      return true // there, but does not resolve: a dangling link
+    } catch {
+      return false // no `.enso/` at all
+    }
+  }
+}
+
 function readOpenedTier(directory: string, path: string, descriptor: number): TierText {
   if (!fstatSync(descriptor).isFile()) return { kind: 'unreadable', reason: 'is not a regular file' }
-  if (realpathSync(dirname(path)) !== dirname(projectConfigPath(realpathSync(directory))))
-    return { kind: 'unreadable', reason: 'is reached through a link' }
+  if (reachedThroughLink(directory, path)) return { kind: 'unreadable', reason: LINKED }
   const buffer = Buffer.alloc(MAX_TIER_BYTES + 1)
   const length = readSync(descriptor, buffer, 0, buffer.length, 0)
   if (length > MAX_TIER_BYTES) return { kind: 'unreadable', reason: `is larger than ${MAX_TIER_BYTES / 1024} KiB` }

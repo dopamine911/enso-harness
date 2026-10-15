@@ -76,13 +76,14 @@ function returnedWholeFile(event: ToolResultEvent): boolean {
  * command judge with the secret values its state is redacted of (#469), and the version of the
  * pi it runs in (#953).
  *
- * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`,
- * `ENSO_HOME`'s log and projects directories and secrets, and pi's own `VERSION`; tests inject known
- * verdicts, a root they built, a policy, directories, a fake judge and a version — a guard test must
- * never reach the network.
+ * Production wires cc-safety-net's `checkCommand`, this checkout's root, an incident policy from the
+ * user's `config.json`, pi's trust store and the project's approved `.enso/config.json`
+ * (`sessionIncidentPolicy`), `ENSO_HOME`'s log and projects directories and secrets, and pi's own
+ * `VERSION`; tests inject known verdicts, a root they built, a policy, directories, a fake judge and a
+ * version — a guard test must never reach the network.
  * `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
  * library would vary with the machine's cc-safety-net config (the contract test alone exercises
- * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
+ * the real one, and pins defaults explicitly) — and the same holds for the machine's config files.
  */
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult
@@ -264,7 +265,7 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
 function productionIncidentPolicy(project: GuardProject | undefined): EnsoIncidentPolicy {
   const { policy, problem } = sessionIncidentPolicy(ensoHome(process.env), project)
   if (problem !== undefined) {
-    log.error('a config is unreadable, so incidents halt with the default thresholds: {problem}', { problem })
+    log.error('a config is unreadable, so incidents halt: {problem}', { problem })
   }
   return policy
 }
