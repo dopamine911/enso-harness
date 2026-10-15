@@ -113,13 +113,14 @@ export function describeThrown(thrown: unknown): { error: string; stack?: string
 export function watchPageFaults(target: Window, threadOnScreen: () => string | undefined): () => void {
   const onError = (event: ErrorEvent): void => {
     if (pageLeaving()) return
-    // An `error` event with no error behind it is not a throw of this page's code: Chrome's
-    // "ResizeObserver loop …" (a layout that took two passes, routine under the transcript's
-    // virtualiser), or a cross-origin or extension script's throw, masked as "Script error.".
-    // Recorded, but no banner: nothing about following a thread is wrong.
+    // An `error` event with no error object: Chrome's "ResizeObserver loop …" (a layout that took
+    // two passes, routine under the transcript's virtualiser), another origin's throw masked as
+    // "Script error.", or a nullish throw (`throw null`/`throw undefined`). The event cannot say
+    // which. Recorded, but no banner: the first two are not the page's, and a nullish throw from
+    // the page's own code is accepted as the cost of not bannering the others.
     if (event.error == null) {
       if (!event.message.startsWith('ResizeObserver loop')) {
-        log.warn('an error event with no error behind it, not from this page: {error}', {
+        log.warn("an error event with no error object (another origin's, or a nullish throw): {error}", {
           error: event.message,
           ...(event.filename === '' ? {} : { source: event.filename }),
         })

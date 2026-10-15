@@ -7,7 +7,7 @@ import type { StreamChunk } from '@tanstack/ai'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from '../custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from '../follow-connection.ts'
 import { pageLeaving } from '../page-leaving.ts'
-import { createScriptedFetch, requestedUrl, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
+import { createScriptedFetch, isFollowRequest, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 /**
  * The adapter is the ONLY place AG-UI is made (#112). These drive it with a scripted server
@@ -786,6 +786,33 @@ test('⚠ a page that joined mid-reply draws the prompt pi claims next, between 
   server.abort()
 })
 
+// PR #986 review: three triggers rotate the bubble — a new model turn (#921), a retry after a
+// refusal (#382), a delivered prompt (#75, #917) — and where two coincide they must rotate ONCE:
+// two rotations would leave an empty bubble between the turns. A delivered prompt draws its own
+// bubble between the two answers (#917), so a rotation is counted as an assistant bubble opened.
+test('each new message rotates the assistant bubble exactly once, whichever triggers coincide (#921, #382, #75)', async () => {
+  const refused: EnsoObservation = { kind: 'provider-refused', provider: 'anthropic', status: 429, message: '429' }
+  const sequences: ReadonlyArray<readonly [string, readonly EnsoObservation[]]> = [
+    ['assistant → assistant', [assistantStart, assistantStart]],
+    ['assistant → refused → assistant', [assistantStart, refused, assistantStart]],
+    ['refused, no message seen → assistant', [refused, assistantStart]],
+    ['assistant → claimed prompt → assistant', [assistantStart, userStart('queued'), assistantStart]],
+  ]
+  for (const [name, sequence] of sequences) {
+    const server = scripted()
+    server.frame(SNAPSHOT_IDLE)
+    await server.untilChunks(1)
+    await send(server, 'first')
+    await server.untilChunks(3) // RUN_STARTED, TEXT_MESSAGE_START
+    await deliver(server, [userStart('first'), ...sequence, textDelta('LAST')], 'LAST')
+    const assistantBubbles = server.chunks.filter(
+      (chunk) => chunk.type === EventType.TEXT_MESSAGE_START && chunk.role === 'assistant',
+    ).length
+    expect({ name, rotations: assistantBubbles - 1 }).toEqual({ name, rotations: 1 })
+    server.abort()
+  }
+})
+
 // PR #120 review: the callers fire-and-forget (`void connection.abort()`), so a network
 // failure must be an OUTCOME the adapter reports, never a rejection that escapes them.
 test('a unary POST that never gets an answer is `unreachable` — reported once, not thrown (#116); a RECORD and a NOTICE from one site (#132)', async () => {
@@ -1118,14 +1145,15 @@ test('close() during the opening fetch ends the subscription instead of throwing
 
 /**
  * The scripted server's fetch, telling when a follow has opened: `frame` writes onto the follow
- * that is open, so a frame written before the subscription's fetch would be lost. Take the
+ * that is open, so a frame written before the subscription's fetch goes to the previous follow
+ * (or nowhere, for the first). Take the
  * promise before the subscription asks.
  */
 function watchFollows(server: ScriptedFetch): { fetch: typeof fetch; nextFollow: () => Promise<void> } {
   let waiting = Promise.withResolvers<void>()
   const watched = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const response = await server.fetch(input, init)
-    if (requestedUrl(input).endsWith('/follow')) {
+    if (isFollowRequest(input)) {
       const opened = waiting
       waiting = Promise.withResolvers<void>()
       opened.resolve()

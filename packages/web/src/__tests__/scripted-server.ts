@@ -32,6 +32,8 @@ export interface ScriptedFetch {
   readonly fetch: typeof fetch
   /** Write one frame onto the open follow. */
   readonly frame: (frame: EnsoFollowFrame) => void
+  /** Write raw `data:` text onto the open follow — a frame off the wire schema. */
+  readonly rawFrame: (text: string) => void
   /** End the follow body — the server went away. */
   readonly closeFollow: () => void
   readonly prompts: Array<{ message: string; admission?: string; images?: unknown[] }>
@@ -158,6 +160,11 @@ const SCRIPTED_LAUNCH_PROJECT: EnsoProject = {
   path: '/scripted/launch',
   status: 'ok',
   launch: true,
+}
+
+/** Whether a `fetch` is for a thread's follow: the adapter asks `${base}/follow`, with no query. */
+export function isFollowRequest(input: string | URL | Request): boolean {
+  return requestedUrl(input).endsWith('/follow')
 }
 
 /** The URL a `fetch` was asked for, whichever of its three forms the caller handed it. */
@@ -382,6 +389,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   return {
     fetch: fetchImpl,
     frame: (frame: EnsoFollowFrame) => write(`data: ${JSON.stringify(frame)}\n\n`),
+    rawFrame: (text) => write(`data: ${text}\n\n`),
     closeFollow: () => close(),
     prompts,
     dialogs,

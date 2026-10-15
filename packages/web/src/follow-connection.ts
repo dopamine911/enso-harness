@@ -125,8 +125,10 @@ interface OpenRun {
   readonly runId: string
   /**
    * The assistant message the view is streaming into. Rotates on every assistant message after the
-   * run's first (#921), when pi delivers a prompt (#75, #917), and when pi starts a new attempt
-   * after a refused one (#382).
+   * run's first (#921); when pi delivers a prompt — a queued one it claims (#75), one steered in
+   * right after the opening prompt, or the opening prompt of a run another client started (#917),
+   * but not the opening prompt of a run this page sent (`awaitingOwnOpeningPrompt`); and when pi
+   * starts a new attempt after a refused one (#382).
    */
   messageId: string
   /** The receipt's `messageId` — how a `prompt-rejected` names this run. Undefined for a run another client started. */
@@ -928,7 +930,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
         state.handedAt = Date.now()
         yield next
         state.handing = undefined
-        // The chunks `followClosed` queued apply nothing of a follow: the follow is gone.
+        // Once the pump has ended, nothing yielded applies a follow: the follow is gone.
         if (!state.ended) appliedAt = Date.now()
       }
     } finally {
