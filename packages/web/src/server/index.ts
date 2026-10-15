@@ -259,6 +259,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     projects,
     threads,
     agentDir: options.agentDir,
+    projectsDir: options.projectsDir,
     ...options.hostCheck,
   })
   const { dispatchThreadRoute } = createThreadRoutes({

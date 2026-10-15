@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   ensoLogger,
+  parseEnsoConfig,
   readWebFetchHostInput,
   WEB_FETCH_TOOL_NAME,
   WEB_FETCH_USER_AGENT,
@@ -11,7 +12,8 @@ import {
   WebFetchHostCheckRequest,
   type WebFetchProjectHosts,
 } from '@enso/core'
-import { projectConfigPath } from '@enso/core/paths'
+import { projectConfigApprovalsPath, projectIdOf } from '@enso/core/paths'
+import { projectTierStanding } from '@enso/core/project-config'
 import { changeUserAllowedHosts, nonPublicAddressReason, readEnsoConfigFile } from '@enso/core/web-fetch-allowlist'
 import type { Static, TSchema } from 'typebox'
 import type { HostedThread } from '../host/live-thread.ts'
@@ -60,6 +62,8 @@ export interface WebToolsRoutesState extends HostCheckNetwork {
   readonly threads: Pick<ThreadRegistry, 'list'>
   /** pi's agent dir, whose `trust.json` decides whether a project's own hosts are read. */
   readonly agentDir: string
+  /** The project folders (`ENSO_HOME/projects`), where each project's approved tiers are kept (#753); absent, none is approved. */
+  readonly projectsDir: string | undefined
 }
 
 export interface WebToolsRoutes {
@@ -115,7 +119,7 @@ async function checkWebFetchHost(host: string, network: Required<HostCheckNetwor
 }
 
 export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes {
-  const { userConfigPath, projects, threads, agentDir } = state
+  const { userConfigPath, projects, threads, agentDir, projectsDir } = state
   const network: Required<HostCheckNetwork> = {
     checkFetch:
       state.checkFetch ??
@@ -129,13 +133,19 @@ export function createWebToolsRoutes(state: WebToolsRoutesState): WebToolsRoutes
    */
   let onOldList = new Map<string, HostedThread>()
 
-  /** Each trusted project's own hosts, read as a new session there would read them (#421). */
+  /**
+   * Each trusted project's own hosts, read as a new session there would read them (#421): its
+   * shared tier as the operator approved it (#753) — a file changed since applies its approved text,
+   * one never approved applies nothing.
+   */
   function projectHosts(): WebFetchProjectHosts[] {
     const found: WebFetchProjectHosts[] = []
+    if (projectsDir === undefined) return found
     for (const project of projects.list()) {
       if (project.status === 'missing-dir' || !projectTrusted(project.path, agentDir)) continue
-      const path = projectConfigPath(project.path)
-      const parsed = readEnsoConfigFile(path)
+      const approvals = projectConfigApprovalsPath(projectsDir, projectIdOf(project.path))
+      const { path, applied } = projectTierStanding(project.path, 'shared', approvals)
+      const parsed = parseEnsoConfig(applied)
       const hosts = parsed.kind === 'ok' ? (parsed.config.webFetch?.allowedHosts ?? []) : []
       if (hosts.length > 0) found.push({ projectId: project.projectId, title: project.title, path, hosts })
     }

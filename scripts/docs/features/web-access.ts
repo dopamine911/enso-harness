@@ -54,7 +54,7 @@ export const WEB_ACCESS: FeatureSpec = {
       ENSO_CONFIG_EXAMPLE,
       '```',
     ].join('\n'),
-    'A project you trust can add hosts for its own threads in its `.enso/config.json`; Settings lists them under the project, read only. Either way, the list is read when a session starts, so restart the thread after you change it. Settings names the threads still running on the old list.',
+    'A project you trust can add hosts for its own threads in its `.enso/config.json`, once you approve the file on the project page; Settings lists the approved hosts under the project, read only. Either way, the list is read when a session starts, so restart the thread after you change it. Settings names the threads still running on the old list.',
     'For the Tavily fallback, put `TAVILY_API_KEY` in `ENSO_HOME/secrets.env`. It is read on every call, so no restart is needed.',
   ],
   shots: [

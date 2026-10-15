@@ -9,6 +9,7 @@ import {
   readFileSync,
   realpathSync,
   rmdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -240,6 +241,7 @@ async function startWith(
     userConfigPath,
     hostCheck,
     ensoHome,
+    projectsDir,
   }: {
     /** The user's config Settings › Web tools edits (#924); absent, those routes refuse. */
     readonly userConfigPath?: string
@@ -256,6 +258,8 @@ async function startWith(
     readonly threadSettings?: ProjectThreadSettingsSource
     /** `ENSO_HOME`, for the settings files' routes (#933); absent, they refuse. */
     readonly ensoHome?: string
+    /** The project folders (#552), where each project's approved config tiers are kept (#753); absent, none. */
+    readonly projectsDir?: string
   } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
@@ -271,6 +275,7 @@ async function startWith(
     ...(userConfigPath === undefined ? {} : { userConfigPath }),
     ...(hostCheck === undefined ? {} : { hostCheck }),
     ...(ensoHome === undefined ? {} : { ensoHome }),
+    ...(projectsDir === undefined ? {} : { projectsDir }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir,
     permissionRulesPath,
@@ -1160,7 +1165,9 @@ async function allowlistOf(response: Response): Promise<WebFetchAllowlist> {
   return answered
 }
 
-async function allowlistServer(userText: string): Promise<{ url: string; userPath: string; project: string }> {
+async function allowlistServer(
+  userText: string,
+): Promise<{ url: string; userPath: string; project: string; approvals: string }> {
   const userPath = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-home-')), 'config.json')
   writeFileSync(userPath, userText)
   const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-allowlist-project-')))
@@ -1169,10 +1176,21 @@ async function allowlistServer(userText: string): Promise<{ url: string; userPat
     join(project, '.enso', 'config.json'),
     JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example'] } }),
   )
+  // The project's file as the operator approved it (#753): only an approved version applies.
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-allowlist-projects-'))
+  const approvals = projectConfigApprovalsPath(projectsDir, projectIdOf(project))
+  for (const reviewed of reviewProjectConfig(project, approvals)) {
+    approveProjectTier(project, approvals, { tier: reviewed.tier, sha256: reviewed.current })
+  }
   const agentDir = mkdtempSync(join(tmpdir(), 'enso-allowlist-agent-'))
   writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: true }))
-  const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, userConfigPath: userPath })
-  return { url, userPath, project }
+  const { url } = await startWith(settlesAtOnce, {}, undefined, {
+    launch: project,
+    agentDir,
+    userConfigPath: userPath,
+    projectsDir,
+  })
+  return { url, userPath, project, approvals }
 }
 
 test('the allowlist round trip: added and removed from the page, the file holding exactly that change (#924)', async () => {
@@ -1197,13 +1215,19 @@ test('the allowlist round trip: added and removed from the page, the file holdin
   expect(JSON.parse(readFileSync(userPath, 'utf8'))).toEqual(JSON.parse(userText))
 })
 
-test('a trusted project’s own hosts are listed under it, apart from the user’s (#924)', async () => {
-  const { url, userPath, project } = await allowlistServer('{}')
+test('a trusted project’s own hosts are listed under it, apart from the user’s, as approved (#924, #753)', async () => {
+  const { url, userPath, project, approvals } = await allowlistServer('{}')
+  const sharedPath = join(project, '.enso', 'config.json')
   const read = await allowlistOf(await fetch(`${url}/api/settings/web-fetch`))
   expect(read).toMatchObject({ path: userPath, hosts: [] })
-  expect(read.projects).toEqual([
-    expect.objectContaining({ path: join(project, '.enso', 'config.json'), hosts: ['docs.project.example'] }),
-  ])
+  expect(read.projects).toEqual([expect.objectContaining({ path: sharedPath, hosts: ['docs.project.example'] })])
+  // A host added to the file and not approved does not apply: the approved version is still listed.
+  writeFileSync(sharedPath, JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example', 'evil.example'] } }))
+  const changed = await allowlistOf(await fetch(`${url}/api/settings/web-fetch`))
+  expect(changed.projects).toEqual([expect.objectContaining({ hosts: ['docs.project.example'] })])
+  // With no approval at all, nothing of the project's applies.
+  rmSync(approvals)
+  expect((await allowlistOf(await fetch(`${url}/api/settings/web-fetch`))).projects).toEqual([])
 })
 
 /** A lookup that answers every host with one public address — the check's DNS, without the network. */
