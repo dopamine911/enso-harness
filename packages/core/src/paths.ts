@@ -112,8 +112,8 @@ function fileBehindLinks(path: string): string {
  * Replace the file at `path` with `text` (or bytes — a file put back as it was, #945) in one step:
  * written beside the file it names, then renamed over it — a reader sees the old file or the new
  * one, never half of one. Settings' writes go through here: the permission policy and Enso's rule
- * record beside it (#474, #945), `config.json` (#924, #933), `secrets.env` (#933) and the project
- * config approvals (#753).
+ * record beside it (#474, #945), `config.json` (#924, #933, #934), `secrets.env` (#933) and the
+ * project config approvals (#753).
  *
  * ⚠ AT THE FILE THE PATH NAMES, NOT THE LINK: a config file kept as a symlink (into a dotfiles repo,
  * say) stays a link, and the file behind it changes — or is made, when the link points at a file
