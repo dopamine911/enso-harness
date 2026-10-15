@@ -1,22 +1,34 @@
 import { expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensoAgentDir, projectConfigPath } from '@enso/core/paths'
+import { incidentPolicyOf } from '@enso/core'
+import {
+  ensoAgentDir,
+  ensoProjectsDir,
+  projectConfigApprovalsPath,
+  projectConfigPath,
+  projectIdOfCwd,
+  projectTreesDir,
+} from '@enso/core/paths'
+import { approveProjectTier, reviewProjectConfig } from '@enso/core/project-config'
 import type { ProjectTrustRuntime, ProjectTrustUpdate } from '../project-trust.ts'
 import {
   type SessionConfigContext,
   type SessionEnsoConfig,
   sessionEnsoConfig,
+  sessionIncidentPolicy,
   userJudgeConfig,
 } from '../session-config.ts'
 
 /**
- * #421: the session's config — the user's, and over it a trusted project's `.enso/config.json`.
- * Each case is a real ENSO_HOME and a real project directory. Faked: the UI, which records the
- * question and the notices a person would see, and pi's trust store and settings (#509), which an
- * extension injects — `harness/core` may not import pi (#145). The fake records which agent dir it
- * was opened on; pi's real classes through the real wiring are `extensions/__tests__/project-trust.test.ts`'s.
+ * #421: the session's config — the user's, and over it a trusted project's `.enso/config.json`, as
+ * the operator approved it (#753). Each case is a real ENSO_HOME and a real project directory.
+ * Faked: the UI, which records the question and the notices a person would see, and pi's trust
+ * store and settings (#509), which an extension injects — `harness/core` may not import pi (#145).
+ * The fake records which agent dir it was opened on; pi's real classes through the real wiring are
+ * `extensions/__tests__/project-trust.test.ts`'s.
  */
 
 interface Fixture {
@@ -62,8 +74,25 @@ function fakeProjectTrust(
   }
 }
 
+/** Where `cwd`'s project keeps its approvals under `home` (#753): the checkout's, for a tree too. */
+const approvalsOf = (home: string, cwd: string): string =>
+  projectConfigApprovalsPath(ensoProjectsDir(home), projectIdOfCwd(ensoProjectsDir(home), cwd))
+
+/** Approve the project's shared file as the page would: its hash as the review answers it. */
+function approveShared(home: string, cwd: string): void {
+  const approvals = approvalsOf(home, cwd)
+  const shared = reviewProjectConfig(cwd, approvals).find((tier) => tier.tier === 'shared')
+  approveProjectTier(cwd, approvals, { tier: 'shared', sha256: shared?.current ?? null })
+}
+
 function fixture(
-  options: { user?: object; project?: object; defaultProjectTrust?: 'ask' | 'always' | 'never' } = {},
+  options: {
+    user?: object
+    project?: object
+    /** Whether the project's file is approved as written; it is, unless said (#753). */
+    approved?: boolean
+    defaultProjectTrust?: 'ask' | 'always' | 'never'
+  } = {},
 ): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'enso-session-config-'))
   const home = join(root, 'home', '.enso')
@@ -74,6 +103,7 @@ function fixture(
   if (options.project !== undefined) {
     mkdirSync(join(cwd, '.enso'))
     writeFileSync(projectConfigPath(cwd), JSON.stringify(options.project))
+    if (options.approved !== false) approveShared(home, cwd)
   }
   const asked: string[] = []
   const notices: string[] = []
@@ -218,11 +248,86 @@ test("a trusted project's threads is read without a warning (#754)", async () =>
   expect(f.notices.join()).not.toContain('threads')
 })
 
-test("a trusted project's unreadable config fails CLOSED, naming the project's file", async () => {
-  const f = fixture({ user: USER, project: { webFetch: { allowedHost: ['typo'] } } })
+// A file Enso cannot read is never approved (#753); an APPROVED one this Enso cannot read — approved
+// by a newer one that knew the key — still fails closed.
+test("a trusted project's approved config that does not read fails CLOSED, naming the project's file", async () => {
+  const typo = JSON.stringify({ webFetch: { allowedHost: ['typo'] } })
+  const f = fixture({ user: USER, project: { webFetch: { allowedHost: ['typo'] } }, approved: false })
+  const approvals = approvalsOf(f.home, f.cwd)
+  mkdirSync(join(approvals, '..'), { recursive: true })
+  const sha256 = createHash('sha256').update(typo).digest('hex')
+  writeFileSync(approvals, JSON.stringify({ shared: { sha256, text: typo } }))
   const resolved = await sessionEnsoConfig({}, f.context('Trust'))
   expect(resolved.result.kind).toBe('unreadable')
   expect(resolved.path).toBe(projectConfigPath(f.cwd))
+})
+
+// #753's first acceptance item, for a session: an edit made after approval, by any route, is not
+// applied — the version approved is — and the thread says so.
+test('⚠ a project config changed after its approval is not applied: the approved one is, and the session is told (#753)', async () => {
+  const f = fixture({ user: USER, project: PROJECT })
+  writeFileSync(projectConfigPath(f.cwd), JSON.stringify({ webFetch: { allowedHosts: ['exfil.example'] } }))
+  const resolved = await sessionEnsoConfig({}, f.context('Trust'))
+  expect(hostsOf(resolved)).toEqual(['docs.user.example', 'docs.project.example'])
+  expect(f.notices).toEqual([
+    expect.stringContaining(
+      `${projectConfigPath(f.cwd)} has changed since you approved it, so the version you approved is in use`,
+    ),
+  ])
+})
+
+test('⚠ a project config never approved applies nothing, trusted or not, and the session is told (#753)', async () => {
+  const f = fixture({ user: USER, project: PROJECT, approved: false })
+  const resolved = await sessionEnsoConfig({}, f.context('Trust'))
+  expect(hostsOf(resolved)).toEqual(['docs.user.example'])
+  expect(f.notices.join()).toContain('has not been approved, so nothing in it applies')
+})
+
+// Gap 2 of #753: a thread's tree holds its own copy of the project's file, the one its session
+// reads. The copy is held to the PROJECT's approval: an agent editing it changes nothing.
+test("⚠ in a thread's tree, the tree's copy is held to its project's approval (#753)", async () => {
+  const f = fixture({ user: USER, project: PROJECT })
+  const projectsDir = ensoProjectsDir(f.home)
+  const tree = join(projectTreesDir(projectsDir, projectIdOfCwd(projectsDir, f.cwd)), 'thread-1')
+  mkdirSync(join(tree, '.enso'), { recursive: true })
+  writeFileSync(projectConfigPath(tree), JSON.stringify({ webFetch: { allowedHosts: ['exfil.example'] } }))
+  f.saved.set(tree, true)
+  const resolved = await sessionEnsoConfig({}, { ...f.context(), cwd: tree })
+  expect(hostsOf(resolved)).toEqual(['docs.user.example', 'docs.project.example'])
+  expect(f.notices.join()).toContain('has changed since you approved it')
+})
+
+// #753's fourth acceptance item: a project that loosens a security key is ignored with a notice;
+// one that tightens it applies — in the guard, which reads it through `sessionIncidentPolicy`.
+test('⚠ a project may only tighten the incident policy: loosening is ignored and said, tightening applies (#753)', async () => {
+  const user = { ...USER, security: { incidents: { halt: true, incidentAtSignals: 5 } } }
+  const loosening = fixture({
+    user,
+    project: { ...PROJECT, security: { incidents: { halt: false, incidentAtSignals: 50 }, judge: { backend: 'jev' } } },
+  })
+  loosening.saved.set(loosening.cwd, true)
+  await sessionEnsoConfig({}, loosening.context())
+  expect(loosening.notices).toEqual([
+    expect.stringContaining('sets security.judge, which only'),
+    expect.stringContaining('sets security.incidents.halt looser than'),
+    expect.stringContaining('sets security.incidents.incidentAtSignals looser than'),
+  ])
+  const trusted = { cwd: loosening.cwd, trusted: true }
+  expect(sessionIncidentPolicy(loosening.home, trusted).policy).toEqual(
+    incidentPolicyOf({ incidents: { halt: true, incidentAtSignals: 5 } }),
+  )
+
+  const tightening = fixture({ user: USER, project: { security: { incidents: { halt: true, incidentAtSignals: 2 } } } })
+  tightening.saved.set(tightening.cwd, true)
+  await sessionEnsoConfig({}, tightening.context())
+  expect(tightening.notices).toEqual([])
+  const tightened = incidentPolicyOf({ incidents: { halt: true, incidentAtSignals: 2 } })
+  expect(sessionIncidentPolicy(tightening.home, { cwd: tightening.cwd, trusted: true }).policy).toEqual(tightened)
+  // Untrusted, or before a start names the project: the user's alone.
+  expect(sessionIncidentPolicy(tightening.home, { cwd: tightening.cwd, trusted: false }).policy).toEqual(
+    incidentPolicyOf(undefined),
+  )
+  expect(sessionIncidentPolicy(tightening.home, undefined).policy).toEqual(incidentPolicyOf(undefined))
 })
 
 test('⚠ one question per session: two tools resolving for the same session share the answer', async () => {

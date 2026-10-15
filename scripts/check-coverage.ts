@@ -94,8 +94,9 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  * Re-measured for #810 (the server's route groups, on top of #801's host modules — 272 owned
  * sources): the 80% bound asks for 217, and ~10% under gives 245.
  *
- * Re-measured for #904 (providers, roles and the models routes, merged with #933's security
- * settings — 313 owned sources): the 80% bound asks for 250, and ~10% under gives 282.
+ * Re-measured 2026-10-15 (#904's providers, roles and models routes merged with #553's prompt runs
+ * and Diff Viewer, #970's permission rules, #976's tool views and #977's config approvals — 313
+ * owned sources): the 80% bound asks for 250, and ~10% under gives 282.
  */
 export const MINIMUM_REPORTED_FILES = 282
 

@@ -92,8 +92,14 @@ const { listening } = startEnsoServer({
   promptsDir: ensoPromptsDir(home),
   projectsDir: ensoProjectsDir(home),
   // Each new thread in its own tree (#551), prepared by its project's settings (#754): the user's
-  // `threads` is their lowest tier, a trusted project's own files override it.
-  threadSettings: { user: config.config, userPath: configPath, canonical: (key) => canonicalConfigPath(key) },
+  // `threads` is their lowest tier, a trusted project's own files override it as approved (#753),
+  // the approvals kept in its project folder.
+  threadSettings: {
+    user: config.config,
+    userPath: configPath,
+    canonical: (key) => canonicalConfigPath(key),
+    projectsDir: ensoProjectsDir(home),
+  },
   harnessPackageDir: harnessDir,
   agentDir,
   permissionRulesPath: ensoPermissionRulesPath(home),

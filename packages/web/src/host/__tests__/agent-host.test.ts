@@ -74,6 +74,7 @@ import {
   ensoProjectsDir,
   findRepoRoot,
   harnessPackageDir,
+  projectConfigApprovalsPath,
   projectIdOf,
   projectSessionsDir,
   projectSnapshotsDir,
@@ -82,7 +83,7 @@ import {
   treeProjectId,
 } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
-import { writeProjectThreadSettings } from '@enso/core/project-config'
+import { approveProjectTier, reviewProjectConfig, writeProjectThreadSettings } from '@enso/core/project-config'
 import { snapshotPaths } from '@enso/core/snapshot-store'
 import { flowTrace } from '@enso/test-support/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
@@ -2345,7 +2346,12 @@ function treeHost(
     permissionRulesPath,
     harnessPackageDir: harnessDir,
     projectsDir,
-    threadSettings: { user, userPath: join(tmpdir(), 'enso-home', 'config.json'), canonical: (key) => key },
+    threadSettings: {
+      user,
+      userPath: join(tmpdir(), 'enso-home', 'config.json'),
+      canonical: (key) => key,
+      projectsDir,
+    },
     extensionFactories,
   })
   return { host, projectsDir }
@@ -2391,10 +2397,22 @@ test("⚠ two threads on one project each get their own worktree at the checkout
 
 // ── #754: a new tree prepared by the project's settings ───────────────────────────────────────
 
-/** `project`'s shared tier (`.enso/config.json`) setting `threads`. */
-function sharedThreads(project: string, threads: EnsoConfig['threads']): void {
+/** Where `project`'s approved tiers are kept (#753), in the run's ENSO_HOME, as `treeHost` reads them by default. */
+function approvalsOf(project: string): string {
+  return projectConfigApprovalsPath(ensoProjectsDir(join(tmpdir(), 'enso-home')), projectIdOf(realpathOrSelf(project)))
+}
+
+/** Approve `project`'s shared tier as its page would (#753): the file's hash as the review answers it. */
+function approveShared(project: string): void {
+  const shared = reviewProjectConfig(project, approvalsOf(project)).find((tier) => tier.tier === 'shared')
+  approveProjectTier(project, approvalsOf(project), { tier: 'shared', sha256: shared?.current ?? null })
+}
+
+/** `project`'s shared tier (`.enso/config.json`) setting `threads`, approved as written unless said (#753). */
+function sharedThreads(project: string, threads: EnsoConfig['threads'], approved = true): void {
   mkdirSync(join(project, '.enso'), { recursive: true })
   writeFileSync(join(project, '.enso', 'config.json'), JSON.stringify({ threads }))
+  if (approved) approveShared(project)
 }
 
 /** The custom entries of a thread's branch, by type, in order. */
@@ -2481,6 +2499,32 @@ test("⚠ an untrusted project's setup is not run, and nothing is recorded (#754
   expect((await host.threadTree(threadId))?.setup).toBeUndefined()
 })
 
+// #753's first and third acceptance items through the real host: a shared tier changed after its
+// approval — here written as a shell command or a pull would write it — runs none of its new
+// commands in the next tree; the approved ones run, and the thread's setup record says the file
+// was not the version approved.
+test('⚠ a setup changed after its approval never runs: the next tree runs the approved setup, and its record says so (#753)', async () => {
+  const project = dirtyCheckout()
+  sharedThreads(project, { setup: ['echo approved > setup.txt'] })
+  sharedThreads(project, { setup: ['echo unapproved > setup.txt; touch pwned.txt'] }, false)
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'first')
+  const tree = hosted.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(readFileSync(join(tree, 'setup.txt'), 'utf8')).toBe('approved\n')
+  expect(existsSync(join(tree, 'pwned.txt'))).toBe(false)
+  expect((await host.threadTree(threadId))?.setup).toMatchObject({
+    ok: true,
+    pending: [{ tier: 'shared', path: join(project, '.enso', 'config.json'), state: 'changed' }],
+  })
+})
+
 // #873, the acceptance's first item: trust set from the page reaches the NEXT tree — its setup
 // runs — and a revoke reaches the next one after: no setup, and no question, since a revoke is saved
 // as "not trusted".
@@ -2539,7 +2583,11 @@ test('⚠ after a revoke, an idle open thread retired as the route retires it is
 // and leaves no worktree or branch in the repository.
 test("⚠ a trusted project's tier saying trees off wins over the user's worktree: the thread runs in the checkout (#754)", async () => {
   const project = dirtyCheckout()
-  expect(writeProjectThreadSettings(project, { tier: 'local', threads: { tree: 'off' } })).toEqual({ kind: 'written' })
+  expect(
+    writeProjectThreadSettings(project, { tier: 'local', threads: { tree: 'off' } }, approvalsOf(project)),
+  ).toEqual({
+    kind: 'written',
+  })
   const core = createFauxCore()
   core.setResponses([faux.fauxAssistantMessage('ran')])
   const { host } = treeHost(project, [fauxModelExtension(core)], 'worktree')
@@ -3855,9 +3903,14 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
 // never from what it says.
 test('⚠ a vendored extension’s own startup notice names it: pi-multi-account says pi-multi-account (#387)', async () => {
   const hosted = await hostedSession()
+  // Found by its words, not its sender (that is the claim): other start notices may come first, such
+  // as the checkout's own `.enso/config.json` waiting for approval (#753).
   const notice = await untilObservation(
     hosted,
-    (observation) => observation.kind === 'extension-ui-request' && observation.method === 'notify',
+    (observation) =>
+      observation.kind === 'extension-ui-request' &&
+      observation.method === 'notify' &&
+      /^pi-multi-account v\S+ loaded/.test(String(observation.message)),
   )
   expect(notice).toMatchObject({ kind: 'extension-ui-request', method: 'notify', sender: 'pi-multi-account' })
 })

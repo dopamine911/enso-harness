@@ -51,6 +51,7 @@ import type { HostProviderFacts, HostProviders } from '../../host/provider-setti
 import { decideSystemPrompt } from '../../host/system-prompt.ts'
 import type { ThreadDeleteOutcome } from '../../host/thread-delete.ts'
 import type { ThreadRenameOutcome, ThreadRestoreOutcome } from '../../host/thread-log-edits.ts'
+import { recordedPromptRunsOf, withStoreTrees } from '../../host/thread-prompt-runs.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -713,6 +714,24 @@ export function createFakeAgentHost(
     threadTree: () => Promise.resolve(undefined),
     readCopyChanges: () => Promise.reject(new Error('the fake host holds no snapshot store')),
     readCopyFileTexts: () => Promise.reject(new Error('the fake host holds no snapshot store')),
+    // A served stored thread's prompt runs off its transcript, as the real host reads them; the fake
+    // holds no snapshot store, so every taken snapshot is unavailable. Unserved or unknown: none (#553).
+    threadPromptRuns: (threadId: string) => {
+      const storedThread = served(threadId)
+      return Promise.resolve(
+        storedThread === undefined
+          ? undefined
+          : withStoreTrees(
+              recordedPromptRunsOf(threadId, storedThread.transcript, storedThread.parentThreadId),
+              new Map(),
+              'the fake host holds no snapshot store',
+            ),
+      )
+    },
+    readPromptRunChanges: (threadId: string) =>
+      Promise.resolve({ kind: 'no-thread', reason: `the fake host holds no snapshot store for ${threadId}` }),
+    readPromptRunFileTexts: (threadId: string) =>
+      Promise.resolve({ kind: 'no-thread', reason: `the fake host holds no snapshot store for ${threadId}` }),
     readStoredThread: (threadId: string) => {
       const storedThread = served(threadId)
       return Promise.resolve(

@@ -1,4 +1,4 @@
-import type { EnsoTreeSetupOutcome, EnsoTreeSetupStep } from '@enso/core'
+import type { EnsoProjectTierPending, EnsoTreeSetupOutcome, EnsoTreeSetupStep } from '@enso/core'
 import { ChevronRightIcon, TriangleAlertIcon } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible.tsx'
 import { tierWords } from './project-worktrees.tsx'
@@ -10,8 +10,16 @@ import { tierWords } from './project-worktrees.tsx'
  * ⚠ A FAILURE IS SAID WITHOUT EXPANDING ANYTHING. The thread opens even when setup failed, and a
  * tree with no `node_modules` fails later, far from the cause (a pre-commit hook that cannot run).
  * So the failing command, its exit and the tier whose list it came from — the file to fix — are on
- * the panel's face; only the output waits behind its step.
+ * the panel's face; only the output waits behind its step. So is a project file that was not the
+ * version approved (#753): the tree was made from the version approved, or without the file.
  */
+
+/** What a tree was made from, for a project file that is not the version approved (#753). */
+const PENDING_WORDS: Readonly<Record<EnsoProjectTierPending['state'], string>> = {
+  changed: 'has changed since you approved it, so this tree was made from the version you approved',
+  removed: 'is gone, so this tree was made from the version you approved',
+  unapproved: 'is not approved, so nothing in it was used',
+}
 
 /** A command's end in words: its exit code, or that it never finished (its time ran out, or it could not start). */
 function exitWords(step: EnsoTreeSetupStep): string {
@@ -73,6 +81,15 @@ export function TreeSetupReport({ setup }: { setup: EnsoTreeSetupOutcome }): Rea
   return (
     <div className="grid gap-1.5">
       <SetupSummary setup={setup} />
+      {(setup.pending ?? []).map((pending) => (
+        <p key={pending.path} role="note" className="flex items-start gap-1.5 text-chart-3">
+          <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <code className="font-mono text-xs break-all">{pending.path}</code> {PENDING_WORDS[pending.state]}. Review
+            it on the project page.
+          </span>
+        </p>
+      ))}
       {setup.copied.length === 0 ? null : (
         <p className="text-muted-foreground">
           Copied in: <code className="font-mono text-xs">{setup.copied.join(', ')}</code>
