@@ -2,6 +2,7 @@ import { afterAll, afterEach, expect, test } from 'bun:test'
 import {
   decisionAction,
   effectiveRows,
+  ENSO_EMPTY_RULE_RECORD,
   ENSO_PERMISSION_MODES,
   EnsoPermissionCheckRequest,
   type EnsoPermissionMap,
@@ -9,6 +10,7 @@ import {
   type EnsoPermissionPolicyRead,
   type EnsoPermissionPolicyWrite,
   type EnsoPermissionVerdict,
+  type EnsoRuleRecord,
 } from '@enso/core'
 import { act, useState } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
@@ -68,13 +70,19 @@ const FILE = {
 
 const ENSO_DEFAULT = { authorizerChain: ['enso-auto'], permission: { '*': 'ask', bash: { '**': 'ask' } } }
 
-const policyOf = (file: Record<string, unknown>, etag: string): EnsoPermissionPolicyRead => ({
+const policyOf = (
+  file: Record<string, unknown>,
+  etag: string,
+  record: EnsoRuleRecord = ENSO_EMPTY_RULE_RECORD,
+): EnsoPermissionPolicyRead => ({
   kind: 'ok',
   path: '/home/person/.enso/permissions.json',
   etag,
   file,
   reviewLogDirectory: '/home/person/.enso/logs',
   ensoDefault: ENSO_DEFAULT,
+  record,
+  recordPath: '/home/person/.enso/permissions.disabled.json',
 })
 
 interface Sent {
@@ -147,14 +155,22 @@ function verdictFor(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict 
   return { mode: 'default', guard, state: 'ask', matchedPattern: '**', origin: 'global' }
 }
 
-/** The scripted server: the file as read, a write read back under a new version, a reset, a verdict. */
-function answer(request: string, body: unknown, file: Record<string, unknown>, writes: number): Response {
+/**
+ * The scripted server: the file and Enso's record as read, a write read back under a new version —
+ * its record too, or the one read when it sent none — a reset, a verdict.
+ */
+function answer(
+  request: string,
+  body: unknown,
+  read: { readonly file: Record<string, unknown>; readonly record: EnsoRuleRecord },
+  writes: number,
+): Response {
   if (request === 'GET /api/permissions') {
-    return Response.json(policyOf(file, '"v1"'), { headers: { ETag: '"v1"' } })
+    return Response.json(policyOf(read.file, '"v1"', read.record), { headers: { ETag: '"v1"' } })
   }
   if (request === 'PUT /api/permissions') {
-    const written = (body as EnsoPermissionPolicyWrite).file
-    return Response.json(policyOf(written, `"v${writes + 1}"`))
+    const written = body as EnsoPermissionPolicyWrite
+    return Response.json(policyOf(written.file, `"v${writes + 1}"`, written.record ?? read.record))
   }
   if (request === 'POST /api/permissions/reset') {
     return Response.json({ backup: '/home/person/.enso/permissions.json.bak', policy: policyOf(ENSO_DEFAULT, '"v9"') })
@@ -220,7 +236,7 @@ function SettingsOnPage({
 }
 
 async function mountSettings(
-  options: { threadId?: string; file?: Record<string, unknown>; override?: Override } = {},
+  options: { threadId?: string; file?: Record<string, unknown>; record?: EnsoRuleRecord; override?: Override } = {},
 ): Promise<Mounted> {
   const sent: Sent[] = []
   const container = document.createElement('div')
@@ -234,7 +250,8 @@ async function mountSettings(
     const headers = new Headers(init?.headers)
     sent.push({ request, ifMatch: headers.get('If-Match'), ifNoneMatch: headers.get('If-None-Match'), body })
     const writes = sent.filter((entry) => entry.request === 'PUT /api/permissions').length
-    return Promise.resolve(options.override?.(request) ?? answer(request, body, options.file ?? FILE, writes))
+    const read = { file: options.file ?? FILE, record: options.record ?? ENSO_EMPTY_RULE_RECORD }
+    return Promise.resolve(options.override?.(request) ?? answer(request, body, read, writes))
   }) as typeof fetch
   const control: { show: (page: PageUrl | undefined) => void } = { show: () => undefined }
   await act(async () => {
@@ -759,19 +776,198 @@ test('a pattern renamed in place keeps its place; a rename onto a pattern the su
   ])
 })
 
-test('turning a rule group on adds only the rules not already in force, after **, and it stays on', async () => {
-  const file = { ...FILE, permission: { ...FILE.permission, bash: { ...FILE.permission.bash, 'git push *': 'ask' } } }
-  const mounted = await mountSettings({ file })
-  const toggle = (): HTMLButtonElement =>
-    find<HTMLButtonElement>(mounted, '[aria-label="rule group Remote writes"] [role="switch"]')
-  expect(toggle().getAttribute('aria-checked')).toBe('false')
-  await act(async () => toggle().click())
+/** The switch of a rule's row (#945), on while the rule is in force. */
+const ruleSwitch = (mounted: Mounted, rule: string): HTMLButtonElement =>
+  find<HTMLButtonElement>(mounted, `[role="switch"][aria-label="in force: ${rule}"]`)
+
+/** The switch of a rule group's card. */
+const groupSwitch = (mounted: Mounted, title: string): HTMLButtonElement =>
+  find<HTMLButtonElement>(mounted, `[aria-label="rule group ${title}"] [role="switch"]`)
+
+async function flip(button: HTMLButtonElement): Promise<void> {
+  await act(async () => button.click())
   await settle()
-  expect(toggle().getAttribute('aria-checked')).toBe('true')
-  expect(toggle().disabled).toBe(true)
+}
+
+/** The rows on one surface, as `shownRows` says them. */
+const surfaceRows = (mounted: Mounted, surface: string): string[] =>
+  shownRows(mounted).filter((row) => row.startsWith(`${surface} `))
+
+/** The record the last save sent; none when it sent none. */
+function lastRecord(mounted: Mounted): EnsoRuleRecord | undefined {
+  const write = writes(mounted).at(-1)
+  if (write === undefined) throw new Error('nothing was saved')
+  return (write.body as EnsoPermissionPolicyWrite).record
+}
+
+// #945: a rule switched off leaves `permission` — the engine reads every rule there — for Enso's
+// record beside the file, with the key it came after; switched on, it goes back to that place.
+test('⚠ a rule switched off leaves the file for Enso’s record, greyed in place and counted; switched on, it goes back where it was (#945)', async () => {
+  const mounted = await mountSettings()
+  await flip(ruleSwitch(mounted, 'bash npm run *'))
+  expect(surfaceRows(mounted, 'bash')).toEqual([
+    'bash ** → ask (catch-all)',
+    'bash git status → allow (yours)',
+    'bash npm run * → allow (disabled)',
+    'bash rm -rf * → deny (yours)',
+  ])
+  // Not numbered: the engine does not read it, and the numbers run on past it.
+  const numberOf = (rule: string): string | null | undefined =>
+    find(mounted, `[aria-label="${rule}"]`).querySelector('td')?.textContent
+  expect([numberOf('bash git status'), numberOf('bash npm run *'), numberOf('bash rm -rf *')]).toEqual(['5', '–', '6'])
+  expect(find(mounted, '[aria-label="rules switched off"]').textContent).toContain('1 rule disabled, not in force')
   await click(mounted, 'Save')
   await eventually(() => expect(writes(mounted)).toHaveLength(1))
-  expect(Object.keys(writtenPermission(mounted, 0).bash as object)).toEqual([
+  expect(Object.keys(writtenPermission(mounted, 0).bash as object)).toEqual(['**', 'git status', 'rm -rf *'])
+  const record: EnsoRuleRecord = {
+    disabled: [{ surface: 'bash', pattern: 'npm run *', decision: 'allow', after: 'git status' }],
+    groups: {},
+  }
+  expect(lastRecord(mounted)).toEqual(record)
+  const saved = lastWritten(mounted)
+  await mounted.unmount()
+
+  // Read again — the file and the record as saved — it is greyed in the same place, and still counted.
+  const reread = await mountSettings({ file: saved, record })
+  expect(surfaceRows(reread, 'bash')[2]).toBe('bash npm run * → allow (disabled)')
+  expect(find(reread, '[aria-label="rules switched off"]').textContent).toContain('1 rule disabled')
+  await flip(ruleSwitch(reread, 'bash npm run *'))
+  await click(reread, 'Save')
+  await eventually(() => expect(writes(reread)).toHaveLength(1))
+  expect(Object.keys(writtenPermission(reread, 0).bash as object)).toEqual([
+    '**',
+    'git status',
+    'npm run *',
+    'rm -rf *',
+  ])
+  expect(lastRecord(reread)).toEqual({ disabled: [], groups: {} })
+  expect(reread.section().querySelector('[aria-label="rules switched off"]')).toBeNull()
+})
+
+// PR #970 review: the only rule on a surface switched off keeps that surface in place, as `{}`, so
+// switching it back on gives the file back byte for byte. Key order does not change the engine's
+// verdict (pinned in agent-host.test.ts) — the place is for the byte-for-byte round trip.
+test('⚠ the only rule on a surface switched off keeps the surface in its place, empty; switched on, the file is as it was (#945)', async () => {
+  const file = {
+    authorizerChain: ['enso-auto'],
+    permission: { webfetch: { 'docs.example.com/*': 'allow' }, '*': 'deny', bash: { '**': 'ask' } },
+  }
+  const off = await mountSettings({ file })
+  await flip(ruleSwitch(off, 'webfetch docs.example.com/*'))
+  await click(off, 'Save')
+  await eventually(() => expect(writes(off)).toHaveLength(1))
+  expect(writtenPermission(off, 0)).toEqual({ webfetch: {}, '*': 'deny', bash: { '**': 'ask' } })
+  expect(Object.keys(writtenPermission(off, 0))).toEqual(['webfetch', '*', 'bash'])
+  const record = lastRecord(off)
+  if (record === undefined) throw new Error('the save sent no record')
+  const saved = lastWritten(off)
+  await off.unmount()
+
+  const on = await mountSettings({ file: saved, record })
+  await flip(ruleSwitch(on, 'webfetch docs.example.com/*'))
+  await click(on, 'Save')
+  await eventually(() => expect(writes(on)).toHaveLength(1))
+  expect(JSON.stringify(lastWritten(on))).toBe(JSON.stringify(file))
+})
+
+test('a whole-surface rule, and two neighbours switched off one after the other, go back where they were (#945)', async () => {
+  const off = await mountSettings()
+  await flip(ruleSwitch(off, 'read *'))
+  await flip(ruleSwitch(off, 'bash git status'))
+  await flip(ruleSwitch(off, 'bash npm run *'))
+  await click(off, 'Save')
+  await eventually(() => expect(writes(off)).toHaveLength(1))
+  expect(Object.keys(writtenPermission(off, 0))).toEqual(['*', 'edit', 'bash'])
+  expect(Object.keys(writtenPermission(off, 0).bash as object)).toEqual(['**', 'rm -rf *'])
+  const record = lastRecord(off)
+  if (record === undefined) throw new Error('the save sent no record')
+  expect(record.disabled).toEqual([
+    { surface: 'read', pattern: '*', decision: 'allow', after: '*', whole: true },
+    { surface: 'bash', pattern: 'git status', decision: 'allow', after: '**' },
+    { surface: 'bash', pattern: 'npm run *', decision: 'allow', after: 'git status' },
+  ])
+  const saved = lastWritten(off)
+  await off.unmount()
+
+  // On in the other order: `npm run *` first, its neighbour still off, then the rest.
+  const on = await mountSettings({ file: saved, record })
+  await flip(ruleSwitch(on, 'bash npm run *'))
+  await flip(ruleSwitch(on, 'bash git status'))
+  await flip(ruleSwitch(on, 'read *'))
+  await click(on, 'Save')
+  await eventually(() => expect(writes(on)).toHaveLength(1))
+  expect(JSON.stringify(lastWritten(on))).toBe(JSON.stringify(FILE))
+})
+
+test('switching a rule off is undone by Discard, as any edit is; Enso’s ** has no switch (#945)', async () => {
+  const mounted = await mountSettings()
+  expect(mounted.section().querySelector('[role="switch"][aria-label="in force: bash **"]')).toBeNull()
+  await flip(ruleSwitch(mounted, 'bash git status'))
+  expect(ruleSwitch(mounted, 'bash git status').getAttribute('aria-checked')).toBe('false')
+  await click(mounted, 'Discard')
+  expect(ruleSwitch(mounted, 'bash git status').getAttribute('aria-checked')).toBe('true')
+  expect(surfaceRows(mounted, 'bash')[1]).toBe('bash git status → allow (yours)')
+  expect(buttonNamed(mounted, 'Save').disabled).toBe(true)
+})
+
+// #945: the file is edited by hand between the switches. A rule whose neighbour has gone goes last on
+// its surface, and says so; a rule written back by hand is the one rule, in force — never a second copy.
+test('⚠ a hand edit between switches: a gone neighbour sends the rule last, said on its row; a rule written back is not doubled (#945)', async () => {
+  const record: EnsoRuleRecord = {
+    disabled: [
+      { surface: 'bash', pattern: 'npm test', decision: 'allow', after: 'npm ci' },
+      { surface: 'bash', pattern: 'git status', decision: 'deny', after: '**' },
+    ],
+    groups: {},
+  }
+  const mounted = await mountSettings({ record })
+  expect(surfaceRows(mounted, 'bash')).toEqual([
+    'bash ** → ask (catch-all)',
+    'bash git status → allow (yours)',
+    'bash npm run * → allow (yours)',
+    'bash rm -rf * → deny (yours)',
+    'bash npm test → allow (disabled)',
+  ])
+  expect(find(mounted, '[aria-label="bash npm test"]').textContent).toContain(
+    'It came after npm ci, which is no longer in the file: switched on, it goes last on bash.',
+  )
+  // Typed again as a new rule, it is refused: it is the one switched off.
+  await typeInto(mounted, 'new rule pattern', 'npm test')
+  await click(mounted, 'Add rule')
+  expect(mounted.section().textContent).toContain('bash has npm test switched off: switch it on in the list')
+  await flip(ruleSwitch(mounted, 'bash npm test'))
+  await click(mounted, 'Save')
+  await eventually(() => expect(writes(mounted)).toHaveLength(1))
+  expect(writtenPermission(mounted, 0).bash).toEqual({ ...FILE.permission.bash, 'npm test': 'allow' })
+  expect(Object.keys(writtenPermission(mounted, 0).bash as object).at(-1)).toBe('npm test')
+  expect(lastRecord(mounted)).toEqual({ disabled: [], groups: {} })
+})
+
+test('a mode preview leaves the rules switched off out; the mode’s own rows are as before (#945)', async () => {
+  const record: EnsoRuleRecord = {
+    disabled: [{ surface: 'bash', pattern: 'git push *', decision: 'deny', after: 'rm -rf *' }],
+    groups: {},
+  }
+  const mounted = await mountSettings({ record })
+  expect(surfaceRows(mounted, 'bash').at(-1)).toBe('bash git push * → deny (disabled)')
+  for (const mode of ENSO_PERMISSION_MODES) {
+    await act(async () => cardNamed(mounted, mode)?.click())
+    await settle()
+    expect({ mode, shown: shownRows(mounted) }).toEqual({ mode, shown: rowsInEffect(mode) })
+  }
+})
+
+// #945: a group's switch turns off now. Enso's record says which rules it added, so off takes out
+// only those: on then off is the file as it was, and a rule you had before stays yours.
+test('⚠ a rule group on, saved, then off, saved, leaves the file exactly as before; a rule you had before stays (#945)', async () => {
+  const file = { ...FILE, permission: { ...FILE.permission, bash: { ...FILE.permission.bash, 'git push *': 'ask' } } }
+  const on = await mountSettings({ file })
+  expect(groupSwitch(on, 'Remote writes').getAttribute('aria-checked')).toBe('false')
+  await flip(groupSwitch(on, 'Remote writes'))
+  expect(groupSwitch(on, 'Remote writes').getAttribute('aria-checked')).toBe('true')
+  await click(on, 'Save')
+  await eventually(() => expect(writes(on)).toHaveLength(1))
+  expect(Object.keys(writtenPermission(on, 0).bash as object)).toEqual([
     '**',
     'git status',
     'npm run *',
@@ -779,6 +975,83 @@ test('turning a rule group on adds only the rules not already in force, after **
     'git push *',
     'gh pr create*',
     'curl * -X POST*',
+  ])
+  const record = lastRecord(on)
+  if (record === undefined) throw new Error('the save sent no record')
+  // `git push *` was yours already: not counted as the group's.
+  expect(record.groups['remote-writes']?.added.map((rule) => rule.pattern)).toEqual([
+    'gh pr create*',
+    'curl * -X POST*',
+  ])
+  const saved = lastWritten(on)
+  await on.unmount()
+
+  const off = await mountSettings({ file: saved, record })
+  expect(groupSwitch(off, 'Remote writes').getAttribute('aria-checked')).toBe('true')
+  await flip(groupSwitch(off, 'Remote writes'))
+  expect(groupSwitch(off, 'Remote writes').getAttribute('aria-checked')).toBe('false')
+  await click(off, 'Save')
+  await eventually(() => expect(writes(off)).toHaveLength(1))
+  expect(JSON.stringify(lastWritten(off))).toBe(JSON.stringify(file))
+  expect(lastRecord(off)).toEqual({ disabled: [], groups: {} })
+})
+
+// PR #970 review: a group turned on before #945 left its rules and no record. Its switch reads off,
+// so the card says its rules are in force as yours, and on then off changes nothing.
+test('a group whose rules are all in force with no record says they are yours; on then off leaves the file as it was (#945)', async () => {
+  const publishing = {
+    'npm publish*': 'deny',
+    'bun publish*': 'deny',
+    'gh release create*': 'deny',
+    'gh pr merge*': 'deny',
+  }
+  const file = { ...FILE, permission: { ...FILE.permission, bash: { ...FILE.permission.bash, ...publishing } } }
+  const mounted = await mountSettings({ file })
+  const card = (): Element => find(mounted, '[aria-label="rule group Publishing"]')
+  expect(groupSwitch(mounted, 'Publishing').getAttribute('aria-checked')).toBe('false')
+  expect(card().textContent).toContain('Its rules are all in force already, as yours')
+  expect(find(mounted, '[aria-label="rule group Remote writes"]').textContent).not.toContain('as yours')
+
+  await flip(groupSwitch(mounted, 'Publishing'))
+  expect(groupSwitch(mounted, 'Publishing').getAttribute('aria-checked')).toBe('true')
+  expect(card().textContent).not.toContain('as yours')
+  await flip(groupSwitch(mounted, 'Publishing'))
+  await click(mounted, 'Save')
+  await eventually(() => expect(writes(mounted)).toHaveLength(1))
+  expect(JSON.stringify(lastWritten(mounted))).toBe(JSON.stringify(file))
+})
+
+test('⚠ turning a group off when one of its rules was changed since lists it and asks; Cancel keeps it on (#945)', async () => {
+  const mounted = await mountSettings()
+  await flip(groupSwitch(mounted, 'Publishing'))
+  await decide(mounted, 'bash gh pr merge*', 'ask')
+  await flip(groupSwitch(mounted, 'Publishing'))
+  const asking = await eventually(() => find(mounted, '[aria-label="turn Publishing off"]'))
+  expect(asking.textContent).toContain("bash · gh pr merge* · now ask (the group's: deny)")
+  expect(groupSwitch(mounted, 'Publishing').getAttribute('aria-checked')).toBe('true')
+  await click(mounted, 'Cancel')
+  expect(mounted.section().querySelector('[aria-label="turn Publishing off"]')).toBeNull()
+  expect(groupSwitch(mounted, 'Publishing').getAttribute('aria-checked')).toBe('true')
+  // Kept as mine: the group is off, its unchanged rules gone, the changed one stays yours.
+  await flip(groupSwitch(mounted, 'Publishing'))
+  await click(mounted, 'Keep them as mine')
+  expect(groupSwitch(mounted, 'Publishing').getAttribute('aria-checked')).toBe('false')
+  expect(surfaceRows(mounted, 'bash').filter((row) => /publish|gh /.test(row))).toEqual([
+    'bash gh pr merge* → ask (yours)',
+  ])
+  // On again, changed, and off with Remove them too: every rule the group added goes.
+  await flip(groupSwitch(mounted, 'Publishing'))
+  await decide(mounted, 'bash npm publish*', 'allow')
+  await flip(groupSwitch(mounted, 'Publishing'))
+  await click(mounted, 'Remove them too')
+  await click(mounted, 'Save')
+  await eventually(() => expect(writes(mounted)).toHaveLength(1))
+  expect(Object.keys(writtenPermission(mounted, 0).bash as object)).toEqual([
+    '**',
+    'git status',
+    'npm run *',
+    'rm -rf *',
+    'gh pr merge*',
   ])
 })
 

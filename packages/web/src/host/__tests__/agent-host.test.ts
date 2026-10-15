@@ -55,6 +55,7 @@ import {
   decisionAction,
   effectiveRows,
   type EnsoPermissionMap,
+  type EnsoRuleRecord,
   ENSO_PERMISSION_MODES,
   modeAgentName,
   openIncidentOf,
@@ -100,7 +101,12 @@ import {
 import { seedMultiAccountConfig } from '../multi-account-seed.ts'
 import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
-import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
+import {
+  type PermissionPolicyWrite,
+  readPermissionPolicy,
+  resetPermissionPolicy,
+  writePermissionPolicy,
+} from '../permission-policy-file.ts'
 import { projectTrusted, saveProjectTrust } from '../project-trust.ts'
 import type { HostProviderFacts } from '../provider-settings.ts'
 import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
@@ -188,6 +194,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'extensions/permission-modes/index.ts',
   'pi-multi-account/index.ts',
   'extensions/ask-user/index.ts',
+  'extensions/write-receipt/index.ts',
   'extensions/system-prompt/index.ts',
   'extensions/run-context/index.ts',
   'extensions/incident-report/index.ts',
@@ -942,6 +949,28 @@ test("the engine reports Enso's catch-all as `**` and a user's surface-wide rule
   expect(await matchedPattern({ permission: { bash: { '*': 'ask' } } })).toBe('*')
 })
 
+// PR #970 review: Settings keeps an emptied surface in its place as `{}` for the off/on round trip,
+// NOT because the engine cares — the engine reads the top-level `*` into its defaults, ahead of every
+// surface's rules, so a surface rule beats it whatever the key order. Pinned here with the real engine.
+test('the engine gives a surface rule over the top-level `*` whatever the key order in the file (#945)', async () => {
+  const state = async (permission: object): Promise<unknown> => {
+    let sessionId = ''
+    const probe: InlineExtension = {
+      name: 'enso-host-key-order-probe',
+      factory: (pi: ExtensionAPI) => {
+        pi.on('session_start', (_event, extensionContext) => {
+          sessionId = extensionContext.sessionManager.getSessionId()
+        })
+      },
+    }
+    await hostedUnder({ permission }, [probe])
+    return getPermissionsService(sessionId)?.checkPermission('bash', 'npm test').state
+  }
+  expect(await state({ '*': 'deny' })).toBe('deny')
+  expect(await state({ bash: { 'npm *': 'allow' }, '*': 'deny' })).toBe('allow')
+  expect(await state({ '*': 'deny', bash: { 'npm *': 'allow' } })).toBe('allow')
+})
+
 // ⚠ Settings shows each mode's rules from `effectiveRows` (#474), a MODEL of the engine's merge —
 // so it is pinned to the engine here: in every mode, every verdict the engine gives names a rule
 // the model shows on that surface, with the decision the engine applied and the right owner (a
@@ -1028,7 +1057,12 @@ test('⚠ a saved deny is in force at the running session’s next call — no r
 
   const { file, etag } = readOk(policyPath)
   const permission = withRule(file.permission as EnsoPermissionMap, 'bash', PUBLISH, 'deny')
-  const written = writePermissionPolicy(policyPath, agentDir, { ...file, permission }, { kind: 'matches', etag })
+  const written = writePermissionPolicy(
+    policyPath,
+    agentDir,
+    { file: { ...file, permission } },
+    { kind: 'matches', etag },
+  )
   expect(written.kind).toBe('written')
 
   expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })).toMatchObject({
@@ -1040,18 +1074,57 @@ test('⚠ a saved deny is in force at the running session’s next call — no r
   expect((await hosted.probeToolCall('bash', { command: PUBLISH }))?.block).toBe(true)
 })
 
+// #945: a rule switched off in Settings leaves the engine's file for Enso's record beside it, so the
+// engine no longer applies it — Try a command (`checkPermission`) and a real call agree — and switched
+// back on, it is in force again at its place. The page's moves are pinned in its own tests; here, the
+// save the page sends, against the real engine.
+test('⚠ a rule switched off is not applied, by Try a command or a real call; switched on, it is again (#945)', async () => {
+  const { hosted, policyPath } = await runningUnderFreshPolicy()
+  /** Save the policy with `bash` as given, and the record when given, under the version on disk. */
+  const saveBash = (bash: Record<string, unknown>, record?: EnsoRuleRecord): PermissionPolicyWrite => {
+    const { file, etag } = readOk(policyPath)
+    const write = { file: { ...file, permission: { ...(file.permission as object), bash } } }
+    return writePermissionPolicy(policyPath, agentDir, record === undefined ? write : { ...write, record }, {
+      kind: 'matches',
+      etag,
+    })
+  }
+  const seeded = (readOk(policyPath).file.permission as EnsoPermissionMap).bash as Record<string, unknown>
+  const withDeny = { ...seeded, [PUBLISH]: 'deny' }
+  saveBash(withDeny)
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).toBe('deny')
+
+  const record: EnsoRuleRecord = {
+    disabled: [{ surface: 'bash', pattern: PUBLISH, decision: 'deny', after: Object.keys(seeded).at(-1) ?? '**' }],
+    groups: {},
+  }
+  expect(saveBash(seeded, record)).toMatchObject({ kind: 'written', read: { kind: 'ok', record } })
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })).toMatchObject({
+    state: 'ask',
+    matchedPattern: '**',
+  })
+  expect((await probeCancellingCards(hosted, 'bash', { command: PUBLISH })).asked).toHaveLength(1)
+
+  expect(saveBash(withDeny, { disabled: [], groups: {} })).toMatchObject({ read: { record: { disabled: [] } } })
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })).toMatchObject({
+    state: 'deny',
+    matchedPattern: PUBLISH,
+  })
+  expect((await hosted.probeToolCall('bash', { command: PUBLISH }))?.block).toBe(true)
+})
+
 // ⚠ The engine reads a file its schema rejects as an EMPTY policy — every deny gone. So a save it
 // would not run is refused whole, each problem at its place, and the file (and its denies) stay.
 test('⚠ a policy the engine would not run is refused with each problem’s place, and nothing is written (#474)', async () => {
   const { hosted, policyPath } = await runningUnderFreshPolicy()
   const { file, etag } = readOk(policyPath)
   const denied = withRule(file.permission as EnsoPermissionMap, 'bash', PUBLISH, 'deny')
-  writePermissionPolicy(policyPath, agentDir, { ...file, permission: denied }, { kind: 'matches', etag })
+  writePermissionPolicy(policyPath, agentDir, { file: { ...file, permission: denied } }, { kind: 'matches', etag })
   const before = readFileSync(policyPath, 'utf8')
   const current = readOk(policyPath)
 
   const typo = { ...current.file, permission: { ...denied, bash: { ...(denied.bash as object), 'git *': 'alow' } } }
-  expect(writePermissionPolicy(policyPath, agentDir, typo, { kind: 'matches', etag: current.etag })).toEqual({
+  expect(writePermissionPolicy(policyPath, agentDir, { file: typo }, { kind: 'matches', etag: current.etag })).toEqual({
     kind: 'refused',
     refusal: {
       reason: expect.stringContaining('nothing was saved'),
@@ -1059,11 +1132,21 @@ test('⚠ a policy the engine would not run is refused with each problem’s pla
     },
   })
   const unknownKey = { ...current.file, yolomode: true }
-  const refused = writePermissionPolicy(policyPath, agentDir, unknownKey, { kind: 'matches', etag: current.etag })
+  const refused = writePermissionPolicy(
+    policyPath,
+    agentDir,
+    { file: unknownKey },
+    { kind: 'matches', etag: current.etag },
+  )
   expect(refused.kind).toBe('refused')
   // A Behaviour value out of the engine's bounds (#935): a zero row budget is refused, not written.
   const zeroRows = { ...current.file, promptMaxRows: 0 }
-  const refusedKnob = writePermissionPolicy(policyPath, agentDir, zeroRows, { kind: 'matches', etag: current.etag })
+  const refusedKnob = writePermissionPolicy(
+    policyPath,
+    agentDir,
+    { file: zeroRows },
+    { kind: 'matches', etag: current.etag },
+  )
   expect(refusedKnob.kind === 'refused' ? refusedKnob.refusal.problems.map((problem) => problem.at) : []).toContain(
     '/promptMaxRows',
   )
@@ -1214,7 +1297,7 @@ test('a save over a file changed since it was read is refused, and the change on
   const { file, etag } = readOk(policyPath)
   const byHand = `${JSON.stringify({ ...file, permission: { bash: 'ask' } }, null, 2)}\n`
   writeFileSync(policyPath, byHand)
-  const outcome = writePermissionPolicy(policyPath, agentDir, file, { kind: 'matches', etag })
+  const outcome = writePermissionPolicy(policyPath, agentDir, { file }, { kind: 'matches', etag })
   expect(outcome).toEqual({ kind: 'conflict', reason: expect.stringContaining('changed on disk') })
   expect(readFileSync(policyPath, 'utf8')).toBe(byHand)
 })

@@ -202,6 +202,7 @@ const VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS: readonly string[] = [
   'packages/harness/extensions/system-prompt/index.ts',
   'packages/harness/extensions/web-fetch/index.ts',
   'packages/harness/extensions/web-search/index.ts',
+  'packages/harness/extensions/write-receipt/index.ts',
   // ── The host ──
   'packages/web/src/host/branch-context.ts',
   // The context reader's elements (#361), kept by #811: priced by pi's own `estimateTokens` so the

@@ -8,6 +8,9 @@ import type {
 import {
   ASK_USER_TOOL_NAME,
   AskUserToolParameters,
+  ENSO_QUESTIONNAIRE_ANSWERS_KIND,
+  ENSO_TOOL_RESULT_KEY,
+  type EnsoToolResultDescriptor,
   type EnsoQuestion,
   type EnsoQuestionAnswer,
   type EnsoQuestionnaireResult,
@@ -183,15 +186,31 @@ export function toolResultText(questions: readonly EnsoQuestion[], result: EnsoQ
 }
 
 /**
+ * The result's `details` (#920): the questions and the answers as a #18 descriptor, so the card shows
+ * question → chosen answer instead of the model's arguments; the host lifts it as the tool emitted it.
+ */
+interface AnswersDetails {
+  readonly [ENSO_TOOL_RESULT_KEY]: EnsoToolResultDescriptor
+}
+
+/**
  * ⚠ AN UNANSWERED QUESTION ENDS THE TURN (#379, #465): a decline is the user's "no", and a session
  * with no one to answer cannot grant what was asked — either way the user decides what's next, so
  * the model gets no turn to pick for them or to route around the question. pi ends the run once
  * every call of the batch set `terminate`; an ask_user batched with other tools does not end it.
  */
-function textResult(text: string, unanswered = false): AgentToolResult<undefined> {
-  return unanswered
-    ? { content: [{ type: 'text', text }], details: undefined, terminate: true }
-    : { content: [{ type: 'text', text }], details: undefined }
+function textResult(
+  text: string,
+  questions: EnsoQuestion[],
+  result: EnsoQuestionnaireResult | 'no-ui',
+): AgentToolResult<AnswersDetails> {
+  const answers = result !== 'no-ui' && 'answers' in result ? { answers: result.answers } : {}
+  const details = {
+    [ENSO_TOOL_RESULT_KEY]: { kind: ENSO_QUESTIONNAIRE_ANSWERS_KIND, props: { questions, ...answers } },
+  }
+  return result === 'no-ui' || 'cancelled' in result
+    ? { content: [{ type: 'text', text }], details, terminate: true }
+    : { content: [{ type: 'text', text }], details }
 }
 
 /** The title a one-card questionnaire carries: its question when alone, its count otherwise. */
@@ -209,7 +228,7 @@ type AskUserExecuteArguments = [
   extensionContext: ExtensionContext,
 ]
 
-async function execute(...executeArguments: AskUserExecuteArguments): Promise<AgentToolResult<undefined>> {
+async function execute(...executeArguments: AskUserExecuteArguments): Promise<AgentToolResult<AnswersDetails>> {
   const [, params, signal, , extensionContext] = executeArguments
   const questions: EnsoQuestion[] = params.questions
   // Refused before anything is asked: a repeated header or label cannot be told apart by the card,
@@ -224,7 +243,7 @@ async function execute(...executeArguments: AskUserExecuteArguments): Promise<Ag
             'Give every option in a question a distinct label, and ask again.',
     )
   }
-  if (!extensionContext.hasUI) return textResult(toolResultText(questions, 'no-ui'), true)
+  if (!extensionContext.hasUI) return textResult(toolResultText(questions, 'no-ui'), questions, 'no-ui')
   const asCard =
     extensionContext.mode === 'tui'
       ? undefined
@@ -232,7 +251,7 @@ async function execute(...executeArguments: AskUserExecuteArguments): Promise<Ag
           () => new QuestionnaireComponent({ title: questionnaireTitle(questions), questions }),
         )
   const result = asCard ?? (await askOneAtATime(extensionContext.ui, questions, signal))
-  return textResult(toolResultText(questions, result), 'cancelled' in result)
+  return textResult(toolResultText(questions, result), questions, result)
 }
 
 export default function askUser(pi: ExtensionAPI): void {

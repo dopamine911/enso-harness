@@ -3,7 +3,13 @@ import type { EnsoGitFileChange, EnsoGitRepository } from '@enso/core'
 import { Window } from 'happy-dom'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ThreadStoresContext } from '../store.ts'
-import { type ChangesOutcome, readThreadChanges, ThreadChanges, ThreadChangesView } from '../thread-changes.tsx'
+import {
+  type ChangesOutcome,
+  DiffFocusContext,
+  readThreadChanges,
+  ThreadChanges,
+  ThreadChangesView,
+} from '../thread-changes.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
 /**
@@ -68,6 +74,117 @@ test("a file's diff: the removed line on the left beside the added one on the ri
   expect(markup).toMatch(/bg-refuse\/15[^>]*>.*before/s)
   expect(markup).toMatch(/bg-ok\/15[^>]*>.*after/s)
   expect(markup.indexOf('before')).toBeLessThan(markup.indexOf('after'))
+})
+
+// ── #920: the file a tool card's "open in Diff" asks for ─────────────────────────────────────
+
+const changed = (path: string): EnsoGitFileChange => ({ ...APP_CHANGE, path })
+
+/** The file the Diff view shows when a card asks for `path`. */
+function shownFor(outcome: ChangesOutcome, path: string): string | undefined {
+  const markup = renderToStaticMarkup(
+    <DiffFocusContext.Provider value={{ path }}>
+      <ThreadChangesView outcome={outcome} />
+    </DiffFocusContext.Provider>,
+  )
+  return /aria-label="changes to ([^"]+)"/.exec(markup)?.[1]
+}
+
+test('#920: the file a call named wins over a deeper file of the same name — the tree lists the deeper first', () => {
+  const outcome = read([changed('packages/web/package.json'), changed('package.json')])
+  expect(shownFor(outcome, 'package.json')).toBe('package.json')
+  expect(shownFor(outcome, './package.json')).toBe('package.json')
+  expect(shownFor(outcome, 'packages/web/package.json')).toBe('packages/web/package.json')
+  expect(shownFor(outcome, '/work/shop-api/package.json')).toBe('package.json')
+  expect(shownFor(outcome, '/work/shop-api/packages/web/package.json')).toBe('packages/web/package.json')
+})
+
+test("#920: a relative path is the thread's folder's — a repository scoped below its top, and a copy's tree", () => {
+  const files = [changed('packages/web/package.json'), changed('packages/package.json')]
+  const scoped: ChangesOutcome = {
+    kind: 'read',
+    payload: {
+      threadId: 't1',
+      cwd: '/work/shop-api/packages',
+      git: { ...CHANGES_REPOSITORY, scope: 'packages/' },
+      files,
+      truncated: false,
+      copy: null,
+    },
+  }
+  expect(shownFor(scoped, 'package.json')).toBe('packages/package.json')
+  expect(shownFor(scoped, 'web/package.json')).toBe('packages/web/package.json')
+  const copied: ChangesOutcome = {
+    kind: 'read',
+    payload: {
+      threadId: 't1',
+      cwd: '/enso/projects/p/trees/t1',
+      git: { kind: 'not-a-repository' },
+      files: [changed('src/web/app.ts'), changed('src/app.ts')],
+      truncated: false,
+      copy: { project: '/work/shop-api', base: 'a'.repeat(40) },
+    },
+  }
+  expect(shownFor(copied, 'src/app.ts')).toBe('src/app.ts')
+  expect(shownFor(copied, '/enso/projects/p/trees/t1/src/app.ts')).toBe('src/app.ts')
+})
+
+test('#920: a path outside the known root falls back to the longest file it ends in; none, the first file', () => {
+  const outcome = read([changed('packages/web/package.json'), changed('package.json')])
+  // The repository reached through a symlink: its absolute path never starts with the root.
+  expect(shownFor(outcome, '/home/me/shop/packages/web/package.json')).toBe('packages/web/package.json')
+  expect(shownFor(outcome, '/home/me/shop/package.json')).toBe('package.json')
+  expect(shownFor(outcome, 'nowhere.md')).toBe('packages/web/package.json')
+})
+
+test("#920: a path pi reads as home or a file URL can't be placed here — the longest file it ends in", () => {
+  // `assets/` is first in the tree: a lookup that names nothing opens it instead.
+  const outcome = read([LOGO, changed('docs/a.md')])
+  expect(shownFor(outcome, '~/work/shop-api/docs/a.md')).toBe('docs/a.md')
+  expect(shownFor(outcome, 'file:///work/shop-api/docs/a.md')).toBe('docs/a.md')
+})
+
+test("#920: an `@` before a path is pi's mention mark, dropped as pi drops it — the path then places cleanly", () => {
+  const outcome = read([LOGO, changed('docs/a.md')])
+  expect(shownFor(outcome, '@docs/a.md')).toBe('docs/a.md')
+  expect(shownFor(outcome, '@/work/shop-api/docs/a.md')).toBe('docs/a.md')
+})
+
+test('#920: a relative path through `..` is not placed — the longest file it ends in, though it lands under the root', () => {
+  const scoped: ChangesOutcome = {
+    kind: 'read',
+    payload: {
+      threadId: 't1',
+      cwd: '/work/shop-api/packages',
+      git: { ...CHANGES_REPOSITORY, scope: 'packages/' },
+      files: [changed('packages/assets/logo.png'), changed('packages/package.json')],
+      truncated: false,
+      copy: null,
+    },
+  }
+  expect(shownFor(scoped, '../packages/package.json')).toBe('packages/package.json')
+})
+
+test('#920: a path placed cleanly under the root names that file or none — never a same-named file elsewhere', () => {
+  // The named file is missing from the list (truncated, or written back to its baseline): Diff
+  // opens the first file in the tree, not a deeper file that merely ends the same way.
+  const top = read([changed('packages/web/package.json'), changed('docs/a.md')], true)
+  expect(shownFor(top, 'package.json')).toBe('docs/a.md')
+  expect(shownFor(top, '/work/shop-api/package.json')).toBe('docs/a.md')
+  const scoped: ChangesOutcome = {
+    kind: 'read',
+    payload: {
+      threadId: 't1',
+      cwd: '/work/shop-api/packages',
+      git: { ...CHANGES_REPOSITORY, scope: 'packages/' },
+      files: [changed('package.json'), changed('src/app.ts')],
+      truncated: true,
+      copy: null,
+    },
+  }
+  // `web/package.json` here is `packages/web/package.json`, not listed: the root one is a different file.
+  expect(shownFor(scoped, 'web/package.json')).toBe('src/app.ts')
+  expect(shownFor(scoped, '/work/shop-api/packages/web/package.json')).toBe('src/app.ts')
 })
 
 // ── #847: what a screen reader is given of the diff ─────────────────────────────────────────
