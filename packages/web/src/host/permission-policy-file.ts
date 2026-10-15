@@ -1,12 +1,19 @@
-import { constants, copyFileSync } from 'node:fs'
+import { constants, copyFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { EnsoPermissionPolicyRead, EnsoPermissionPolicyRefusal } from '@enso/core'
+import {
+  ENSO_EMPTY_RULE_RECORD,
+  type EnsoPermissionPolicyRead,
+  type EnsoPermissionPolicyRefusal,
+  type EnsoPermissionPolicyWrite,
+  EnsoRuleRecord,
+} from '@enso/core'
 import { realpathOrSelf, replaceFileText } from '@enso/core/paths'
 import {
   ENSO_DEFAULT_PERMISSION_POLICY,
   permissionEngineConfigPath,
   withCatchAllFirst,
 } from '@enso/core/permission-rules'
+import { Check } from 'typebox/value'
 import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition } from './atomic-file.ts'
 import { policyProblems } from './permission-policy.ts'
 
@@ -28,16 +35,48 @@ import { policyProblems } from './permission-policy.ts'
  * In the host, beside the engine's schema, because the write is shaped by what the engine does:
  * it reloads on the modification time alone (`replaceFileText`), and its real-engine tests must
  * share `agent-host.test.ts`'s process-wide agent dir.
+ *
+ * ⚠ ENSO'S RECORD RIDES THE SAME SAVE (#945). The rules switched off, and what each rule group
+ * added, live in a file of Enso's beside the policy (`recordPathOf`): the engine's schema refuses
+ * a key of ours inside its own file. One `ETag` names both files, and a save whose policy write
+ * fails puts the record back (`writeBoth`).
  */
+
+/** Where Enso's record lives (#945): beside the policy, `permissions.json` → `permissions.disabled.json`. */
+function recordPathOf(policyPath: string): string {
+  return `${policyPath.replace(/\.json$/, '')}.disabled.json`
+}
+
+/**
+ * The `ETag` of the policy's bytes and, when there is one, the record's (#945): a hand edit to
+ * either file is a new version. With no record it is the policy's own `etagOf`.
+ */
+function policyEtagOf(policy: Uint8Array, record: Uint8Array | undefined): string {
+  return etagOf(record === undefined ? policy : Buffer.concat([policy, Buffer.from('\0record\0'), record]))
+}
 
 /** Where the engine writes its review log: beside its config, under `logs/`. */
 function reviewLogDirectoryOf(agentDir: string): string {
   return join(dirname(permissionEngineConfigPath(agentDir)), 'logs')
 }
 
+/** Enso's record as read, or why it cannot be: then it is shown empty, and the policy is unaffected. */
+function recordOf(bytes: Buffer | undefined): { readonly record: EnsoRuleRecord; readonly problem?: string } {
+  if (bytes === undefined) return { record: ENSO_EMPTY_RULE_RECORD }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bytes.toString('utf8'))
+  } catch (error: unknown) {
+    return { record: ENSO_EMPTY_RULE_RECORD, problem: error instanceof Error ? error.message : String(error) }
+  }
+  return Check(EnsoRuleRecord, parsed)
+    ? { record: parsed }
+    : { record: ENSO_EMPTY_RULE_RECORD, problem: 'it is not the record Enso writes' }
+}
+
 /**
- * The policy as a page reads it — or why the file cannot be read, since the engine reads that
- * file as an empty policy and the page must say so, not show an empty list.
+ * The policy as a page reads it, with Enso's record beside it — or why the file cannot be read,
+ * since the engine reads that file as an empty policy and the page must say so, not show an empty list.
  */
 export function readPermissionPolicy(policyPath: string, agentDir: string): EnsoPermissionPolicyRead {
   const common = {
@@ -49,7 +88,9 @@ export function readPermissionPolicy(policyPath: string, agentDir: string): Enso
   if (bytes === undefined) {
     return { kind: 'unreadable', ...common, reason: 'the file is missing: the next launch seeds Enso’s policy' }
   }
-  const etag = etagOf(bytes)
+  const recordPath = recordPathOf(policyPath)
+  const recordBytes = bytesOf(recordPath)
+  const etag = policyEtagOf(bytes, recordBytes)
   let parsed: unknown
   try {
     parsed = JSON.parse(bytes.toString('utf8'))
@@ -59,7 +100,60 @@ export function readPermissionPolicy(policyPath: string, agentDir: string): Enso
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { kind: 'unreadable', ...common, etag, reason: 'the file is not a JSON object' }
   }
-  return { kind: 'ok', ...common, etag, file: parsed as Record<string, unknown> }
+  const { record, problem } = recordOf(recordBytes)
+  return {
+    kind: 'ok',
+    ...common,
+    etag,
+    file: parsed as Record<string, unknown>,
+    record,
+    recordPath,
+    ...(problem === undefined ? {} : { recordProblem: problem }),
+  }
+}
+
+/**
+ * Why the files on disk are not what `condition` expects, or `undefined` when they are: the
+ * policy's own `conflictOf`, but a version read names the record too (`policyEtagOf`).
+ */
+function policyConflictOf(policyPath: string, condition: WriteCondition): string | undefined {
+  const bytes = condition.kind === 'matches' ? bytesOf(policyPath) : undefined
+  if (condition.kind !== 'matches' || bytes === undefined) return conflictOf(policyPath, condition)
+  const recordPath = recordPathOf(policyPath)
+  if (policyEtagOf(bytes, bytesOf(recordPath)) === condition.etag) return undefined
+  return `${policyPath} or ${recordPath} changed on disk since it was opened — reload to see the version there now`
+}
+
+const isEmptyRecord = (record: EnsoRuleRecord): boolean =>
+  record.disabled.length === 0 && Object.keys(record.groups).length === 0
+
+/**
+ * Write the policy and, when given, Enso's record (#945): both, or the record put back. The record
+ * goes first — a rule switched off leaves the policy only once the record holds it — and when the
+ * policy's write then fails, the record that was on disk is put back (or, none there, removed). Each
+ * write is atomic (`replaceFileText`; the engine never reads the record, so moving its time is
+ * harmless), the pair is not: a crash between them leaves the new record over the old policy.
+ * What is in force does not change; a rule being switched off reads as still in force (`liveRecord`
+ * on the page), one being switched back on is in neither file, and a group being turned off leaves
+ * its rules as yours. A record the same as on disk is not rewritten, and an empty one is not created
+ * where there was none.
+ */
+function writeBoth(policyPath: string, policyText: string, record: EnsoRuleRecord | undefined): void {
+  const recordPath = recordPathOf(policyPath)
+  const previous = bytesOf(recordPath)
+  const recordText = record === undefined ? undefined : `${JSON.stringify(record, null, 2)}\n`
+  const changed =
+    record !== undefined && (previous === undefined ? !isEmptyRecord(record) : previous.toString('utf8') !== recordText)
+  if (changed && recordText !== undefined) replaceFileText(recordPath, recordText)
+  try {
+    replaceFileText(policyPath, policyText)
+  } catch (error: unknown) {
+    if (changed) {
+      if (previous === undefined) rmSync(recordPath, { force: true })
+      else replaceFileText(recordPath, previous)
+    }
+    throw error
+  }
 }
 
 /** @group Permission policy */
@@ -71,16 +165,18 @@ export type PermissionPolicyWrite =
 /**
  * Write the whole file a page sent, under `condition`: with Enso's `**` put first where a mode
  * needs it (the same normalisation a launch gives a hand-edited file, #499), validated against the
- * engine's schema, atomically. A refusal writes nothing.
+ * engine's schema, atomically — and Enso's record with it when the page sent one (#945). A refusal
+ * writes nothing.
  */
 export function writePermissionPolicy(
   policyPath: string,
   agentDir: string,
-  file: Readonly<Record<string, unknown>>,
+  write: EnsoPermissionPolicyWrite,
   condition: WriteCondition,
 ): PermissionPolicyWrite {
-  const conflict = conflictOf(policyPath, condition)
+  const conflict = policyConflictOf(policyPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
+  const { file, record } = write
   const permission = file.permission
   const normalized =
     typeof permission === 'object' && permission !== null && !Array.isArray(permission)
@@ -91,7 +187,7 @@ export function writePermissionPolicy(
     const reason = `the engine would not run this policy as written (${problems.length} problem${problems.length === 1 ? '' : 's'}); nothing was saved`
     return { kind: 'refused', refusal: { reason, problems } }
   }
-  replaceFileText(policyPath, `${JSON.stringify(normalized, null, 2)}\n`)
+  writeBoth(policyPath, `${JSON.stringify(normalized, null, 2)}\n`, record)
   return { kind: 'written', read: readPermissionPolicy(policyPath, agentDir) }
 }
 
@@ -119,17 +215,21 @@ export type PermissionPolicyReset =
 
 /**
  * Put Enso's default policy in force, the current file kept beside it first (never overwritten).
- * Under `If-None-Match: *` — no file there — there is nothing to keep.
+ * Under `If-None-Match: *` — no file there — there is nothing to keep. What Enso's record says each
+ * rule group added goes with the file it described (#945): those rules are in the backup now. The
+ * rules switched off stay in the record, still off.
  */
 export function resetPermissionPolicy(
   policyPath: string,
   agentDir: string,
   condition: WriteCondition,
 ): PermissionPolicyReset {
-  const conflict = conflictOf(policyPath, condition)
+  const conflict = policyConflictOf(policyPath, condition)
   if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
   const backup = condition.kind === 'absent' ? undefined : copyAside(realpathOrSelf(policyPath))
-  replaceFileText(policyPath, `${JSON.stringify(ENSO_DEFAULT_PERMISSION_POLICY, null, 2)}\n`)
+  const { record, problem } = recordOf(bytesOf(recordPathOf(policyPath)))
+  const kept = problem === undefined && Object.keys(record.groups).length > 0 ? { ...record, groups: {} } : undefined
+  writeBoth(policyPath, `${JSON.stringify(ENSO_DEFAULT_PERMISSION_POLICY, null, 2)}\n`, kept)
   const read = readPermissionPolicy(policyPath, agentDir)
   return backup === undefined ? { kind: 'reset', read } : { kind: 'reset', backup, read }
 }

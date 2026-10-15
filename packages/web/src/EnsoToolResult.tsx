@@ -16,7 +16,12 @@ import { constantStore, ThreadStoresContext, useStore } from './store.ts'
  * successful empty result. Every early return below ends in visible output.
  */
 
-/** Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. */
+/**
+ * Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. A renderer
+ * declines a descriptor by returning `null`, `undefined`, a boolean or `''`, and the text is shown
+ * instead of a blank box. Only those values are seen: an empty array or fragment, or an element
+ * whose component renders `null`, is drawn as given — a renderer that declines returns `null`.
+ */
 export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
 
 /**
@@ -45,10 +50,18 @@ export function toolResultState(result: ToolResultPart | undefined, runOpen: boo
   return { status: 'done', result }
 }
 
-function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
+/**
+ * How one tool's text result reads for a person (#920) — `bash`'s output as a terminal, `read`'s line
+ * count over a folded preview — given by the step row for the tool it draws. Absent, the text prints
+ * as it came.
+ */
+export type ToolTextView = (text: string) => React.ReactNode
+
+function TextFallback({ result, view }: { result: ToolResultPart; view: ToolTextView | undefined }): React.ReactNode {
   // `content` is `string | ContentPart[]`; only the string form is safe to print directly.
   const text =
     typeof result.content === 'string' ? result.content : result.content.map((part) => JSON.stringify(part)).join('\n')
+  if (view !== undefined) return <div data-enso-tool-result="text">{view(text)}</div>
   return (
     <pre
       data-enso-tool-result="text"
@@ -89,6 +102,7 @@ export function EnsoToolResult({
   result,
   runOpen,
   renderers,
+  view,
 }: {
   /**
    * ⚠ Explicitly `| undefined` rather than optional. `exactOptionalPropertyTypes` is on,
@@ -99,6 +113,8 @@ export function EnsoToolResult({
   /** The call's run is still in flight — see {@link toolResultState}. */
   runOpen: boolean
   renderers: EnsoRendererMap
+  /** The tool's own reading of a text result, when no descriptor renderer draws it. */
+  view?: ToolTextView | undefined
 }): React.ReactNode {
   const state = toolResultState(result, runOpen)
   const descriptor = useDescriptor(result)
@@ -133,17 +149,20 @@ export function EnsoToolResult({
     )
   }
 
-  if (descriptor === undefined) return <TextFallback result={state.result} />
+  if (descriptor === undefined) return <TextFallback result={state.result} view={view} />
 
-  const render = renderers[descriptor.kind]
+  // A renderer that draws nothing — its props did not check (a stored descriptor from another
+  // version, a tool's malformed one) — is an unknown kind too (#920): the text, never a blank.
+  const drawn = renderers[descriptor.kind]?.(descriptor.props)
   // ⚠ Unknown kind: fall through to text. This is the branch that makes an unrecognised
   // descriptor visible instead of blank, and it is the one worth a test. The truncation is data,
-  // not the renderer's (#411): it is said under the text too — and with no renderer registered,
-  // this is where every pi tool's truncated result lands.
-  if (render === undefined) {
+  // not the renderer's (#411): it is said under the text too — the text of every pi tool's
+  // truncated result lands here.
+  // A decline is any of the empty values `EnsoRendererMap` lists, not only `null`.
+  if (drawn === undefined || drawn === null || typeof drawn === 'boolean' || drawn === '') {
     return (
       <div data-enso-kind={descriptor.kind}>
-        <TextFallback result={state.result} />
+        <TextFallback result={state.result} view={view} />
         {descriptor.truncated !== undefined ? <TruncationNote truncated={descriptor.truncated} /> : null}
       </div>
     )
@@ -151,7 +170,7 @@ export function EnsoToolResult({
 
   return (
     <div data-enso-tool-result="descriptor" data-enso-kind={descriptor.kind}>
-      {render(descriptor.props)}
+      {drawn}
       {descriptor.truncated !== undefined ? <TruncationNote truncated={descriptor.truncated} /> : null}
     </div>
   )

@@ -129,7 +129,12 @@ const DIRECTIONAL: Readonly<Record<string, readonly [string, string]>> = {
   external_directory: ['external_directory_read', 'external_directory_write'],
 }
 
-const toPatternMap = (value: EnsoSurfaceValue): Readonly<Record<string, EnsoPermissionDecision>> =>
+/**
+ * A surface's value as patterns: one decision for the whole surface is its `*` pattern.
+ *
+ * @group Permission policy
+ */
+export const toPatternMap = (value: EnsoSurfaceValue): Readonly<Record<string, EnsoPermissionDecision>> =>
   typeof value === 'string' ? { '*': value } : value
 
 /** The engine's `expandDirectionalSugar`: a shorthand's entries first, then the direction's own. */
@@ -400,10 +405,90 @@ export function withRuleMoved(
   return { ...permission, [surface]: Object.fromEntries(moved) }
 }
 
+/** A rule's decision on the wire: an action, or a deny with the reason the agent is told. */
+const EnsoPermissionDecisionSchema = Type.Union([
+  EnsoPermissionAction,
+  Type.Object({ action: Type.Literal('deny'), reason: Type.Optional(Type.String()) }, { additionalProperties: false }),
+])
+
+/**
+ * A rule switched off in Settings (#945): out of the engine's `permission` block, kept here to go
+ * back where it was. `after` is the key before it in the map it came from — the pattern before it on
+ * its surface, or, for a surface written as one decision (`whole`), the surface before it — and is
+ * absent when it was first.
+ *
+ * @group Permission policy
+ */
+export const EnsoDisabledRule = Type.Object(
+  {
+    surface: Type.String({ minLength: 1 }),
+    pattern: Type.String({ minLength: 1 }),
+    decision: EnsoPermissionDecisionSchema,
+    after: Type.Optional(Type.String()),
+    /** The surface was written as this one decision: `pattern` is `*`, and it goes back as the surface's value. */
+    whole: Type.Optional(Type.Literal(true)),
+  },
+  { additionalProperties: false },
+)
+/** @group Permission policy */
+export type EnsoDisabledRule = Static<typeof EnsoDisabledRule>
+
+/**
+ * A rule a group's switch put in the file (#945). `replaced` is the decision the same pattern had
+ * before the group set its own: switching the group off puts it back instead of removing the rule.
+ *
+ * @group Permission policy
+ */
+export const EnsoGroupAddedRule = Type.Object(
+  {
+    surface: Type.String({ minLength: 1 }),
+    pattern: Type.String({ minLength: 1 }),
+    decision: EnsoPermissionAction,
+    replaced: Type.Optional(EnsoPermissionDecisionSchema),
+  },
+  { additionalProperties: false },
+)
+/** @group Permission policy */
+export type EnsoGroupAddedRule = Static<typeof EnsoGroupAddedRule>
+
+/**
+ * Enso's own record beside the policy file (#945), `ENSO_HOME/permissions.disabled.json`: the rules
+ * switched off, and, per rule group switched on, the rules it added and the surfaces it created.
+ *
+ * ⚠ A SIDECAR, NOT A KEY OF `permissions.json`: the engine's schema refuses any top-level key it
+ * does not know (`additionalProperties: false`), and it reads a file its schema refuses as an EMPTY
+ * policy. The engine never reads this file.
+ *
+ * @group Permission policy
+ */
+export const EnsoRuleRecord = Type.Object(
+  {
+    disabled: Type.Array(EnsoDisabledRule),
+    groups: Type.Record(
+      Type.String(),
+      Type.Object(
+        { added: Type.Array(EnsoGroupAddedRule), created: Type.Optional(Type.Array(Type.String())) },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+)
+/** @group Permission policy */
+export type EnsoRuleRecord = Static<typeof EnsoRuleRecord>
+
+/**
+ * The record before anything is switched: what a missing file reads as.
+ *
+ * @group Permission policy
+ */
+export const ENSO_EMPTY_RULE_RECORD: EnsoRuleRecord = { disabled: [], groups: {} }
+
 /**
  * `GET /api/permissions` (#474): the policy file as read, with its `ETag` — or why it cannot be
  * read, since the engine reads a file it cannot parse as an EMPTY policy (every call asks, every
- * deny gone) and the page must say so rather than show nothing.
+ * deny gone) and the page must say so rather than show nothing. The `ETag` names the policy file and
+ * Enso's record beside it together (#945): a save writes both, or puts the record back.
  *
  * @group Permission policy
  */
@@ -418,6 +503,11 @@ export const EnsoPermissionPolicyRead = Type.Union([
       reviewLogDirectory: Type.String(),
       /** Enso's default policy, for a reset's diff: the page cannot import it (it lives with `node:fs`). */
       ensoDefault: Type.Record(Type.String(), Type.Unknown()),
+      /** Enso's record beside the file (#945): the rules switched off, and what each group added. */
+      record: EnsoRuleRecord,
+      recordPath: Type.String(),
+      /** Why the record on disk cannot be read: it is shown empty, and a save that writes it replaces it. */
+      recordProblem: Type.Optional(Type.String()),
     },
     { additionalProperties: false },
   ),
@@ -437,13 +527,18 @@ export const EnsoPermissionPolicyRead = Type.Union([
 export type EnsoPermissionPolicyRead = Static<typeof EnsoPermissionPolicyRead>
 
 /**
- * `PUT /api/permissions`'s body: the whole file as the page wants it. The server validates it
- * against the engine's own schema, puts `**` first where a mode needs it, and writes it atomically.
+ * `PUT /api/permissions`'s body: the whole file as the page wants it, and Enso's record when the
+ * page changed it (#945; absent, the record on disk stays). The server validates the file against
+ * the engine's own schema, puts `**` first where a mode needs it, and writes each file atomically:
+ * the record first, then the policy, the record put back when the policy's write fails. Not one
+ * step: a crash between the two leaves the new record over the old policy — what is in force does not
+ * change, but a rule being switched back on is then in neither file, and a group being turned off
+ * leaves its rules as yours.
  *
  * @group Permission policy
  */
 export const EnsoPermissionPolicyWrite = Type.Object(
-  { file: Type.Record(Type.String(), Type.Unknown()) },
+  { file: Type.Record(Type.String(), Type.Unknown()), record: Type.Optional(EnsoRuleRecord) },
   { additionalProperties: false },
 )
 /** @group Permission policy */
