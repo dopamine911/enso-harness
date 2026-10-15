@@ -4,6 +4,7 @@ import { act } from 'react'
 import type { createRoot as CreateRoot } from 'react-dom/client'
 import type * as FollowConnectionModule from '../follow-connection.ts'
 import type * as IncidentCardModule from '../incident-card.tsx'
+import type * as PaneContextModule from '../pane-context.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 
 /**
@@ -18,6 +19,7 @@ ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
 const { IncidentCard }: typeof IncidentCardModule = await import('../incident-card.tsx')
 const { createFollowConnection }: typeof FollowConnectionModule = await import('../follow-connection.ts')
+const { LaunchActionsContext }: typeof PaneContextModule = await import('../pane-context.ts')
 afterAll(releaseDom)
 
 const flush = (work: () => Promise<void> | void): Promise<void> => act(async () => work())
@@ -152,9 +154,36 @@ test('an inherited incident names the thread and incident it came from; halting 
   )
   expect(card.container.textContent).toContain('came from thread src-9, whose incident inc-0 was open')
   expect(section(card.container, 'Suspended tools').textContent).toBe(
-    'Suspended toolsnothing suspended — halting is off (security.incidents.halt)',
+    'Suspended toolsnothing suspended — halting is off (Settings › Security)',
   )
   await card.unmount()
+})
+
+// #933: the hint opens the control, not a key to edit by hand.
+test('halting off: the hint opens Settings › Security', async () => {
+  const state = openState({ ...OPENED, halted: false, suspended: [] })
+  const opened: string[] = []
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  await flush(() =>
+    root.render(
+      <LaunchActionsContext.Provider
+        value={{
+          openThread: () => undefined,
+          manageProjects: () => undefined,
+          openSettings: (section) => void opened.push(section),
+        }}
+      >
+        <IncidentCard record={state.record} incidents={state.incidents} resolve={async () => ({ outcome: 'told' })} />
+      </LaunchActionsContext.Provider>,
+    ),
+  )
+  const link = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Settings › Security')
+  await flush(() => link?.click())
+  expect(opened).toEqual(['security'])
+  await flush(() => root.unmount())
+  container.remove()
 })
 
 test('resume with restrictions and none ticked is refused before posting; ticked, it posts the families that stay suspended', async () => {

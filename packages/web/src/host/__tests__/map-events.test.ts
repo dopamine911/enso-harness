@@ -7,17 +7,14 @@ import { RuntimeEventSchema } from '../runtime-event.ts'
 
 const kindOf = (event: Parameters<typeof mapPiEvent>[0]): EnsoObservation['kind'] => mapPiEvent(event).kind
 
-// --- streaming deltas, and the usage that rides on every one
-test('a text delta maps, carrying usage', () => {
-  const observed = mapPiEvent({
-    type: 'message_update',
-    usage: { input: 100, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.0004 } },
-    assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Hello ' },
-  })
-  expect(observed).toMatchObject({ kind: 'text-delta', delta: 'Hello ', contentIndex: 0 })
-  // ⚠ #24's second deal-breaker: usage per message, not by polling.
-  expect(observed).toMatchObject({ usage: { input: 100, output: 1, totalCost: 0.0004 } })
-})
+// --- streaming deltas
+test('a text delta maps to its characters', () =>
+  expect(
+    mapPiEvent({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Hello ' },
+    }),
+  ).toEqual({ kind: 'text-delta', delta: 'Hello ', contentIndex: 0 }))
 
 test('a thinking delta is distinguished from text', () =>
   expect(
@@ -396,41 +393,45 @@ test('an unmodelled event is carried through with its payload intact', () => {
 })
 
 // --- usage: zero versus absent (#53 S2, adjacent to #45)
-// `usage: {}` is a real shape pi can emit (an errored request); absent means "this delta
-// carries no accounting". They must not collapse into one another: the browser's stats
-// treat an all-zero usage as a failed request and an absent one as nothing to fold.
-test('a delta with usage {} carries an all-zero usage; a delta without usage carries none', () => {
-  const withEmptyUsage = mapPiEvent({
-    type: 'message_update',
-    usage: {},
-    assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'x' },
-  })
-  expect(withEmptyUsage).toEqual({
-    kind: 'text-delta',
-    contentIndex: 0,
-    delta: 'x',
+// `usage: {}` is a real shape pi can emit (an errored request); absent means "this message
+// carries no accounting". They must not collapse into one another: an all-zero usage is a
+// request that cost nothing, an absent one is nothing to fold.
+test('a message_end with usage {} carries an all-zero usage; one without usage carries none', () => {
+  expect(mapPiEvent({ type: 'message_end', message: { role: 'assistant', usage: {} } })).toEqual({
+    kind: 'message-end',
+    role: 'assistant',
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   })
-  const withoutUsage = mapPiEvent({
-    type: 'message_update',
-    assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'x' },
+  expect(mapPiEvent({ type: 'message_end', message: { role: 'assistant' } })).toEqual({
+    kind: 'message-end',
+    role: 'assistant',
   })
-  expect(withoutUsage).toEqual({ kind: 'text-delta', contentIndex: 0, delta: 'x' })
 })
 
-test('cacheWrite and cost.total are read from usage, not defaulted', () =>
+// #915: pi's cumulative usage rides on every `message_update` — ~350 bytes on a delta of a few
+// characters, megabytes while a large tool call is composed — and nothing downstream reads it.
+test("a streamed delta crosses without pi's per-delta usage, mapped or carried as unmapped", () => {
+  const usage = { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.5 } }
   expect(
     mapPiEvent({
       type: 'message_update',
-      usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.5 } },
+      usage,
       assistantMessageEvent: { type: 'text_delta', contentIndex: 2, delta: 'x' },
     }),
-  ).toEqual({
-    kind: 'text-delta',
-    contentIndex: 2,
-    delta: 'x',
-    usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalCost: 0.5 },
-  }))
+  ).toEqual({ kind: 'text-delta', contentIndex: 2, delta: 'x' })
+  expect(
+    mapPiEvent({
+      type: 'message_update',
+      usage,
+      assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'hmm' },
+    }),
+  ).toEqual({ kind: 'thinking-delta', contentIndex: 0, delta: 'hmm' })
+  const argumentsDelta = { type: 'toolcall_delta', contentIndex: 1, delta: '); c.rotate(-' }
+  expect(mapPiEvent({ type: 'message_update', usage, assistantMessageEvent: argumentsDelta })).toEqual({
+    kind: 'unmapped',
+    event: { type: 'message_update', assistantMessageEvent: argumentsDelta },
+  })
+})
 
 // ⚠ All four dialog methods block pi (#53 S3): `input` and `editor` were never tested as
 // blocking, so dropping either from the dialog set would have let pi hang silently.
