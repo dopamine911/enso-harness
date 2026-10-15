@@ -55,6 +55,7 @@ const EVALUATED: EnsoSessionEval = {
       S1_duplicateToolClusters: 0,
       S3_retryAfterErrorFires: 1,
       toolErrors: 1,
+      nonZeroExits: 0,
       S5_outputCollapseSpans: 0,
       S19_timeGaps: 0,
       S20_rareCommandMatches: 0,
