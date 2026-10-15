@@ -1,5 +1,5 @@
-import type { EnsoForkReceipt } from '@enso/core'
-import type { UIMessage } from '@tanstack/ai-client'
+import { type EnsoForkReceipt, ensoLogger } from '@enso/core'
+import type { ConnectionStatus, UIMessage } from '@tanstack/ai-client'
 import { type ChatUIHost, createChatHook } from '@tanstack/ai-react/ui'
 import { useEffect, useMemo, useRef } from 'react'
 import { ChatLayout } from './chat-layout.tsx'
@@ -144,6 +144,34 @@ function useThreadSummary(stores: ThreadStores, messages: readonly UIMessage[], 
   }, [threadId, title, generating, waiting])
 }
 
+const followLog = ensoLogger('browser', 'follow')
+
+/**
+ * The record of WHY the chat client's live subscription ended on an error (#915): the exception.
+ *
+ * TanStack catches a throw from handling a chunk — its stream processor, a callback of ours, a React
+ * update — ends the subscription, says `connectionStatus: 'error'` and keeps the exception as `error`.
+ * Caught there, a chunk handler's throw reaches no page-level error handler, so nothing else would
+ * ever log it; the follow adapter has already told the page that updates stopped, and on which chunk
+ * (`follow-connection.ts#consumerStopped`), and the run alert shows the exception's message.
+ * Any other subscription error is recorded here too — a follow that never opened, already logged
+ * by the adapter as "the follow could not be opened" — so that one has two lines.
+ */
+function useSubscriptionFailureRecord(
+  threadId: string,
+  connectionStatus: ConnectionStatus,
+  error: Error | undefined,
+): void {
+  useEffect(() => {
+    if (connectionStatus !== 'error') return
+    followLog.warn('the live subscription ended on an error: {error}', {
+      threadId,
+      error: error === undefined ? 'no error was kept' : `${error.name}: ${error.message}`,
+      ...(error?.stack === undefined ? {} : { stack: error.stack }),
+    })
+  }, [threadId, connectionStatus, error])
+}
+
 /**
  * One thread's pane: its chat factory, its stores in context, its summary kept current for
  * the rail.
@@ -215,6 +243,7 @@ export function ThreadPane({
     [stores, onForked],
   )
   useThreadSummary(stores, chat.messages, chat.sessionGenerating)
+  useSubscriptionFailureRecord(threadId, chat.connectionStatus, chat.error)
   const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
   return (
     <div
