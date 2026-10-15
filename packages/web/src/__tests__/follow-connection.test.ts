@@ -7,7 +7,7 @@ import type { StreamChunk } from '@tanstack/ai'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from '../custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from '../follow-connection.ts'
 import { pageLeaving } from '../page-leaving.ts'
-import { createScriptedFetch, requestedUrl, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
+import { createScriptedFetch, isFollowRequest, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 /**
  * The adapter is the ONLY place AG-UI is made (#112). These drive it with a scripted server
@@ -1036,14 +1036,15 @@ test('close() during the opening fetch ends the subscription instead of throwing
 
 /**
  * The scripted server's fetch, telling when a follow has opened: `frame` writes onto the follow
- * that is open, so a frame written before the subscription's fetch would be lost. Take the
+ * that is open, so a frame written before the subscription's fetch goes to the previous follow
+ * (or nowhere, for the first). Take the
  * promise before the subscription asks.
  */
 function watchFollows(server: ScriptedFetch): { fetch: typeof fetch; nextFollow: () => Promise<void> } {
   let waiting = Promise.withResolvers<void>()
   const watched = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const response = await server.fetch(input, init)
-    if (requestedUrl(input).endsWith('/follow')) {
+    if (isFollowRequest(input)) {
       const opened = waiting
       waiting = Promise.withResolvers<void>()
       opened.resolve()
