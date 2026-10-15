@@ -46,6 +46,7 @@ import {
 import { ensureDom, releaseDom } from './dom-environment.ts'
 import {
   createScriptedFetch,
+  isFollowRequest,
   requestedUrl,
   type ScriptedFetch,
   type ScriptedFetchOptions,
@@ -1478,7 +1479,12 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
 
   // Stop: pi is told, its queue is cleared (the frame every follower reads), and the words
-  // come back to THIS composer — clear-and-restore, pi's TUI's behaviour.
+  // come back to THIS composer — clear-and-restore, pi's TUI's behaviour — AFTER what the user
+  // has typed since, which stays (PR #988 review: an empty draft could not tell append from replace).
+  await flush(async () => {
+    typeInto(pane.composer(), 'half a thought')
+    await tick()
+  })
   const stop = pane.stopButton()
   if (stop === null) throw new Error('expected the stop button during the run')
   await flush(async () => {
@@ -1487,7 +1493,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
   await eventually(() => {
     expect(pane.server.abortCount()).toBe(1)
-    expect(pane.composer().value).toBe('by the button, mid-run')
+    expect(pane.composer().value).toBe('half a thought\n\nby the button, mid-run')
   })
   await pane.settle({ type: 'observation', seq: 2, observation: { kind: 'queue', interrupting: [], enqueued: [] } })
   await eventually(() => {
@@ -1595,6 +1601,29 @@ test('⚠ a page opening on a run another page queued behind lists the same queu
   // A later snapshot that lists nothing waiting clears a stale list (a resync is complete).
   await pane.settle({ ...SNAPSHOT_IDLE, queue: { interrupting: [], enqueued: ['stale'] } }, SNAPSHOT_IDLE)
   await eventually(() => expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull())
+  await pane.unmount()
+})
+
+// PR #988 review item 2(b): this page follows an idle thread and another page starts a run. Its
+// opening prompt — and one pi steers in right after it — arrive before any assistant message, so
+// each ends the assistant message the run opened with nothing in it. Neither draws an empty bubble.
+test('⚠ a run another page started draws its opening prompt and a back-to-back one, then one reply bubble — no empty bubble ahead (#917)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await pane.settle(
+    { type: 'status', live: true, busy: true, generation: 1 },
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'user', text: 'from the other page' } },
+    { type: 'observation', seq: 2, observation: { kind: 'message-start', role: 'user', text: 'and steered in' } },
+    { type: 'observation', seq: 3, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 4, observation: { kind: 'text-delta', contentIndex: 0, delta: 'OTHER-REPLY' } },
+  )
+  await eventually(() => {
+    expect(userBubbles(pane)).toEqual([
+      expect.stringContaining('from the other page'),
+      expect.stringContaining('and steered in'),
+    ])
+    expect(assistantBubbles(pane)).toEqual([expect.stringContaining('OTHER-REPLY')])
+  })
   await pane.unmount()
 })
 
@@ -2096,11 +2125,14 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
 
 // ── #921: each model turn's thinking reads where that turn begins, live as after a reload ────────
 
+/** A thinking card's trigger label, streaming (`Thinking...`) or done (`Thought for 3s`). */
+const THINKING_CARD_LABEL = /^(Thought|Thinking)/
+
 /** One node's row in {@link transcriptRows}, or undefined when it is none. */
 function transcriptRow(node: Node): string | undefined {
   if (!(node instanceof Element)) return /SAID-\w+/.exec(node.textContent ?? '')?.[0]
   if (node.hasAttribute('data-tool-call-id')) return `tool:${node.getAttribute('data-tool-call-id')}`
-  if (node.tagName === 'BUTTON' && /^(Thought|Thinking)/.test(node.textContent ?? '')) return 'thought'
+  if (node.tagName === 'BUTTON' && THINKING_CARD_LABEL.test(node.textContent ?? '')) return 'thought'
   return undefined
 }
 
@@ -2125,7 +2157,10 @@ function transcriptRows(pane: MountedPane): string[][] {
 const thoughtLabels = (pane: MountedPane): string[] =>
   [...pane.container.querySelectorAll('[data-role="assistant"] button')]
     .map((button) => button.textContent ?? '')
-    .filter((label) => /^(Thought|Thinking)/.test(label))
+    .filter((label) => THINKING_CARD_LABEL.test(label))
+
+/** How long turn 1 of the #921 test thinks: `Date.now` jumps by it, so no test waits it out. */
+const TURN_THOUGHT_S = 3
 
 test('⚠ thinking → call → result → thinking → call reads in that order live, and identically after a reload; each turn’s thinking is timed on its own (#921)', async () => {
   const pane = await mountPane()
@@ -2153,7 +2188,10 @@ test('⚠ thinking → call → result → thinking → call reads in that order
     thinking(3, 'plan the stripes'),
   )
   await eventually(() => expect(thoughtLabels(pane)).toEqual(['Thinking...']))
-  await Bun.sleep(1100)
+  // The card times its thinking with `Date.now` (`reasoning.tsx`): the clock jumps ahead instead
+  // of the test sleeping, and keeps running, so `eventually`'s deadline still lapses on a failure.
+  const realNow = Date.now.bind(Date)
+  const clock = spyOn(Date, 'now').mockImplementation(() => realNow() + TURN_THOUGHT_S * 1000)
   // ...then calls, gets its result, and turn 2 begins thinking.
   await pane.settle(
     call(4, 'c1'),
@@ -2164,7 +2202,7 @@ test('⚠ thinking → call → result → thinking → call reads in that order
   // Turn 1's card stopped when its turn did and says how long THAT turn thought; turn 2's is its own.
   await eventually(() => {
     const [first, second, ...rest] = thoughtLabels(pane)
-    expect(first).toMatch(/^Thought for [1-9]\d*s$/)
+    expect(Number(/^Thought for (\d+)s$/.exec(first ?? '')?.[1])).toBeGreaterThanOrEqual(TURN_THOUGHT_S)
     expect([second, ...rest]).toEqual(['Thinking...'])
   })
   await pane.settle(
@@ -2177,6 +2215,7 @@ test('⚠ thinking → call → result → thinking → call reads in that order
   )
   const expected = [['thought', 'tool:c1'], ['thought', 'tool:c2'], ['SAID-DONE']]
   await eventually(() => expect(transcriptRows(pane)).toEqual(expected))
+  clock.mockRestore()
   await pane.unmount()
 
   // The same run as a reload mounts it: one message per pi message, each result paired into the
@@ -5203,9 +5242,7 @@ test('a subscription whose follow is refused leaves the record of why: the excep
   globalThis.fetch = server.fetch
   const broken: typeof fetch = Object.assign(
     (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
-      requestedUrl(input).endsWith('/follow')
-        ? Promise.reject(new TypeError('the follow broke'))
-        : server.fetch(input, init),
+      isFollowRequest(input) ? Promise.reject(new TypeError('the follow broke')) : server.fetch(input, init),
     { preconnect: server.fetch.preconnect },
   )
   const stores = mintThread(broken)
