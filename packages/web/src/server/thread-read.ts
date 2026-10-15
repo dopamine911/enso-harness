@@ -13,10 +13,12 @@ import {
   type EnsoSessionUsage,
   type EnsoStoppedAfter,
   type EnsoThreadHistory,
+  type EnsoThreadModelRole,
   type EnsoThreadSystemPrompt,
   type EnsoTranscriptEntry,
   sessionIncidentsOf,
   sessionRiskOfTranscript,
+  threadModelRole,
   threadSystemPrompt,
 } from '@enso/core'
 import type { AgentHost } from '../host/agent-host.ts'
@@ -137,6 +139,8 @@ export interface ThreadMount {
    * session's entries or the file's, the same record either way. `null` is pi's default.
    */
   readonly systemPrompt: EnsoThreadSystemPrompt
+  /** The role the branch runs under (#904): its last `enso-model-role` record, live or cold; `null` for none. */
+  readonly modelRole: EnsoThreadModelRole | null
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
   /** What pi holds behind the run (#917), interrupting first; both empty when nothing waits or not live. */
@@ -201,6 +205,7 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     stoppedAfter: stoppedAfter(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
     systemPrompt: threadSystemPrompt(transcript),
+    modelRole: threadModelRole(transcript),
     incidents: sessionIncidentsOf(
       transcript.flatMap((transcriptEntry) => (transcriptEntry.kind === 'custom' ? [transcriptEntry] : [])),
     ),

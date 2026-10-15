@@ -20,6 +20,8 @@ import {
   type EnsoPromptReceipt,
   EnsoQuestionAnswers,
   EnsoSessionConfiguration,
+  type EnsoRoleResolution,
+  type HostCommandOption,
   ensoLogger,
   isWholeBase64,
   type PromptImageContent,
@@ -257,6 +259,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     model: mount.model,
     ...(mount.recordedModel === undefined ? {} : { recordedModel: mount.recordedModel }),
     systemPrompt: mount.systemPrompt,
+    modelRole: mount.modelRole,
     cwd: mount.cwd,
     tree: mount.tree,
     usage: mount.usage,
@@ -824,6 +827,12 @@ export function readHostCommandBody(raw: string): EnsoHostCommandRun {
   )
 }
 
+/** What a configuration's names resolve through: a prompt reference to its library prompt (#443), a role to its model and effort (#904). */
+export interface ConfigureChoices {
+  readonly pickSystemPrompt: (id: string) => SystemPromptPick
+  readonly resolveRole: (name: string, options: readonly HostCommandOption[]) => EnsoRoleResolution
+}
+
 export type ConfigureOutcome =
   | { readonly status: 204 }
   | Refusal<409>
@@ -834,29 +843,81 @@ export type ConfigureOutcome =
  * while a run holds the thread (409), as every control route is; else ONE lease for all of them, in
  * the order that matters — the system prompt first (#443: a session takes one only before its first
  * request; the library's pick is `pickSystemPrompt`), then the model (the effort a model allows
- * depends on it), then the effort, then the mode. A value equal to the current one is left alone,
- * so choosing what the session already has says nothing on the feed. The first refusal stops it and
- * is the 422, NAMING the step: the steps before it applied, the ones after it did not run. The mode
- * is awaited to its acceptance (the mode route answers before it), so the prompt the page sends next
- * cannot overtake it and a rejected mode is this response, not a later line.
+ * depends on it) — or a role in place of the model and effort (#904, `applyRole`) — then the effort,
+ * then the mode. A value equal to the current one is left alone, and a role equal to the one the
+ * session runs under is not recorded again, so choosing what the session already has says nothing
+ * on the feed. The first refusal stops it and is the 422, NAMING the step: the steps before it
+ * applied, the ones after it did not run. The mode is awaited to its acceptance (the mode route
+ * answers before it), so the prompt the page sends next cannot overtake it and a rejected mode is
+ * this response, not a later line.
  */
 export async function configureThread(
   deps: FollowRouteDeps,
   threadId: string,
   configuration: EnsoSessionConfiguration,
-  pickSystemPrompt: (id: string) => SystemPromptPick,
+  choices: ConfigureChoices,
 ): Promise<ConfigureOutcome> {
+  const { pickSystemPrompt, resolveRole } = choices
   const { threads } = deps
   const lease = await controlLease(threads, threadId, 'configure it')
   if ('reason' in lease) return lease
   try {
+    // A role stands in for the model and the effort (never sent with them, `readConfigureBody`);
+    // the mode follows either way.
+    const { role, mode } = configuration
     const refusal =
       systemPromptRefusal(lease.runtime, configuration.systemPrompt, pickSystemPrompt) ??
-      (await applyConfiguration(lease.runtime, configuration))
+      (role === undefined
+        ? await applyConfiguration(lease.runtime, configuration)
+        : ((await applyRole(lease.runtime, role, resolveRole)) ??
+          (await applyConfiguration(lease.runtime, mode === undefined ? {} : { mode }))))
     return refusal === undefined ? { status: 204 } : { status: 422, refusal }
   } finally {
     lease.release()
   }
+}
+
+/**
+ * A role's step (#904), in place of the model and effort: resolved from the user's config against
+ * the models the session offers now — its model, else its first available fallback, the effort
+ * clamped — applied as the `model` and `thinking` steps, then recorded with what it resolved to
+ * (decision 5). A role with no model available is refused at the `model` step with its reason,
+ * never run on a substitute. The steps run as the role's (`byRole`), so a switch from one role to
+ * another records the new one alone, never the first one ended in between (PR #973 review); a step
+ * refused after an earlier one applied ends the role, whose record no longer says what runs.
+ */
+async function applyRole(
+  runtime: ThreadRuntime,
+  role: string,
+  resolveRole: (name: string, options: readonly HostCommandOption[]) => EnsoRoleResolution,
+): Promise<EnsoConfigurationRefusal | undefined> {
+  const modelRow = runtime.listCommands().find((command) => command.source === 'host' && command.name === 'model')
+  const resolution = resolveRole(role, modelRow?.options ?? [])
+  if (resolution.kind === 'refused') return { step: 'model', reason: resolution.reason }
+  const before = runtime.modelState()
+  const refusal = await applyConfiguration(
+    runtime,
+    { model: resolution.model, ...(resolution.effort === undefined ? {} : { thinking: resolution.effort }) },
+    { byRole: true },
+  )
+  const { model, thinkingLevel } = runtime.modelState()
+  if (refusal !== undefined) {
+    const changed =
+      model?.provider !== before.model?.provider ||
+      model?.id !== before.model?.id ||
+      thinkingLevel !== before.thinkingLevel
+    if (changed) runtime.setModelRole(null)
+    return refusal
+  }
+  if (model === null) return { step: 'model', reason: `role ${role}: the session runs no model` }
+  runtime.setModelRole({
+    role,
+    provider: model.provider,
+    modelId: model.id,
+    thinkingLevel,
+    ...(resolution.fallback ? { fallback: true } : {}),
+  })
+  return undefined
 }
 
 /**
@@ -880,15 +941,16 @@ function systemPromptRefusal(
 async function applyConfiguration(
   runtime: ThreadRuntime,
   configuration: EnsoSessionConfiguration,
+  options?: { readonly byRole?: boolean },
 ): Promise<EnsoConfigurationRefusal | undefined> {
   const before = runtime.modelState()
   const { model, thinking, mode } = configuration
   if (model !== undefined && (before.model === null || model !== modelOptionId(before.model))) {
-    const reason = await hostRefusalOf(runtime, { name: 'model', value: model })
+    const reason = await hostRefusalOf(runtime, { name: 'model', value: model }, options)
     if (reason !== undefined) return { step: 'model', reason }
   }
   if (thinking !== undefined && thinking !== runtime.modelState().thinkingLevel) {
-    const reason = await hostRefusalOf(runtime, { name: 'thinking', value: thinking })
+    const reason = await hostRefusalOf(runtime, { name: 'thinking', value: thinking }, options)
     if (reason !== undefined) return { step: 'thinking', reason }
   }
   if (mode === undefined) return undefined
@@ -911,9 +973,13 @@ async function applyConfiguration(
  * The host's refusal of one host command, or `undefined` when it applied. Only a refusal the host
  * DECIDED is a refusal: anything else is a fault and propagates to the 500.
  */
-async function hostRefusalOf(runtime: ThreadRuntime, run: EnsoHostCommandRun): Promise<string | undefined> {
+async function hostRefusalOf(
+  runtime: ThreadRuntime,
+  run: EnsoHostCommandRun,
+  options?: { readonly byRole?: boolean },
+): Promise<string | undefined> {
   try {
-    await runtime.runHostCommand(run)
+    await runtime.runHostCommand(run, options)
     return undefined
   } catch (error) {
     if (error instanceof HostCommandRefused) return error.message
@@ -921,14 +987,18 @@ async function hostRefusalOf(runtime: ThreadRuntime, run: EnsoHostCommandRun): P
   }
 }
 
-/** The configure body, checked against its closed schema — `model`, `thinking`, `mode`, `systemPrompt`; each optional. */
+/** The configure body, checked against its closed schema — `model`, `thinking`, `mode`, `systemPrompt`, `role`; each optional, `role` never with `model` or `thinking`. */
 export function readConfigureBody(raw: string): EnsoSessionConfiguration {
-  return readClosedBody(
+  const body = readClosedBody(
     raw,
     EnsoSessionConfiguration,
     'configure',
-    "configure body takes only `model`, `thinking`, `mode` and `systemPrompt`, each a non-empty string; `systemPrompt` may also be `null` for pi's default",
+    "configure body takes only `model`, `thinking`, `mode`, `systemPrompt` and `role`, each a non-empty string; `systemPrompt` may also be `null` for pi's default",
   )
+  if (body.role !== undefined && (body.model !== undefined || body.thinking !== undefined)) {
+    throw new Error('configure body names a role or a model and effort, never both: the role decides them')
+  }
+  return body
 }
 
 export type ForkRouteOutcome =

@@ -2,6 +2,7 @@ import type { EnsoProject, EnsoStoredThread } from '@enso/core'
 import { useEffect, useMemo } from 'react'
 import type { ListingState } from './listing-store.ts'
 import { recentModelIds } from './model-picker.tsx'
+import { modelsSettings } from './models-settings.ts'
 import { isFixtureMode } from './page-mode.ts'
 import { createProjectsStore, projectOf } from './project-list.ts'
 import { watchRunStates } from './run-states-connection.ts'
@@ -62,7 +63,10 @@ export function usePageListings(): PageListings {
     if (!(anyBusy || isFixtureMode)) void storedThreads.refresh()
   }, [anyBusy])
   useEffect(() => {
-    if (!isFixtureMode) void projectList.refresh()
+    if (isFixtureMode) return
+    void projectList.refresh()
+    // The models section (#904): the picker, the launch panel and Settings read it.
+    void modelsSettings.refresh()
   }, [])
   const watchRuns = !isFixtureMode && storedRowRuns(stored.rows, threads)
   useEffect(() => {

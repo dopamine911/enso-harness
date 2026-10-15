@@ -159,14 +159,17 @@ async function resolveSessionConfig(context: SessionConfigContext): Promise<Sess
   // ⚠ `security.incidents` may only TIGHTEN (#753): a checkout the agent can write must not switch
   // halting off or raise the thresholds its own incident is measured against. What tightens, the
   // guard applies (`sessionIncidentPolicy`); what loosens is named here and ignored. None of
-  // `security` enters this merge. `threads` is a project setting since #754 (its tree mode, setup
-  // and files to copy); the host resolves it by tier when it makes a tree
-  // (`@enso/core/project-config`), and nothing in a session reads it from this merge.
-  const { projects, security, claudeCode, ...projectConfig } = project.config
+  // `security` enters this merge. ⚠ And `models` (#904 decision 1): the server reads favorites,
+  // hidden providers and roles from the user's file alone, so a project's would configure nothing.
+  // `threads` is a project setting since #754 (its tree mode, setup and files to copy); the host
+  // resolves it by tier when it makes a tree (`@enso/core/project-config`), and nothing in a
+  // session reads it from this merge.
+  const { projects, security, claudeCode, models, ...projectConfig } = project.config
   const userOnlySections: readonly (readonly [string, unknown])[] = [
     ['projects.roots', projects],
     ['security.judge', security?.judge],
     ['claudeCode', claudeCode],
+    ['models', models],
   ]
   for (const [section, projectSetting] of userOnlySections) {
     if (projectSetting === undefined) continue

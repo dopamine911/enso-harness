@@ -1,6 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import { ClaudeCodeConfig } from './claude-code.ts'
+import { EnsoModelsConfig } from './model-roles.ts'
 import { EnsoProjectsConfig } from './project.ts'
 import { EnsoSecurityConfig } from './session-incident.ts'
 import { WebFetchConfig } from './web-fetch.ts'
@@ -94,6 +95,8 @@ export const EnsoConfig = Type.Object(
     security: Type.Optional(EnsoSecurityConfig),
     threads: Type.Optional(EnsoThreadsConfig),
     claudeCode: Type.Optional(ClaudeCodeConfig),
+    /** Favorites, hidden providers, roles and presets (#904): user-only, read and written by the server. */
+    models: Type.Optional(EnsoModelsConfig),
   },
   { additionalProperties: false },
 )

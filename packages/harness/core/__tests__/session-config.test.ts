@@ -230,6 +230,15 @@ test("⚠ projects.roots is user-only: a trusted project's is ignored, and said"
   expect(f.notices.join()).toContain('projects.roots')
 })
 
+// #904 decision 1: favorites, hidden providers and roles are the user's, read from the user's file
+// alone by the server; a project's `models` would configure nothing, so it is dropped and said.
+test("⚠ models is user-only: a trusted project's is ignored, and said (#904)", async () => {
+  const f = fixture({ user: USER, project: { ...PROJECT, models: { favorites: ['faux/model'] } } })
+  const resolved = await sessionEnsoConfig({}, f.context('Trust'))
+  expect(resolved.result.kind === 'ok' ? resolved.result.config.models : 'unreadable').toBeUndefined()
+  expect(f.notices.join()).toContain('sets models, which only')
+})
+
 // #754: `threads` is a project setting now (its trees' mode, setup and files to copy), resolved by
 // tier where a tree is made; a trusted project naming it is no longer told it was ignored.
 test("a trusted project's threads is read without a warning (#754)", async () => {
