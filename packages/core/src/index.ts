@@ -83,6 +83,13 @@ export {
   EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'
+export {
+  EnsoPromptRun,
+  EnsoPromptRunBaseline,
+  EnsoPromptRunChanges,
+  EnsoPromptRunSnapshot,
+  EnsoThreadPromptRuns,
+} from './prompt-runs.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
 export { unifiedPatch } from './text-patch.ts'
 export {
@@ -542,9 +549,11 @@ export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thre
 export {
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  EnsoSnapshotHash,
   EnsoThreadTreeKind,
   EnsoThreadTreeRecord,
   EnsoTreeRestored,
+  isSnapshotHash,
   readEnsoThreadTree,
   readEnsoTreeRestored,
   type ThreadTreeKind,

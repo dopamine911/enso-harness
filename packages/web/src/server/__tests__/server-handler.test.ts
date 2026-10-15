@@ -30,11 +30,13 @@ import {
   EnsoProjectSettings,
   EnsoProjectTrust,
   EnsoProjectPromptLibrary,
+  EnsoPromptRunChanges,
   EnsoStoredThread,
   EnsoSystemPromptPreview,
   EnsoThreadCommands,
   EnsoThreadEvents,
   EnsoThreadHistory,
+  EnsoThreadPromptRuns,
   EnsoThreadInspection,
   EnsoThreadSummary,
   type EnsoTranscriptEntry,
@@ -56,6 +58,7 @@ import { Check } from 'typebox/value'
 import { type AgentHost, SessionDirectoryRefused } from '../../host/agent-host.ts'
 import type { HostedThread, HostedThreadInspection } from '../../host/live-thread.ts'
 import type { ThreadRestoreOutcome, ThreadTreePlace } from '../../host/thread-log-edits.ts'
+import type { PromptRunRead } from '../../host/thread-prompt-run-reads.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'
@@ -2433,6 +2436,140 @@ test('GET …/changes/file needs a path and a held thread, and reads its paths U
   })
   // Encoded, a climb out is still a climb out.
   expect((await read('live1', `?path=${encodeURIComponent('../outside.ts')}`)).status).toBe(400)
+})
+
+// #553, the #985 review: the Diff Viewer's list is read where the thread is served — a stored
+// thread in no project is no thread here (404), as the real host's stored-thread lookup decides.
+test('GET …/prompt-runs answers a served thread with its prompt runs, and one in no project or nowhere with a 404', async () => {
+  const stored = (cwd: string): FakeStoredThread => ({
+    cwd,
+    transcript: [{ kind: 'message', id: 'u1', role: 'user', parts: [{ type: 'text', text: 'one' }] }],
+    modified: new Date('2026-10-14T00:00:00.000Z'),
+    firstMessage: 'one',
+  })
+  const { url, built } = await startWith(settlesAtOnce, {
+    here: stored(tmpdir()),
+    elsewhere: stored('/somewhere/else'),
+  })
+  const served = await fetch(`${url}/api/threads/here/prompt-runs`)
+  expect(served.status).toBe(200)
+  const payload: unknown = await served.json()
+  expect(Check(EnsoThreadPromptRuns, payload)).toBe(true)
+  expect(payload).toMatchObject({ threadId: 'here', promptRuns: [{ promptRun: 1, prompt: 1, entryId: 'u1' }] })
+  const absent = async (threadId: string): Promise<[number, string]> => {
+    const response = await fetch(`${url}/api/threads/${threadId}/prompt-runs`)
+    return [response.status, await response.text()]
+  }
+  expect(await absent('elsewhere')).toEqual([404, 'no session for thread elsewhere'])
+  expect(await absent('never-used')).toEqual([404, 'no session for thread never-used'])
+  // Looking builds nothing (#86).
+  expect(built).toHaveLength(0)
+})
+
+// #553, the #985 review: the two pair routes over HTTP. The query is guarded before the host is
+// asked; the host's answers are the route's statuses — no thread, 404; a refused pair (a hash the
+// branch does not record, two snapshots git cannot compare), 409 with the host's words; a read,
+// the payload with what was asked. What the host reads from git is `thread-prompt-runs.test.ts`'s.
+test('⚠ GET …/prompt-runs/changes and …/file guard their query before the host is asked, and answer its refusals as 404 and 409 (#553)', async () => {
+  const [first, second, stranger] = ['a', 'b', 'c'].map((digit) => digit.repeat(40)) as [string, string, string]
+  const lost = 'e'.repeat(64)
+  const asked: unknown[] = []
+  /** What the host answers each thread id: none, a refusal, or the read. */
+  const answerFor = <Read>(threadId: string, read: Read): PromptRunRead<Read> => {
+    if (threadId === 'nowhere') return { kind: 'no-thread', reason: 'no session for thread nowhere' }
+    if (threadId === 'stranger')
+      return { kind: 'refused', reason: `${stranger} is not a snapshot thread stranger's prompt runs record` }
+    if (threadId === 'lost')
+      return { kind: 'refused', reason: `git could not compare the snapshots: fatal: bad object ${lost}` }
+    return { kind: 'read', read }
+  }
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    readPromptRunChanges: (threadId, from, to) => {
+      asked.push(['changes', threadId, from, to])
+      return Promise.resolve(answerFor(threadId, { files: [], truncated: false }))
+    },
+    readPromptRunFileTexts: (threadId, pair, paths) => {
+      asked.push(['file', threadId, pair, paths])
+      return Promise.resolve(
+        answerFor(threadId, { oldText: { kind: 'text', text: 'one\n' } as const, newText: { kind: 'none' } as const }),
+      )
+    },
+  }))
+  const read = async (threadId: string, route: string, query: string): Promise<[number, string]> => {
+    const response = await fetch(`${url}/api/threads/${threadId}/prompt-runs/${route}${query}`)
+    return [response.status, await response.text()]
+  }
+  const pair = `from=${first}&to=${second}`
+
+  // The pair: two snapshot hashes, lowercase hex of 40 or 64 digits — else a 400, the host unasked.
+  const pairRefused: [number, string] = [400, 'name two snapshots: ?from=<hash>&to=<hash>']
+  for (const query of [
+    '',
+    `?to=${second}`,
+    `?from=${first.toUpperCase()}&to=${second}`,
+    `?from=${first.slice(1)}&to=${second}`,
+  ]) {
+    expect(await read('t', 'changes', query)).toEqual(pairRefused)
+  }
+  expect(await read('t', 'file', `?path=b.txt&from=${first}`)).toEqual(pairRefused)
+  // The path: malformed (a climb, empty, an empty segment, a NUL) is a 400 naming it, the host unasked.
+  const file = (paths: Record<string, string>): string =>
+    `?${new URLSearchParams({ from: first, to: second, ...paths }).toString()}`
+  for (const [paths, named] of [
+    [{ path: '../x' }, '"../x"'],
+    [{ path: '' }, '""'],
+    [{}, '""'],
+    [{ path: 'b.txt', oldPath: 'a//b' }, '"a//b"'],
+    [{ path: 'a\0b' }, '"a\\u0000b"'],
+  ] as const) {
+    expect(await read('t', 'file', file(paths))).toEqual([400, `${named} is not a file under the tree`])
+  }
+  expect(asked).toEqual([])
+
+  // The host's answers, as statuses with its words.
+  expect(await read('nowhere', 'changes', `?${pair}`)).toEqual([404, 'no session for thread nowhere'])
+  expect(await read('stranger', 'changes', `?${pair}`)).toEqual([
+    409,
+    `${stranger} is not a snapshot thread stranger's prompt runs record`,
+  ])
+  expect(await read('lost', 'changes', `?from=${first}&to=${lost}`)).toEqual([
+    409,
+    `git could not compare the snapshots: fatal: bad object ${lost}`,
+  ])
+  expect(await read('nowhere', 'file', file({ path: 'b.txt' }))).toEqual([404, 'no session for thread nowhere'])
+  expect((await read('stranger', 'file', file({ path: 'b.txt' })))[0]).toBe(409)
+  const [changedStatus, changedBody] = await read('t', 'changes', `?${pair}`)
+  expect(changedStatus).toBe(200)
+  const changes: unknown = JSON.parse(changedBody)
+  expect(Check(EnsoPromptRunChanges, changes)).toBe(true)
+  expect(changes).toEqual({ threadId: 't', from: first, to: second, files: [], truncated: false })
+
+  // A rename: the old side is asked for at `oldPath`, and the answer names both paths.
+  const [renamedStatus, renamedBody] = await read('t', 'file', file({ path: 'b.txt', oldPath: 'a.txt' }))
+  expect(renamedStatus).toBe(200)
+  expect(JSON.parse(renamedBody)).toEqual({
+    threadId: 't',
+    path: 'b.txt',
+    oldPath: 'a.txt',
+    oldText: { kind: 'text', text: 'one\n' },
+    newText: { kind: 'none' },
+  })
+  expect(asked.at(-1)).toEqual(['file', 't', { from: first, to: second }, { path: 'b.txt', oldPath: 'a.txt' }])
+})
+
+test('a Diff Viewer read that throws is the 500, not a 409 that blames git (#985 review)', async () => {
+  const failing = (): Promise<never> => Promise.reject(new Error('the sessions directory could not be read'))
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    readPromptRunChanges: failing,
+    readPromptRunFileTexts: failing,
+  }))
+  const pair = `from=${'a'.repeat(40)}&to=${'b'.repeat(40)}`
+  for (const route of [`changes?${pair}`, `file?${pair}&path=a.txt`]) {
+    const response = await fetch(`${url}/api/threads/t/prompt-runs/${route}`)
+    expect([response.status, await response.text()]).toEqual([500, 'the request failed — see the server log'])
+  }
 })
 
 // #469: the judge cases are read live-or-cold like the incidents; looking builds nothing.

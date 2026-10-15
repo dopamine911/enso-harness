@@ -516,11 +516,23 @@ function namedFile(
   )
 }
 
+/** The file a tool card's "open in Diff" asks for, when there is an ask and a `place` to read it in. */
+function askedFile(
+  ordered: readonly EnsoGitFileChange[],
+  focus: { readonly path: string } | undefined,
+  place: FilesPlace | undefined,
+): EnsoGitFileChange | undefined {
+  return focus === undefined || place === undefined ? undefined : namedFile(ordered, focus.path, place)
+}
+
 /**
  * The Diff header — `description` says what the files are compared with — then the changed files
- * as a tree and the chosen file's diff: a repository's and a copy's alike.
+ * as a tree and the chosen file's diff: a repository's and a copy's alike, and the Diff Viewer's
+ * two snapshots (#553) under a `title` of its own. Only the Diff view has a `place`: a tool card's
+ * "open in Diff" (#920) asks it for a file, and the Diff Viewer, without one, keeps its own choice.
  */
-function ChangedFiles({
+export function ChangedFiles({
+  title = 'Diff',
   description,
   place,
   files,
@@ -528,8 +540,9 @@ function ChangedFiles({
   nothingText,
   readFile,
 }: {
+  readonly title?: string
   readonly description: React.ReactNode
-  readonly place: FilesPlace
+  readonly place?: FilesPlace
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
   readonly nothingText: string
@@ -543,16 +556,13 @@ function ChangedFiles({
   const tree = buildFileTree(files)
   const ordered = filesInOrder(tree)
   // The chosen file while it still differs; else the asked-for file; otherwise the first in the tree.
-  const shown =
-    ordered.find((change) => change.path === chosen) ??
-    (focus === undefined ? undefined : namedFile(ordered, focus.path, place)) ??
-    ordered[0]
+  const shown = ordered.find((change) => change.path === chosen) ?? askedFile(ordered, focus, place) ?? ordered[0]
   const added = files.reduce((sum, change) => sum + (change.added ?? 0), 0)
   const removed = files.reduce((sum, change) => sum + (change.removed ?? 0), 0)
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-4 py-2 text-sm">
-        <h2 className="font-heading font-semibold text-foreground">Diff</h2>
+        <h2 className="font-heading font-semibold text-foreground">{title}</h2>
         {description}
         <span className="ml-auto text-xs text-muted-foreground">
           {files.length}

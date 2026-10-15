@@ -59,6 +59,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'project.ts': 'Thread, Permission',
     'project-settings.ts': 'Thread, Record',
     'prompt-library.ts': 'Thread, Record',
+    'prompt-runs.ts': 'Thread, Observation',
     'provider-refusal.ts': 'Observation, Record',
     'run-context.ts': 'Thread, Record',
     'runtime-entries.ts': 'Thread, Record',
