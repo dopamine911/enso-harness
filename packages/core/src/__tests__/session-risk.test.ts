@@ -256,6 +256,21 @@ test('in-place, dd and prefixed writes to a config tier are signals; a dd read f
   ])
 })
 
+// Review of 1d095ec3: a runner flag that takes a value (`sudo -u root`, `nice -n 10`, `xargs -n 1`,
+// `timeout 5`) and a `|` inside a quoted sed script must not hide the write behind them.
+test.each([
+  ['sudo -u root', 'echo x | sudo -u root tee .enso/config.json'],
+  ['nice -n 10', 'nice -n 10 cp /tmp/evil.json .enso/config.json'],
+  ['xargs -n 1', 'echo x | xargs -n 1 tee .enso/config.json'],
+  ['timeout 5', 'timeout 5 cp /tmp/evil.json .enso/config.json'],
+  ['quoted alternation', `sed -E -i 's/(a|b)/c/' .enso/config.json`],
+  ['-i.bak', `sed -i.bak 's/a/b/' .enso/config.json`],
+])('a write behind %s to a config tier is a signal', (_route, command) => {
+  expect(signalsOf(oneCallEach([bash('c1', command)])).filter(([signal]) => signal === 'config-tier-touch')).toEqual([
+    ['config-tier-touch', 'c1'],
+  ])
+})
+
 // Review of #987: signals stay in the session, so a read or a mention of a tier file must not be
 // one — five of them (this repo names its own `.enso/config.json` routinely) would open an incident.
 test('a read or a mention of a config tier in a shell command is no signal', () => {

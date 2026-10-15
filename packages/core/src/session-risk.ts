@@ -527,9 +527,11 @@ function configTierTouch(call: RecentCall): EnsoSecuritySignal | undefined {
 const TIER_REDIRECT = /\d?>[>|]?\s*['"]?[^\s'";&|]*\.enso[/\\]config(?:\.local)?\.json(?![\w.-])/i
 /**
  * The words a command can stand behind and still be the command: `VAR=value` assignments and the
- * runners `sudo`/`doas`/`env`/`command`/`exec`/`nohup`/`nice`/`time`/`xargs` with their flags.
+ * runners in the alternation below with their flags — the value-taking short flags those runners
+ * use (`sudo -u root`, `nice -n 10`, `xargs -n 1`) take their value along — and `timeout` with its
+ * duration. Best-effort: a runner or flag spelling not listed here hides the command behind it.
  */
-const COMMAND_PREFIX = String.raw`^(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs)(?:\s+-\S+)*\s+|[A-Za-z_]\w*=\S*\s+)*`
+const COMMAND_PREFIX = String.raw`^(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs|stdbuf|ionice|setsid|busybox)(?:\s+-[ugnCILPdsacpUrtSo]\s+\S+|\s+-\S+)*\s+|timeout(?:\s+-\S+)*\s+\d[\w.]*\s+|[A-Za-z_]\w*=\S*\s+)*`
 /**
  * Commands that write the file named among their arguments: `tee`, `truncate`, and `sed`/`perl`
  * with an in-place flag in any spelling (`-i`, `-Ei`, `-ni`, `-pi`, `-i.bak`, `--in-place`).
@@ -549,12 +551,12 @@ const WRITES_LAST_ARGUMENT = new RegExp(`${COMMAND_PREFIX}(?:cp|mv|ln|install|rs
  * Whether a shell command names a config tier file in a write-shaped way: an interpreter one-liner
  * naming it (the guard cannot read what it does), a redirect into it, `tee`/`truncate`/in-place
  * `sed`/`perl` with it as an argument, `dd of=` it, or `cp`/`mv`/`ln`/`install`/`rsync` with it as
- * the destination — each also behind `VAR=`/`env`/`sudo`/`xargs`/`command` (`COMMAND_PREFIX`).
+ * the destination — each also behind `COMMAND_PREFIX`.
  */
 function shellWritesTier(command: string): boolean {
   if (!CONFIG_TIER.test(command)) return false
   if (ONE_LINER.test(command) || TIER_REDIRECT.test(command)) return true
-  return command.split(/[;&|\n]+/).some((segment) => {
+  return shellSegments(command).some((segment) => {
     const words = segment.trim()
     if (!CONFIG_TIER.test(words)) return false
     if (WRITES_ARGUMENT.test(words) || DD_WRITES_TIER.test(words)) return true
@@ -562,6 +564,26 @@ function shellWritesTier(command: string): boolean {
     const last = words.split(/\s+/).at(-1) ?? ''
     return CONFIG_TIER.test(` ${last.replace(/^['"]|['"]$/g, '')}`)
   })
+}
+
+/** A command split at `;`, `&`, `|` and newlines that stand outside quotes (`sed 's/(a|b)/c/'` stays whole). */
+function shellSegments(command: string): string[] {
+  const segments: string[] = []
+  let current = ''
+  let quote: string | undefined
+  for (const char of command) {
+    if (quote !== undefined) {
+      if (char === quote) quote = undefined
+    } else if (char === "'" || char === '"') quote = char
+    else if (';&|\n'.includes(char)) {
+      segments.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  segments.push(current)
+  return segments
 }
 
 /** The signals a call raises: a config tier reached, and what it does against the refusals before it in the window. */
