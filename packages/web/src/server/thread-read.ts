@@ -5,6 +5,7 @@ import {
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoProviderRefusal,
+  type EnsoQueuedPrompts,
   type EnsoRecordedModel,
   type EnsoRiskThresholds,
   type EnsoSessionIncidents,
@@ -142,6 +143,8 @@ export interface ThreadMount {
   readonly modelRole: EnsoThreadModelRole | null
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
+  /** What pi holds behind the run (#917), interrupting first; both empty when nothing waits or not live. */
+  readonly queue: EnsoQueuedPrompts
   /** The login waiting on its provider (#348), which Stop can end; undefined when none is, or not live. */
   readonly login: EnsoLoginInProgress | undefined
   /**
@@ -274,6 +277,7 @@ type RunReading = Pick<
   | 'model'
   | 'recordedModel'
   | 'openDialogs'
+  | 'queue'
   | 'usage'
   | 'login'
 >
@@ -295,6 +299,7 @@ function liveReading(thread: ThreadView, transcript: readonly EnsoTranscriptEntr
     model: runtime.modelState(),
     recordedModel: undefined,
     openDialogs: runtime.openDialogs(),
+    queue: runtime.queued(),
     usage: runtime.sessionUsage(),
     login: runtime.loginInProgress(),
   }
@@ -322,6 +327,7 @@ function coldReading(
     model: null,
     recordedModel: stored?.recordedModel,
     openDialogs: [],
+    queue: { interrupting: [], enqueued: [] },
     usage: stored?.usage ?? NO_USAGE,
     login: undefined,
   }

@@ -158,3 +158,5 @@ export type EnsoProviderLoginAnswer = Static<typeof EnsoProviderLoginAnswer>
  * @group Providers
  */
 export const EnsoProviderLogoutRequest = closedObject({ provider: NonEmptyString })
+/** @group Providers */
+export type EnsoProviderLogoutRequest = Static<typeof EnsoProviderLogoutRequest>

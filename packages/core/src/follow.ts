@@ -1,7 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { EnsoOpenDialog } from './dialog.ts'
 import { EnsoThreadModelRole } from './model-roles.ts'
-import { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
+import { EnsoLoginInProgress, EnsoObservation, EnsoQueuedPrompts } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoThreadSystemPrompt } from './prompt-library.ts'
 import { EnsoProviderRefusal } from './provider-refusal.ts'
@@ -98,6 +98,12 @@ export const EnsoFollowSnapshot = Type.Object(
     trailingRefusal: Type.Optional(EnsoProviderRefusal),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
     openDialogs: Type.Array(EnsoOpenDialog),
+    /**
+     * The prompts pi holds behind the run in flight (#917), the interrupting ones first — the same
+     * lists a later `queue` observation carries whole. Absent when nothing waits or the thread is
+     * not live. So a page that opens mid-run lists what an earlier page queued.
+     */
+    queue: Type.Optional(EnsoQueuedPrompts),
     interrupted: Type.Optional(EnsoInterruptedTail),
     /** Where the branch's runs were stopped (#766), oldest first; absent when none was — see `EnsoStoppedAfter`. */
     stoppedAfter: Type.Optional(EnsoStoppedAfter),
@@ -252,6 +258,25 @@ export const EnsoPromptBody = Type.Object(
 )
 /** @group Follow wire */
 export type EnsoPromptBody = Static<typeof EnsoPromptBody>
+
+/**
+ * The composers' drafts the page's Reload keeps in the tab's `sessionStorage` (#919), by thread:
+ * each draft's text and its attachments as `data:` URLs. Never crosses to the server; checked when
+ * the page reads it back, so a shape another bundle wrote opens no composer with it.
+ *
+ * @group Page storage
+ */
+export const EnsoKeptDrafts = Type.Record(
+  Type.String(),
+  Type.Object({
+    text: Type.String(),
+    files: Type.Array(
+      Type.Object({ id: Type.String(), filename: Type.String(), mediaType: Type.String(), url: Type.String() }),
+    ),
+  }),
+)
+/** @group Page storage */
+export type EnsoKeptDrafts = Static<typeof EnsoKeptDrafts>
 
 /**
  * Decoded size of a base64 string, without decoding it: three bytes per four characters, less the padding.

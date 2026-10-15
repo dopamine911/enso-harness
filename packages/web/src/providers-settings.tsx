@@ -195,20 +195,18 @@ function QuestionForm({
   )
 }
 
+/** What the login panel shows, and what its buttons do. */
+interface LoginPanelProps {
+  readonly login: EnsoProviderLogin
+  readonly busy: boolean
+  readonly onAnswer: (answer: EnsoProviderLoginAnswer) => void
+  readonly onCancel: () => void
+  readonly onDismiss: () => void
+}
+
 /** The login started here, as it goes: what it said, the question it waits on, how it ended. */
-function LoginPanel({
-  login,
-  busy,
-  onAnswer,
-  onCancel,
-  onDismiss,
-}: {
-  login: EnsoProviderLogin
-  busy: boolean
-  onAnswer: (answer: EnsoProviderLoginAnswer) => void
-  onCancel: () => void
-  onDismiss: () => void
-}): React.ReactNode {
+function LoginPanel(props: LoginPanelProps): React.ReactNode {
+  const { login, busy, onAnswer, onCancel, onDismiss } = props
   const running = login.status === 'running'
   const way = login.authType === 'api_key' ? 'an API key' : 'a subscription'
   const heading: Readonly<Record<EnsoProviderLogin['status'], string>> = {

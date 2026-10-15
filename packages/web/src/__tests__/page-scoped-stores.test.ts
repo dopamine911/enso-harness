@@ -29,6 +29,8 @@ const PAGE_SCOPED_BY_DESIGN: readonly string[] = [
   'thread-stores.ts:browserLogging',
   // The page's clock (#278): one interval, every relative age on the page subscribed to it.
   'page-clock.ts:pageClock',
+  // Whether the page may be out of date (#919): one banner per page, whichever thread or pane fell behind.
+  'page-health.ts:fault',
 ]
 
 const MODULE_LEVEL_STORE = /^(?:export )?const (\w+)(?::[^=]+)? = create\w*(?:Store|Lines)\w*(?:<[^\n]*?>)?\(/gm

@@ -83,7 +83,8 @@ function readSection(home: string | undefined): SectionRead {
  * The section written over the user's file, every other section kept. The page saves the section
  * whole and holds no `ETag`, so the write is over whatever is on disk now — none, or the file there.
  */
-function writeSection(home: string, models: EnsoModelsConfig): SectionRead {
+function writeSection(home: string | undefined, models: EnsoModelsConfig): SectionRead {
+  if (home === undefined) return { kind: 'refused', reason: NO_USER_CONFIG }
   const written = writeConfigSections(
     home,
     bytesOf(ensoConfigPath(home)) === undefined ? { kind: 'absent' } : { kind: 'present' },
@@ -321,13 +322,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   const providerOf = async (id: string): Promise<HostProviderFacts | undefined> =>
     (await providers.list()).find((candidate) => candidate.id === id)
 
-  async function respondToSectionWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const models = await readClosedBody(request, response, SECTION_BODY)
-    if (models === undefined) return
-    if (ensoHome === undefined) {
-      refuseWith(response, { status: 422, reason: NO_USER_CONFIG })
-      return
-    }
+  function respondToSectionWrite(models: EnsoModelsConfig, response: ServerResponse): void {
     const written = writeSection(ensoHome, models)
     if (written.kind === 'refused') log.warn('models settings not saved: {reason}', { reason: written.reason })
     else log.info('models settings saved to {path}', { path: written.path, roles: Object.keys(models.roles ?? {}) })
@@ -335,9 +330,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   }
 
   /** Start pi's login, the one `/login` runs, outside any thread; the answer once it settles or asks. */
-  async function respondToLogin(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const body = await readClosedBody(request, response, LOGIN_BODY)
-    if (body === undefined) return
+  async function respondToLogin(body: EnsoProviderLoginRequest, response: ServerResponse): Promise<void> {
     // The providers are read BEFORE the running-login check, and nothing awaits between that check
     // and `login = started`: two logins sent together cannot both pass it, the second overwriting
     // the first and leaving its question unanswerable.
@@ -430,9 +423,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
     await answerAt(nextChange(started), started, response)
   }
 
-  async function respondToAnswer(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const body = await readClosedBody(request, response, ANSWER_BODY)
-    if (body === undefined) return
+  async function respondToAnswer(body: EnsoProviderLoginAnswer, response: ServerResponse): Promise<void> {
     const current = login
     if (current?.answer === undefined || current.state.question?.id !== body.questionId) {
       refuseWith(response, { status: 409, reason: 'no login asks that question now' })
@@ -442,9 +433,7 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
     await answerAt(nextChange(current), current, response)
   }
 
-  async function respondToLogout(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const body = await readClosedBody(request, response, LOGOUT_BODY)
-    if (body === undefined) return
+  async function respondToLogout(body: EnsoProviderLogoutRequest, response: ServerResponse): Promise<void> {
     const provider = await providerOf(body.provider)
     if (provider?.stored !== true) {
       refuseWith(response, {
@@ -485,17 +474,30 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
     return true
   }
 
+  /** Answer through `respond` once the body is `body`'s, refused already when it is not; as `answered`. */
+  function answeredWith<Schema extends TSchema>(
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: ClosedBody<Schema>,
+    respond: (parsed: Static<Schema>, response: ServerResponse) => void | Promise<void>,
+  ): true {
+    return answered(response, async () => {
+      const parsed = await readClosedBody(request, response, body)
+      if (parsed !== undefined) await respond(parsed, response)
+    })
+  }
+
   /** The section and the listing routes. */
   function dispatchSettingsRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
     if (request.method === 'GET' && url === '/api/models/settings')
       return answered(response, () => answerSection(response, readSection(ensoHome)))
     if (request.method === 'PUT' && url === '/api/models/settings')
-      return answered(response, () => respondToSectionWrite(request, response))
+      return answeredWith(request, response, SECTION_BODY, respondToSectionWrite)
     if (request.method === 'GET' && url === '/api/providers')
       return answered(response, async () => answerJson(response, await listing()))
     if (request.method === 'POST' && url === '/api/providers/logout')
-      return answered(response, () => respondToLogout(request, response))
+      return answeredWith(request, response, LOGOUT_BODY, respondToLogout)
     return false
   }
 
@@ -503,11 +505,11 @@ export function createModelsRoutes(state: ModelsRoutesState): ModelsRoutes {
   function dispatchLoginRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
     if (request.method === 'POST' && url === '/api/providers/login')
-      return answered(response, () => respondToLogin(request, response))
+      return answeredWith(request, response, LOGIN_BODY, respondToLogin)
     if (request.method === 'GET' && url === '/api/providers/login')
       return answered(response, () => respondWithLogin(response))
     if (request.method === 'POST' && url === '/api/providers/login/answer')
-      return answered(response, () => respondToAnswer(request, response))
+      return answeredWith(request, response, ANSWER_BODY, respondToAnswer)
     if (request.method === 'POST' && url === '/api/providers/login/cancel')
       return answered(response, () => respondToCancel(response))
     return false

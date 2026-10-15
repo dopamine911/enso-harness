@@ -11,6 +11,7 @@ import type {
   EnsoModelState,
   EnsoObservation,
   EnsoPermissionModeState,
+  EnsoQueuedPrompts,
   EnsoRecordedModel,
   EnsoSessionUsage,
   EnsoSystemPromptChoice,
@@ -159,7 +160,7 @@ export interface FakeThreadRecord {
   queueClears: number
   disposed: number
   /** What pi holds behind the run — a test fills it to see a stop hand it back (#75). */
-  queue: { interrupting: string[]; enqueued: string[] }
+  queue: EnsoQueuedPrompts
 }
 
 /** The fake's own state, handed to an override so a scripted method can record and emit through it. */
@@ -225,7 +226,7 @@ function fakeSystemPromptPreview(candidate: EnsoSystemPromptChoice | null): Syst
 }
 
 /** Hand the queue back the way pi does — a copy out, the queue emptied. */
-export function takeQueue(record: FakeThreadRecord): { interrupting: string[]; enqueued: string[] } {
+export function takeQueue(record: FakeThreadRecord): EnsoQueuedPrompts {
   const cleared = { interrupting: [...record.queue.interrupting], enqueued: [...record.queue.enqueued] }
   record.queue = { interrupting: [], enqueued: [] }
   return cleared
@@ -413,6 +414,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       emit({ kind: 'queue', interrupting: [], enqueued: [] })
       return cleared
     },
+    queued: () => ({ interrupting: [...record.queue.interrupting], enqueued: [...record.queue.enqueued] }),
     dispose: () => {
       record.disposed += 1
     },

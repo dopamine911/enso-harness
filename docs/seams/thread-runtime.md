@@ -177,7 +177,13 @@ export const ThreadRuntime = Type.Object({
    * The stop route hands the texts back to the tab that stopped, so nothing typed is lost and
    * nothing runs unasked on the next turn. ZEN's two words (#216) — the host maps them.
    */
-  clearQueue: Type.Unsafe<() => { interrupting: string[]; enqueued: string[] }>(Type.Function([], Type.Unknown())),
+  clearQueue: Type.Unsafe<() => EnsoQueuedPrompts>(Type.Function([], Type.Unknown())),
+  /**
+   * The prompts waiting behind the run, interrupting first (#917), without touching them — what the
+   * follow's snapshot lists, so a page that opens mid-run shows the same queue as the page that
+   * queued. ZEN's two words (#216), as `clearQueue` answers.
+   */
+  queued: Type.Unsafe<() => EnsoQueuedPrompts>(Type.Function([], Type.Unknown())),
   /** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
   dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
 })
@@ -334,7 +340,8 @@ thread (`ThreadEntry.hosted.runtime`), subscribes it to the feed, and hands a `T
 the run that acquired the thread. `server/follow.ts` calls `prompt`, `continueRun` (#436),
 `resolveIncident` (#466), `listCommands`, `answerDialog`, `openDialogs`, `permissionModeState` from the
 unary routes; the abort route goes through the registry, whose `abort` is the one caller of `clearQueue`
-and `abort`.
+and `abort`. `server/thread-read.ts` reads `queued` for the follow's snapshot (#917), so a page that
+opens mid-run lists what another page queued.
 `server/literal-routes.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
 gets is observations on the follow.
 

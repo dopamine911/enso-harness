@@ -1,4 +1,4 @@
-import { EnsoStoredThread, EnsoThreadHistory } from '@enso/core'
+import { type EnsoRunStatesFrame, EnsoStoredThread, EnsoThreadHistory } from '@enso/core'
 import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
 import { createListingStore, type ListingStore } from './listing-store.ts'
@@ -7,13 +7,75 @@ import { createListingStore, type ListingStore } from './listing-store.ts'
  * The sessions a user can come back to (#95): pi's session files in this server's projects, as
  * the server lists them — the rail's rows under each project (#395). Refreshed on load and after a
  * run settles, when a session file appears or grows (`listing-store.ts` has the rules).
+ *
+ * A row's `busy` and `waiting` are as of the listing, unless the page watches the server's run
+ * states (#911, `GET /api/run-states`): each frame it hears sets them at once, and a listing that
+ * was out while a frame came is corrected by it — the frame is the newer word.
  */
-export type StoredThreadsStore = ListingStore<EnsoStoredThread>
+export interface StoredThreadsStore extends ListingStore<EnsoStoredThread> {
+  readonly applyRunStates: (frame: EnsoRunStatesFrame) => void
+}
+
+/** A thread's run as a frame said it, and how many frames had been heard by then. */
+interface HeardRun {
+  readonly busy: boolean
+  readonly waiting: boolean
+  readonly at: number
+  /** The frame said `waiting` without reading a question: a take's `run-state`, before any could open. */
+  readonly waitingUnread: boolean
+  /** The frame count at the last frame that said this thread was not busy; undefined when none was heard. */
+  readonly idleAt: number | undefined
+}
 
 export function createStoredThreadsStore(
   fetchStoredThreads: () => Promise<unknown> = fetchStoredThreadList,
 ): StoredThreadsStore {
-  return createListingStore(EnsoStoredThread, 'session listing', fetchStoredThreads)
+  const heard = new Map<string, HeardRun>()
+  let frames = 0
+  /** The frame count at the last `run-states`: a thread it did not name was held by no run then. */
+  let wholeAt = 0
+  /**
+   * `row` as the frames after the `since`-th say it; the same object when they say nothing new.
+   * ⚠ A `run-state`'s `waiting` is read at a build, a take, a release or a drop — at a take, before
+   * any question could open — and a question opening mid-run sends no frame. So when the frame was
+   * a take and no frame since the listing was asked said the thread was idle, a listing that says
+   * waiting is kept: it may have seen a question open in the run that take began. A `run-states`
+   * snapshot reads the open questions, so its `waiting` is not overridden (PR #995 review).
+   */
+  const corrected = (row: EnsoStoredThread, since: number): EnsoStoredThread => {
+    const said =
+      heard.get(row.threadId) ??
+      (wholeAt > since
+        ? { busy: false, waiting: false, at: wholeAt, waitingUnread: false, idleAt: wholeAt }
+        : undefined)
+    if (said === undefined || said.at <= since) return row
+    const listingSawThisRun = said.waitingUnread && (said.idleAt === undefined || said.idleAt <= since)
+    const waiting = listingSawThisRun ? row.waiting || said.waiting : said.waiting
+    if (row.busy === said.busy && row.waiting === waiting) return row
+    return { ...row, busy: said.busy, waiting }
+  }
+  const listing = createListingStore(EnsoStoredThread, 'session listing', fetchStoredThreads, () => {
+    const since = frames
+    return (rows) => rows.map((row) => corrected(row, since))
+  })
+  return {
+    ...listing,
+    applyRunStates: (frame) => {
+      frames += 1
+      if (frame.type === 'run-states') {
+        heard.clear()
+        wholeAt = frames
+        for (const { threadId, busy, waiting } of frame.threads) {
+          heard.set(threadId, { busy, waiting, at: frames, waitingUnread: false, idleAt: busy ? undefined : frames })
+        }
+      } else {
+        const { busy, waiting } = frame
+        const idleAt = busy ? heard.get(frame.threadId)?.idleAt : frames
+        heard.set(frame.threadId, { busy, waiting, at: frames, waitingUnread: busy, idleAt })
+      }
+      listing.update((rows) => rows.map((row) => corrected(row, frames - 1)))
+    },
+  }
 }
 
 /**

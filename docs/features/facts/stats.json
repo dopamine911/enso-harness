@@ -11,7 +11,7 @@
         "Costliest calls"
       ],
       "measured": {
-        "totalCost": "$0.1658",
+        "totalCost": "$0.1671",
         "failures": "0 · 0%",
         "offBranch": "$0.0302"
       }

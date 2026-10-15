@@ -1,22 +1,25 @@
 import { expect, test } from 'bun:test'
 import type { EnsoIncidentOpened, EnsoSessionIncidents, EnsoSessionUsage, EnsoToolRefusal } from '@enso/core'
+import { NO_SESSION_INCIDENTS } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { countThread, describeActivity, ThreadStatusView } from '../thread-status.tsx'
+import { describeRunStatus, describeStep, type RunStatusInputs, type RunStep } from '../run-status.ts'
+import { countThread, ThreadStatusView } from '../thread-status.tsx'
 
 /**
- * #90 PR 1: the always-on status bar. Activity and counts are derived from the message
- * list the page already holds; cost and context from pi's session usage (#45). Tested as the
- * two pure functions plus a static render of the view, the thread-debug.test.tsx pattern.
+ * #90 PR 1: the always-on status bar. The run's step and counts are derived from the message
+ * list the page already holds; the run's status from that and what the follow says (#914); cost
+ * and context from pi's session usage (#45). Tested as the pure functions plus a static render of
+ * the view, the thread-debug.test.tsx pattern; `run-status.test.tsx` drives the mounted page.
  */
 
 const user = (id: string, content: string): UIMessage => ({ id, role: 'user', parts: [{ type: 'text', content }] })
 const assistant = (id: string, parts: UIMessage['parts']): UIMessage => ({ id, role: 'assistant', parts })
-const call = (id: string, name: string): UIMessage['parts'][number] => ({
+const call = (id: string, name: string, args = '{}'): UIMessage['parts'][number] => ({
   type: 'tool-call',
   id,
   name,
-  arguments: '{}',
+  arguments: args,
   state: 'input-complete',
 })
 const result = (toolCallId: string): UIMessage['parts'][number] => ({
@@ -28,44 +31,67 @@ const result = (toolCallId: string): UIMessage['parts'][number] => ({
 
 const NO_USAGE: EnsoSessionUsage = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null }
 
-// ── activity ─────────────────────────────────────────────────────────────────
+/** The step the tail reads as, without its identity. */
+const stepOf = (messages: UIMessage[]): RunStep => describeStep(messages, undefined).step
 
-test('not loading is idle, whatever the transcript holds', () => {
-  const messages = [user('u1', 'hi'), assistant('a1', [call('c1', 'read')])]
-  expect(describeActivity(messages, false)).toEqual({ kind: 'idle' })
-})
+// ── the step ─────────────────────────────────────────────────────────────────
 
-// #119: after the follow ends the run flag is as of that moment — a run in flight may have
-// finished, been aborted, or died with the server. The bar says the one thing it knows.
-test('disconnected outranks the run flag: neither idle nor the tail is reported once the follow ended', () => {
-  const midRun = [user('u1', 'hi'), assistant('a1', [call('c1', 'bash')])]
-  expect(describeActivity(midRun, true, true)).toEqual({ kind: 'disconnected' })
-  expect(describeActivity(midRun, false, true)).toEqual({ kind: 'disconnected' })
-  expect(describeActivity(midRun, true, false)).toEqual({ kind: 'running', tool: 'bash' })
-})
-
-test('a run with no assistant output yet is working, not idle', () => {
-  expect(describeActivity([user('u1', 'hi')], true)).toEqual({ kind: 'working' })
-  expect(describeActivity([], true)).toEqual({ kind: 'working' })
+test('a run with no assistant output yet waits on the model', () => {
+  expect(stepOf([user('u1', 'hi')])).toEqual({ kind: 'model' })
+  expect(stepOf([])).toEqual({ kind: 'model' })
 })
 
 // ⚠ THE DONE/PENDING RULE: a call is running until its result is paired — and pairing is
 // TanStack's own selection across the whole list, not a `state` field we would have to
 // keep in step with the library.
-test('a tool call with no result is running <tool>; once its result lands the model is working again', () => {
-  const pending = [user('u1', 'hi'), assistant('a1', [{ type: 'text', content: 'let me look' }, call('c1', 'read')])]
-  expect(describeActivity(pending, true)).toEqual({ kind: 'running', tool: 'read' })
+test('a tool call with no result is running <tool> <subject>; once its result lands the model has the next request', () => {
+  const pending = [
+    user('u1', 'hi'),
+    assistant('a1', [{ type: 'text', content: 'let me look' }, call('c1', 'bash', '{"command":"bun test\\nmore"}')]),
+  ]
+  expect(stepOf(pending)).toEqual({ kind: 'running', tool: 'bash', subject: 'bun test…' })
   const paired = [user('u1', 'hi'), assistant('a1', [call('c1', 'read'), result('c1')])]
-  expect(describeActivity(paired, true)).toEqual({ kind: 'working' })
+  expect(stepOf(paired)).toEqual({ kind: 'model' })
 })
 
-test('a thinking tail is thinking; a text tail is responding', () => {
-  expect(describeActivity([user('u1', 'hi'), assistant('a1', [{ type: 'thinking', content: 'hm' }])], true)).toEqual({
+test('a thinking tail is thinking, with its text; a text tail is writing a reply', () => {
+  expect(stepOf([user('u1', 'hi'), assistant('a1', [{ type: 'thinking', content: 'hm\nwhich file' }])])).toEqual({
     kind: 'thinking',
+    text: 'hm\nwhich file',
   })
-  expect(describeActivity([user('u1', 'hi'), assistant('a1', [{ type: 'text', content: 'so' }])], true)).toEqual({
-    kind: 'responding',
+  expect(stepOf([user('u1', 'hi'), assistant('a1', [{ type: 'text', content: 'so' }])])).toEqual({ kind: 'writing' })
+})
+
+// #914: the model writing a call's arguments is on the follow before the call is in the transcript.
+test('a call the model is composing is the step, named by its subject so far and its size', () => {
+  const messages = [user('u1', 'hi'), assistant('a1', [{ type: 'thinking', content: 'write it' }])]
+  const composing = {
+    toolCallId: 't1',
+    toolName: 'write',
+    args: `{"path":"site/arcade.html","content":"<!doc${'x'.repeat(49_257)}`,
+  }
+  expect(describeStep(messages, composing)).toEqual({
+    step: { kind: 'composing', tool: 'write', subject: 'site/arcade.html', size: 49_300 },
+    key: 'composing:t1',
   })
+  // Cut mid-subject: what has come so far.
+  expect(describeStep(messages, { ...composing, args: '{"command":"git sta' }).step).toMatchObject({
+    subject: 'git sta',
+  })
+})
+
+test('a delta into the same step keeps its identity; the next step has another', () => {
+  const thinking = (content: string): UIMessage[] => [
+    user('u1', 'hi'),
+    assistant('a1', [{ type: 'thinking', content }]),
+  ]
+  expect(describeStep(thinking('a'), undefined).key).toBe(describeStep(thinking('a longer thought'), undefined).key)
+  const running = [user('u1', 'hi'), assistant('a1', [{ type: 'thinking', content: 'a' }, call('c1', 'read')])]
+  const done = [
+    user('u1', 'hi'),
+    assistant('a1', [{ type: 'thinking', content: 'a' }, call('c1', 'read'), result('c1')]),
+  ]
+  expect(describeStep(running, undefined).key).not.toBe(describeStep(done, undefined).key)
 })
 
 // #418: joining a live run (a reload) opens a new assistant message after the stored one holding
@@ -73,20 +99,20 @@ test('a thinking tail is thinking; a text tail is responding', () => {
 // past a user message: an earlier turn's unanswered call is not what a new prompt is doing.
 test('an empty assistant message at the tail is read past to the step behind it, never past a user message', () => {
   const joined = [user('u1', 'pick one'), assistant('a1', [call('c1', 'ask_user')]), assistant('a2', [])]
-  expect(describeActivity(joined, true)).toEqual({ kind: 'running', tool: 'ask_user' })
+  expect(stepOf(joined)).toMatchObject({ kind: 'running', tool: 'ask_user' })
   const newPrompt = [user('u1', 'hi'), assistant('a1', [call('c1', 'bash')]), user('u2', 'next'), assistant('a2', [])]
-  expect(describeActivity(newPrompt, true)).toEqual({ kind: 'working' })
+  expect(stepOf(newPrompt)).toEqual({ kind: 'model' })
 })
 
-// ⓘ Diverges from the transcript's render-everything policy on purpose: a one-word summary
-// has no word for an image or an unmatched result, and `working` is true of both — the run
-// is in flight, and the part itself is still visible in the transcript.
-test('a tail the summary has no word for — an image, an unmatched result — is working', () => {
+// ⓘ Diverges from the transcript's render-everything policy on purpose: a one-line summary
+// has no word for an image or an unmatched result, and "waiting on the model" is true of both —
+// the run is in flight, and the part itself is still visible in the transcript.
+test('a tail the summary has no word for — an image, an unmatched result — waits on the model', () => {
   const image = assistant('a1', [{ type: 'image', source: { type: 'url', value: 'x.png' } }])
-  expect(describeActivity([user('u1', 'hi'), image], true)).toEqual({ kind: 'working' })
+  expect(stepOf([user('u1', 'hi'), image])).toEqual({ kind: 'model' })
   // A result whose call never crossed: TanStack keeps it as an unmatched `toolResult` part.
   const orphanResult = assistant('a2', [result('never-called')])
-  expect(describeActivity([user('u1', 'hi'), orphanResult], true)).toEqual({ kind: 'working' })
+  expect(stepOf([user('u1', 'hi'), orphanResult])).toEqual({ kind: 'model' })
 })
 
 // ⚠ THE TAIL READ IS PER-MESSAGE (#282). This function selects the LAST message ALONE
@@ -95,29 +121,105 @@ test('a tail the summary has no word for — an image, an unmatched result — i
 // reachable shape where the two selections could disagree and do not: a result at the tail
 // whose call sits in an EARLIER message is `matched` under the whole-transcript selection
 // and unmatched under this one, so it is filtered in the first case and hits the catch-all
-// in the second — `working` both ways. A red line here means the tail read began depending
-// on cross-message pairing, and the per-message selection is no longer sound.
-test('a result at the tail whose call sits in an earlier message is working (#282)', () => {
+// in the second — the model's turn both ways. A red line here means the tail read began
+// depending on cross-message pairing, and the per-message selection is no longer sound.
+test('a result at the tail whose call sits in an earlier message waits on the model (#282)', () => {
   const split = [assistant('a1', [call('c1', 'read')]), assistant('a2', [result('c1')])]
-  expect(describeActivity(split, true)).toEqual({ kind: 'working' })
+  expect(stepOf(split)).toEqual({ kind: 'model' })
 })
 
 // ⚠ THE ONE ACCEPTED DIVERGENCE (#282). A result that follows another part INSIDE a message
 // that does not hold its call is the single shape where the per-message read answers
 // differently from the whole-transcript read it replaced: matched-and-filtered there, so the
-// text behind it was the tail (`responding`); unmatched here, so the result is the tail
-// (`working`). It is recorded rather than fixed because TanStack cannot produce it — the
-// stream processor anchors a `tool-result` into the message holding its `tool-call`, and
-// carries the call forward into the result's message when the snapshot lacks it
-// (`@tanstack/ai` `reconcileSnapshotToolCalls`, post-passes (a) and (b)), so a result and
-// its call are never in different messages with something between. A red line here means
-// that normalisation changed and the tail read needs the transcript-wide pairing back.
-test('⚠ a result behind a text part, call in an earlier message: working, not responding (#282)', () => {
+// text behind it was the tail (writing); unmatched here, so the result is the tail (the model's
+// turn). It is recorded rather than fixed because TanStack cannot produce it — the stream
+// processor anchors a `tool-result` into the message holding its `tool-call`, and carries the
+// call forward into the result's message when the snapshot lacks it (`@tanstack/ai`
+// `reconcileSnapshotToolCalls`, post-passes (a) and (b)), so a result and its call are never in
+// different messages with something between. A red line here means that normalisation changed
+// and the tail read needs the transcript-wide pairing back.
+test('⚠ a result behind a text part, call in an earlier message: the model, not writing (#282)', () => {
   const wedged = [
     assistant('a1', [call('c1', 'read')]),
     assistant('a2', [{ type: 'text', content: 'done' }, result('c1')]),
   ]
-  expect(describeActivity(wedged, true)).toEqual({ kind: 'working' })
+  expect(stepOf(wedged)).toEqual({ kind: 'model' })
+})
+
+// ── the status ───────────────────────────────────────────────────────────────
+
+const AT = Date.UTC(2026, 9, 13, 13, 34)
+const MINUTE = 60_000
+
+/** A page at rest, live, nothing open — each test moves the one input it is about. */
+function inputs(overrides: Partial<RunStatusInputs>): RunStatusInputs {
+  return {
+    generating: false,
+    step: { step: { kind: 'model' }, key: 'model:' },
+    stepSince: AT,
+    liveView: { state: 'live' },
+    disconnected: false,
+    fault: undefined,
+    dialog: undefined,
+    pulse: { runStartedAt: undefined, composing: undefined, request: undefined, ended: undefined },
+    outputAt: undefined,
+    refusal: undefined,
+    incidents: NO_SESSION_INCIDENTS,
+    now: AT,
+    ...overrides,
+  }
+}
+
+const QUESTION = { id: 'd1', dialog: { method: 'confirm', title: 'Run rm -rf build?', message: '' } } as const
+
+// #119, #914: a page not receiving the thread cannot vouch for anything on it — not the run, and
+// not that the question it shows is still open.
+test('a lost live view outranks the question and the run; it asks for a reload once the page says so', () => {
+  const lost = inputs({ generating: true, dialog: QUESTION, liveView: { state: 'silent', since: AT } })
+  expect(describeRunStatus(lost)).toEqual({ kind: 'lost', since: AT, reload: false })
+  const fault = { trigger: 'lost', error: 'gone', threadId: 't1' } as const
+  expect(describeRunStatus({ ...lost, fault })).toEqual({ kind: 'lost', since: AT, reload: true })
+  expect(describeRunStatus(inputs({ disconnected: true }))).toMatchObject({ kind: 'lost' })
+})
+
+test('a question outranks the run: waiting on you, with its one line', () => {
+  expect(describeRunStatus(inputs({ generating: true, dialog: QUESTION }))).toEqual({
+    kind: 'waiting',
+    dialogId: 'd1',
+    question: 'Run rm -rf build?',
+  })
+})
+
+test('working until nothing has come for the threshold — keepalives are not output — then possibly stuck', () => {
+  const working = inputs({
+    generating: true,
+    pulse: { runStartedAt: AT, composing: undefined, request: undefined, ended: undefined },
+    outputAt: AT + MINUTE,
+    now: AT + 3 * MINUTE + 59_000,
+  })
+  expect(describeRunStatus(working)).toMatchObject({ kind: 'working', runSince: AT })
+  expect(describeRunStatus({ ...working, now: AT + 4 * MINUTE })).toMatchObject({
+    kind: 'stuck',
+    quietSince: AT + MINUTE,
+  })
+})
+
+test('a run that ended says how until the next prompt: a Stop, its error, the provider, a guard, or finished', () => {
+  const ended = (aborted: boolean, error?: string): Partial<RunStatusInputs> => ({
+    pulse: { runStartedAt: undefined, composing: undefined, request: undefined, ended: { aborted, error } },
+  })
+  expect(describeRunStatus(inputs({}))).toEqual({ kind: 'idle' })
+  expect(describeRunStatus(inputs(ended(false)))).toMatchObject({ ending: 'finished' })
+  expect(describeRunStatus(inputs(ended(true)))).toMatchObject({ ending: 'stopped' })
+  expect(describeRunStatus(inputs(ended(false, 'guard.ts failed on tool_call: boom')))).toMatchObject({
+    ending: 'failed',
+    reason: 'guard.ts failed on tool_call: boom',
+  })
+  const refusal = { refusalClass: 'rate-limited', provider: 'Anthropic', outputAtRefusal: 0 } as const
+  expect(describeRunStatus(inputs({ ...ended(false), refusal }))).toMatchObject({
+    ending: 'failed',
+    reason: 'Anthropic: rate-limited',
+  })
 })
 
 // ── counts ───────────────────────────────────────────────────────────────────
@@ -177,7 +279,8 @@ test('⚠ an error result something refused counts as refused — a guard, a rul
 const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string =>
   renderToStaticMarkup(
     <ThreadStatusView
-      activity={props.activity ?? { kind: 'idle' }}
+      status={props.status ?? { kind: 'idle' }}
+      now={props.now ?? AT}
       counts={props.counts ?? { prompts: 0, toolCalls: 0, refused: 0, exited: 0, failed: 0 }}
       usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
@@ -286,20 +389,59 @@ test('an open halted incident requires intervention in the refusal colour; halti
   expect(resumed).not.toContain('intervention')
 })
 
-test('disconnected renders as its own word, with the recovery in the title', () => {
-  const rendered = render({ activity: { kind: 'disconnected' } })
-  expect(rendered).toContain('disconnected')
-  expect(rendered).toContain('reload and resume from the rail')
+test('a lost live view says so, then the way back', () => {
+  const reconnecting = render({ status: { kind: 'lost', since: AT, reload: false } })
+  expect(reconnecting).toContain('live view lost')
+  expect(reconnecting).toContain('not receiving updates — reconnecting…')
+  const reload = render({ status: { kind: 'lost', since: AT, reload: true } })
+  expect(reload).toContain('Reload to catch up')
+  expect(reload).toContain('>Reload</button>')
 })
 
-test('the running tool is named, and counts read as English', () => {
+test('working names the step, how long it has run and how long the run has, and the request’s output so far; counts read as English', () => {
   const rendered = render({
-    activity: { kind: 'running', tool: 'bash' },
+    status: {
+      kind: 'working',
+      step: { kind: 'thinking', text: 'Pong first.' },
+      stepSince: AT - 42_000,
+      runSince: AT - 10 * MINUTE - 3000,
+      request: { startedAt: AT - 42_000, thinking: 18_000, text: 0, tool: 400 },
+    },
     counts: { prompts: 1, toolCalls: 1, refused: 0, exited: 0, failed: 0 },
   })
-  expect(rendered).toContain('running bash')
+  expect(rendered).toContain('working')
+  expect(rendered).toContain('thinking')
+  expect(rendered).toContain('>42s<')
+  expect(rendered).toContain('run 10m 3s')
+  expect(rendered).toContain('~18.4K chars')
   expect(rendered).toContain('1 prompt<')
   expect(rendered).toContain('1 tool call<')
+  // Nothing streamed yet: no figure, rather than a zero.
+  const quiet = render({
+    status: {
+      kind: 'working',
+      step: { kind: 'model' },
+      stepSince: AT,
+      runSince: AT,
+      request: { startedAt: AT, thinking: 0, text: 0, tool: 0 },
+    },
+    counts: { prompts: 1, toolCalls: 0, refused: 0, exited: 0, failed: 0 },
+  })
+  expect(quiet).not.toContain('chars')
+})
+
+test('possibly stuck is an observation, with what has been open and a Stop', () => {
+  const rendered = renderToStaticMarkup(
+    <ThreadStatusView
+      status={{ kind: 'stuck', step: { kind: 'model' }, stepSince: AT, quietSince: AT }}
+      now={AT + 3 * MINUTE + 5000}
+      onStop={() => undefined}
+      counts={{ prompts: 1, toolCalls: 0, refused: 0, exited: 0, failed: 0 }}
+    />,
+  )
+  expect(rendered).toContain('possibly stuck')
+  expect(rendered).toMatch(/no output for 3 min \(model request open since \d\d:\d\d/)
+  expect(rendered).toContain('>Stop</button>')
 })
 
 // #45: before the follow's first snapshot the page does not know what was spent — `$0.0000`

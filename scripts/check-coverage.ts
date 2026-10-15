@@ -94,11 +94,17 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  * Re-measured for #810 (the server's route groups, on top of #801's host modules — 272 owned
  * sources): the 80% bound asks for 217, and ~10% under gives 245.
  *
- * Re-measured 2026-10-15 (#904's providers, roles and models routes merged with #553's prompt runs
- * and Diff Viewer, #970's permission rules, #976's tool views, #977's config approvals and #934's
- * projects settings — 330 owned sources): the 80% bound asks for 264, and ~10% under gives 297.
+ * Re-measured 2026-10-15 (#553's prompt runs and Diff Viewer merged with #970's permission rules
+ * and #976's tool views — 312 owned sources): the 80% bound asks for 249, and ~10% under gives 281.
+ *
+ * Re-measured 2026-10-15 again (#919's health checks, fault banner and draft-keeping reload merged
+ * onto that — 318 owned sources): the 80% bound asks for 254, so 281 still holds.
+ *
+ * Re-measured 2026-10-15 for #904 (providers, roles and the models routes, merged with #977's
+ * config approvals, #934's projects settings and the live-page stack #980–#998 — 342 owned
+ * sources): the 80% bound asks for 273, and ~10% under gives 308.
  */
-export const MINIMUM_REPORTED_FILES = 297
+export const MINIMUM_REPORTED_FILES = 308
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 

@@ -7,8 +7,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { configureBrowserLogging, pageLogLevel } from './browser-logging.ts'
 import { ChatScreen } from './chat-screen.tsx'
 import { applyFonts, linkFontFaces, readSavedFonts } from './fonts.ts'
+import { watchPageFaults } from './page-health.ts'
 import { applyTheme, pageStorage, readSavedTheme } from './theme.ts'
-import { browserLogging } from './thread-stores.ts'
+import { browserLogging, threadOnScreen } from './thread-stores.ts'
 
 /**
  * THE ENTRY, deliberately thin: mount the app, nothing else. Everything importable lives
@@ -39,6 +40,9 @@ browserLogging.set(
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') browserLogging.get()?.shipper?.flush(true)
 })
+// The page's own failures (#919): a throw nothing caught, a promise nobody awaited — logged with
+// the thread on screen, and the banner offers Reload. After logging, so they reach the server.
+watchPageFaults(window, threadOnScreen)
 
 const rootElement = document.getElementById('root')
 if (rootElement === null) throw new Error('Enso: #root is missing from index.html')

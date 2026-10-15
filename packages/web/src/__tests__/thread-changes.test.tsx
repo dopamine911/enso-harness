@@ -410,3 +410,35 @@ test('the route read: a payload, a thread nothing has run in, and a schema miss'
     problem: "the server's changes payload did not match its schema",
   })
 })
+
+// #913: a write the model is composing, or pi holds unanswered, is drawn above the diff as NOT applied.
+test('⚠ a pending write is labelled not applied; refused, only its reason stays; at rest nothing is said of a run', () => {
+  const change = {
+    toolCallId: 'w1',
+    tool: 'write',
+    path: 'site/arcade.html',
+    content: '<!doctype html>\n<canvas>',
+    edits: [],
+    size: 21_504,
+  }
+  const AT = 1_700_000_000_000
+  const live = { runSince: AT - 72_000, request: undefined, now: AT }
+  const composing = renderToStaticMarkup(
+    <ThreadChangesView outcome={read([])} live={live} pending={{ state: 'composing', change }} />,
+  )
+  expect(composing).toContain('write site/arcade.html')
+  expect(composing).toContain('being written — not applied yet')
+  expect(composing).toContain('21 KB so far')
+  expect(composing).toContain('&lt;canvas&gt;')
+  expect(composing).toContain('Nothing differs yet: a run is in progress · 1m 12s.')
+  const refused = renderToStaticMarkup(
+    <ThreadChangesView
+      outcome={read([])}
+      pending={{ state: 'refused', change, reason: 'a guard refused a write outside the project' }}
+    />,
+  )
+  expect(refused).toContain('refused — not applied')
+  expect(refused).toContain('a guard refused a write outside the project')
+  expect(refused).not.toContain('&lt;canvas&gt;')
+  expect(render(read([]))).not.toContain('in progress')
+})

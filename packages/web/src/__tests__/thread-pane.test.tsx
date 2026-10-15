@@ -668,7 +668,7 @@ test("every request a pane makes goes through its thread's fetch, never the page
 
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────
 
-test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode chip still offered (#618); settled → idle, all back', async () => {
+test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode chip still offered (#618); settled → finished, all back', async () => {
   const pane = await mountPane()
   expect(pane.status()).toContain('idle')
   expect(pane.stopButton()).toBeNull()
@@ -691,10 +691,34 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode ch
     { type: 'status', live: true, busy: false, generation: 3 },
   )
   await eventually(() => {
-    expect(pane.status()).toContain('idle')
+    expect(pane.status()).toContain('finished')
     expect(pane.stopButton()).toBeNull()
     expect(pane.chip('Mode').disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(false)
+  })
+  await pane.unmount()
+})
+
+// #911: the rail must stop saying running on the FIRST frame that says the run is over — the
+// settle, or a released status where nothing settles (an extension command) — not a later one.
+test('⚠ the rail row stops saying running on the one frame that ends the run: a settle alone, or a released status alone (#911)', async () => {
+  const pane = await mountPane()
+  const railState = (): string | undefined =>
+    threadListStore.get().find((thread) => thread.threadId === pane.stores.threadId)?.headline?.state
+  await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
+  await eventually(() => expect(railState()).toBe('working'))
+  await pane.settle({ type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } })
+  await eventually(() => {
+    expect(railBusy(pane.stores.threadId)).toBe(false)
+    expect(railState()).toBe('finished')
+  })
+
+  await pane.settle({ type: 'status', live: true, busy: true, generation: 2 })
+  await eventually(() => expect(railState()).toBe('working'))
+  await pane.settle({ type: 'status', live: true, busy: false, generation: 2 })
+  await eventually(() => {
+    expect(railBusy(pane.stores.threadId)).toBe(false)
+    expect(railState()).toBe('finished')
   })
   await pane.unmount()
 })
@@ -1316,9 +1340,10 @@ test("⚠ the composer's e2e selectors match the rendered markup, and the spec's
   await pane.unmount()
 })
 
-// PR #129 review: the take-back runs after a network round trip, from a closure an older
-// render made. It must act on the transcript as it is THEN — not revert what streamed in between.
-test('⚠ a queued prompt refused after a delay takes back only its own bubble; deltas that streamed meanwhile stay', async () => {
+// PR #129 review: the take-back runs after a network round trip, from a closure an older render
+// made. A queued prompt has no bubble (#917), so a refusal touches only the draft — never the
+// transcript, and not the deltas that streamed in between.
+test('⚠ a queued prompt refused after a delay comes back to the draft; deltas that streamed meanwhile stay', async () => {
   const server = createScriptedFetch()
   let releaseSecondPrompt: () => void = () => undefined
   let prompts = 0
@@ -1369,7 +1394,11 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
     pressEnter(composer())
     await tick()
   })
-  await eventually(() => expect(container.textContent).toContain('second, queued'))
+  // Held by pi, it is not in the transcript (#917): sent, the draft is empty and no bubble holds it.
+  await eventually(() => {
+    expect(prompts).toBe(2)
+    expect(container.textContent).not.toContain('second, queued')
+  })
   // Meanwhile the first answer streams.
   await flush(async () => {
     server.frame({ type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } })
@@ -1381,7 +1410,7 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
     await tick()
   })
   await eventually(() => expect(container.textContent).toContain('streamed while held'))
-  // Now the refusal lands: its bubble leaves, its text returns to the draft — and the delta STAYS.
+  // Now the refusal lands: its text returns to the draft — and the delta STAYS.
   await flush(async () => {
     releaseSecondPrompt()
     await tick()
@@ -1398,8 +1427,12 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
 
 // ── the follow ending under the page (#103 receipt, #119) ───────────────────────────────
 
+function userBubbles(pane: MountedPane): string[] {
+  return [...pane.container.querySelectorAll('[data-role="user"]')].map((bubble) => bubble.textContent ?? '')
+}
+
 // @pins abort-clear-restore/composer-takes-back
-test('Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer, and a stop hands it back (#75)', async () => {
+test('Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer and not in the transcript, and a stop hands it back (#75, #917)', async () => {
   const pane = await mountPane({ server: { queued: ['by the button, mid-run'] } })
   await pane.settle(SNAPSHOT_IDLE)
   await flush(async () => {
@@ -1415,7 +1448,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
 
   // A prompt during the run: to pi NOW as a follow-up — not TanStack's browser queue (which
-  // held it until settle before #75) — with the user message in the transcript at once.
+  // held it until settle before #75) — and NOT into the transcript: pi has not sent it (#917).
   await flush(async () => {
     typeInto(pane.composer(), 'by the button, mid-run')
     await tick()
@@ -1431,7 +1464,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
       { message: 'hello pi' },
       { message: 'by the button, mid-run', admission: 'enqueue' },
     ])
-    expect(pane.container.textContent).toContain('by the button, mid-run')
+    expect(userBubbles(pane)).toEqual([expect.stringContaining('hello pi')])
   })
   // pi lists it for every follower; this pane shows the list above the composer.
   await pane.settle({
@@ -1446,7 +1479,12 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
 
   // Stop: pi is told, its queue is cleared (the frame every follower reads), and the words
-  // come back to THIS composer — clear-and-restore, pi's TUI's behaviour.
+  // come back to THIS composer — clear-and-restore, pi's TUI's behaviour — AFTER what the user
+  // has typed since, which stays (PR #988 review: an empty draft could not tell append from replace).
+  await flush(async () => {
+    typeInto(pane.composer(), 'half a thought')
+    await tick()
+  })
   const stop = pane.stopButton()
   if (stop === null) throw new Error('expected the stop button during the run')
   await flush(async () => {
@@ -1455,15 +1493,136 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   })
   await eventually(() => {
     expect(pane.server.abortCount()).toBe(1)
-    expect(pane.composer().value).toBe('by the button, mid-run')
+    expect(pane.composer().value).toBe('half a thought\n\nby the button, mid-run')
   })
   await pane.settle({ type: 'observation', seq: 2, observation: { kind: 'queue', interrupting: [], enqueued: [] } })
   await eventually(() => {
     expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull()
-    // The bubble that was never asked leaves with its text (pi's TUI does the same): with the
-    // queue list gone, the ONLY place the words remain is the composer. The first prompt's bubble stays.
+    // The words were never in the transcript (#917): with the queue list gone, the ONLY place
+    // they remain is the composer. The first prompt's bubble stays.
     expect((pane.container.textContent?.match(/by the button, mid-run/g) ?? []).length).toBe(1)
+    expect(userBubbles(pane)).toEqual([expect.stringContaining('hello pi')])
     expect(pane.container.textContent).toContain('hello pi')
+  })
+  await pane.unmount()
+})
+
+// #917: a queued prompt reads in the queue only — never as a sent bubble with fork and restore —
+// until pi delivers it; then it is in the transcript, before the reply to it, and counted.
+test('⚠ a prompt queued during a run leaves the transcript unchanged and shows in the queue; delivered, it moves to the transcript (#917)', async () => {
+  const pane = await mountPane({
+    server: { promptStatus: { status: 202, body: { threadId: 't1', messageId: 'pm1', generation: 1, queued: false } } },
+  })
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), 'first ask')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(pane.status()).toContain('working'))
+  await pane.settle(
+    { type: 'status', live: true, busy: true, generation: 1 },
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'user', text: 'first ask' } },
+    { type: 'observation', seq: 2, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 3, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
+  )
+  await eventually(() => expect(assistantBubbles(pane).at(-1)).toContain('FIRST-REPLY'))
+  const transcriptBefore = userBubbles(pane)
+  expect(transcriptBefore).toEqual([expect.stringContaining('first ask')])
+
+  await flush(async () => {
+    typeInto(pane.composer(), 'where is the file?')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await pane.settle({
+    type: 'observation',
+    seq: 4,
+    observation: { kind: 'queue', interrupting: [], enqueued: ['where is the file?'] },
+  })
+  await eventually(() => {
+    expect(pane.server.prompts.at(-1)).toEqual({ message: 'where is the file?', admission: 'enqueue' })
+    expect(pane.container.querySelector('[aria-label="queued prompts"]')?.textContent).toContain('where is the file?')
+  })
+  // Queued: the transcript is as it was — no bubble (so nothing to fork or restore at), one prompt.
+  expect(userBubbles(pane)).toEqual(transcriptBefore)
+
+  // pi claims it as the run's turn ends: the queue empties, the prompt is in the transcript, the reply after it.
+  await pane.settle(
+    { type: 'observation', seq: 5, observation: { kind: 'queue', interrupting: [], enqueued: [] } },
+    { type: 'observation', seq: 6, observation: { kind: 'message-start', role: 'user', text: 'where is the file?' } },
+    { type: 'observation', seq: 7, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 8, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+  )
+  await eventually(() => {
+    expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull()
+    expect(userBubbles(pane)).toEqual([
+      expect.stringContaining('first ask'),
+      expect.stringContaining('where is the file?'),
+    ])
+    expect(assistantBubbles(pane).at(-1)).toContain('SECOND-REPLY')
+  })
+  const text = pane.container.textContent ?? ''
+  expect(text.indexOf('FIRST-REPLY')).toBeLessThan(text.indexOf('where is the file?'))
+  expect(text.indexOf('where is the file?')).toBeLessThan(text.indexOf('SECOND-REPLY'))
+  await pane.unmount()
+})
+
+// #917: a second page following the thread shows the queue another page made — from the
+// snapshot it opens on, then the follow — and counts the same prompts.
+test('⚠ a page opening on a run another page queued behind lists the same queue entry, and draws the prompt once pi delivers it (#917)', async () => {
+  const pane = await mountPane()
+  await pane.settle({
+    ...SNAPSHOT_IDLE,
+    live: true,
+    busy: true,
+    generation: 1,
+    queue: { interrupting: [], enqueued: ['where is the file?'] },
+  })
+  await eventually(() => {
+    const queueList = pane.container.querySelector('[aria-label="queued prompts"]')
+    expect(queueList?.textContent).toContain('1 prompt queued')
+    expect(queueList?.textContent).toContain('where is the file?')
+  })
+  expect(userBubbles(pane)).toEqual([])
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
+    { type: 'observation', seq: 3, observation: { kind: 'queue', interrupting: [], enqueued: [] } },
+    { type: 'observation', seq: 4, observation: { kind: 'message-start', role: 'user', text: 'where is the file?' } },
+    { type: 'observation', seq: 5, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+  )
+  await eventually(() => {
+    expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull()
+    expect(userBubbles(pane)).toEqual([expect.stringContaining('where is the file?')])
+    expect(assistantBubbles(pane).at(-1)).toContain('SECOND-REPLY')
+  })
+  // A later snapshot that lists nothing waiting clears a stale list (a resync is complete).
+  await pane.settle({ ...SNAPSHOT_IDLE, queue: { interrupting: [], enqueued: ['stale'] } }, SNAPSHOT_IDLE)
+  await eventually(() => expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull())
+  await pane.unmount()
+})
+
+// PR #988 review item 2(b): this page follows an idle thread and another page starts a run. Its
+// opening prompt — and one pi steers in right after it — arrive before any assistant message, so
+// each ends the assistant message the run opened with nothing in it. Neither draws an empty bubble.
+test('⚠ a run another page started draws its opening prompt and a back-to-back one, then one reply bubble — no empty bubble ahead (#917)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await pane.settle(
+    { type: 'status', live: true, busy: true, generation: 1 },
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'user', text: 'from the other page' } },
+    { type: 'observation', seq: 2, observation: { kind: 'message-start', role: 'user', text: 'and steered in' } },
+    { type: 'observation', seq: 3, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 4, observation: { kind: 'text-delta', contentIndex: 0, delta: 'OTHER-REPLY' } },
+  )
+  await eventually(() => {
+    expect(userBubbles(pane)).toEqual([
+      expect.stringContaining('from the other page'),
+      expect.stringContaining('and steered in'),
+    ])
+    expect(assistantBubbles(pane)).toEqual([expect.stringContaining('OTHER-REPLY')])
   })
   await pane.unmount()
 })
@@ -1647,7 +1806,7 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
   await pane.unmount()
 })
 
-test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no stop, and Enter sends nothing', async () => {
+test('⚠ the follow closing mid-run: the notice, the live view lost on the bar, no stop, and Enter sends nothing', async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 })
   await eventually(() => expect(pane.stopButton()).not.toBeNull())
@@ -1663,7 +1822,7 @@ test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no st
   })
   await eventually(() => {
     expect(pane.container.textContent).toContain('the connection to the server ended')
-    expect(pane.status()).toContain('disconnected')
+    expect(pane.status()).toContain('live view lost')
     expect(pane.stopButton()).toBeNull()
     expect(pane.sendButton().disabled).toBe(true)
     expect(pane.composer().placeholder).toContain('disconnected')
@@ -1723,7 +1882,7 @@ test('⚠ a tool call reads running… while its run is open and aborted once th
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   await eventually(() => {
-    expect(pane.status()).toContain('idle')
+    expect(pane.status()).toContain('finished')
     expect(step()).toBe('aborted')
     expect(pane.container.textContent).toContain('aborted')
     expect(pane.container.textContent).not.toContain('running…')
@@ -1962,6 +2121,125 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
     expect(pane.container.textContent).not.toContain('running…')
   })
   await pane.unmount()
+})
+
+// ── #921: each model turn's thinking reads where that turn begins, live as after a reload ────────
+
+/** A thinking card's trigger label, streaming (`Thinking...`) or done (`Thought for 3s`). */
+const THINKING_CARD_LABEL = /^(Thought|Thinking)/
+
+/** One node's row in {@link transcriptRows}, or undefined when it is none. */
+function transcriptRow(node: Node): string | undefined {
+  if (!(node instanceof Element)) return /SAID-\w+/.exec(node.textContent ?? '')?.[0]
+  if (node.hasAttribute('data-tool-call-id')) return `tool:${node.getAttribute('data-tool-call-id')}`
+  if (node.tagName === 'BUTTON' && THINKING_CARD_LABEL.test(node.textContent ?? '')) return 'thought'
+  return undefined
+}
+
+/**
+ * The pane's transcript as a reader meets it, bubble by bubble: a thinking card (`thought`), a
+ * step row (`tool:<id>`), a reply's words (`SAID-…`). Thinking is a card, not its text: a closed
+ * card draws no text, and whether one is open is not what is pinned.
+ */
+function transcriptRows(pane: MountedPane): string[][] {
+  return [...pane.container.querySelectorAll('[data-role="assistant"]')].map((bubble) => {
+    const rows: string[] = []
+    const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const row = transcriptRow(node)
+      if (row !== undefined && rows.at(-1) !== row) rows.push(row)
+    }
+    return rows
+  })
+}
+
+/** The thinking cards' labels, top to bottom. */
+const thoughtLabels = (pane: MountedPane): string[] =>
+  [...pane.container.querySelectorAll('[data-role="assistant"] button')]
+    .map((button) => button.textContent ?? '')
+    .filter((label) => THINKING_CARD_LABEL.test(label))
+
+/** How long turn 1 of the #921 test thinks: `Date.now` jumps by it, so no test waits it out. */
+const TURN_THOUGHT_S = 3
+
+test('⚠ thinking → call → result → thinking → call reads in that order live, and identically after a reload; each turn’s thinking is timed on its own (#921)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await sendPrompt(pane, 'draw a sunset')
+  const thinking = (seq: number, delta: string): EnsoFollowFrame => ({
+    type: 'observation',
+    seq,
+    observation: { kind: 'thinking-delta', contentIndex: 0, delta },
+  })
+  const call = (seq: number, toolCallId: string): EnsoFollowFrame => ({
+    type: 'observation',
+    seq,
+    observation: { kind: 'tool-call', toolCallId, toolName: 'bash', args: { command: `echo ${toolCallId}` } },
+  })
+  const result = (seq: number, toolCallId: string): EnsoFollowFrame => ({
+    type: 'observation',
+    seq,
+    observation: { kind: 'tool-result', toolCallId, toolName: 'bash', text: 'ok', complete: true, isError: false },
+  })
+  // Turn 1 thinks; the card is open and streaming while it does.
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'user', text: 'draw a sunset' } },
+    { type: 'observation', seq: 2, observation: { kind: 'message-start', role: 'assistant' } },
+    thinking(3, 'plan the stripes'),
+  )
+  await eventually(() => expect(thoughtLabels(pane)).toEqual(['Thinking...']))
+  // The card times its thinking with `Date.now` (`reasoning.tsx`): the clock jumps ahead instead
+  // of the test sleeping, and keeps running, so `eventually`'s deadline still lapses on a failure.
+  const realNow = Date.now.bind(Date)
+  const clock = spyOn(Date, 'now').mockImplementation(() => realNow() + TURN_THOUGHT_S * 1000)
+  // ...then calls, gets its result, and turn 2 begins thinking.
+  await pane.settle(
+    call(4, 'c1'),
+    result(5, 'c1'),
+    { type: 'observation', seq: 6, observation: { kind: 'message-start', role: 'assistant' } },
+    thinking(7, 'settle the parameters'),
+  )
+  // Turn 1's card stopped when its turn did and says how long THAT turn thought; turn 2's is its own.
+  await eventually(() => {
+    const [first, second, ...rest] = thoughtLabels(pane)
+    expect(Number(/^Thought for (\d+)s$/.exec(first ?? '')?.[1])).toBeGreaterThanOrEqual(TURN_THOUGHT_S)
+    expect([second, ...rest]).toEqual(['Thinking...'])
+  })
+  await pane.settle(
+    call(8, 'c2'),
+    result(9, 'c2'),
+    { type: 'observation', seq: 10, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 11, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SAID-DONE' } },
+    { type: 'observation', seq: 12, observation: { kind: 'settled', aborted: false } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  const expected = [['thought', 'tool:c1'], ['thought', 'tool:c2'], ['SAID-DONE']]
+  await eventually(() => expect(transcriptRows(pane)).toEqual(expected))
+  clock.mockRestore()
+  await pane.unmount()
+
+  // The same run as a reload mounts it: one message per pi message, each result paired into the
+  // message holding its call — `transcript-to-messages.ts`'s shape, pinned in its own tests.
+  const turn = (id: string, thought: string, toolCallId: string): UIMessage => ({
+    id,
+    role: 'assistant',
+    parts: [
+      { type: 'thinking', content: thought },
+      { type: 'tool-call', id: toolCallId, name: 'bash', arguments: '{}', state: 'complete', output: 'ok' },
+      { type: 'tool-result', toolCallId, name: 'bash', content: 'ok', state: 'complete' },
+    ],
+  })
+  const messages = [
+    text('s-u1', 'user', 'draw a sunset'),
+    turn('s-a1', 'plan the stripes', 'c1'),
+    turn('s-a2', 'settle the parameters', 'c2'),
+    text('s-a3', 'assistant', 'SAID-DONE'),
+  ]
+  const threadId = crypto.randomUUID()
+  const reloaded = await mountPane({ history: storedHistory(threadId, messages) })
+  await reloaded.settle({ ...SNAPSHOT_IDLE, threadId, messageCount: messages.length })
+  await eventually(() => expect(transcriptRows(reloaded)).toEqual(expected))
+  await reloaded.unmount()
 })
 
 // ── #739: a long thread opens on its last page, and a chunk redraws only its own message ─────────
@@ -2293,8 +2571,8 @@ test('⚠ an incident card reads after the message holding its tipping call, and
     { type: 'observation', seq: 8, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
-  // Live, one bubble holds the whole run (every turn of it), so the card follows the run's reply.
-  const firstRun = ['first prompt', 'CALLING-REPLY', 'WRAP-UP', 'Incident inc-live']
+  // Live, each turn is its own bubble (#921), so the card follows the turn holding its call — as a reload reads it.
+  const firstRun = ['first prompt', 'CALLING-REPLY', 'Incident inc-live', 'WRAP-UP']
   await eventually(() => expect(readingOrder(pane, firstRun)).toEqual(firstRun))
   await sendPrompt(pane, 'second prompt')
   await pane.settle(
@@ -2520,7 +2798,7 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
     },
   })
   await eventually(() => {
-    expect(alpha.status()).toContain('working')
+    expect(alpha.status()).toContain('waiting on you')
     expect(alpha.status()).toContain('$0.0123')
     expect(alpha.container.textContent).toContain('Only alpha asks')
     expect(bravo.status()).toContain('idle')
@@ -4646,6 +4924,53 @@ test('a URL naming a deleted thread (410) is said on the rail and never started 
     window.history.replaceState(null, '', '/')
     await flush(async () => root.unmount())
     container.remove()
+  }
+})
+
+// #938: back/forward to panes the page partly holds adopts the rest — and adopting one past the
+// follow budget evicts the oldest idle thread. The held panes the URL names are about to be shown,
+// so they are never that thread: otherwise the layout lands naming a thread the page just dropped.
+test('⚠ restoring panes at the follow budget never evicts a held pane the URL names (#938)', async () => {
+  const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()]
+  const [held, other, left, right, adopted] = ids as [string, string, string, string, string]
+  // Stored and prompted, so leaving one keeps it on the page; `adopted` is the server's, not yet the page's.
+  const stored = (threadId: string): EnsoThreadHistory => ({
+    threadId,
+    projectId: 'p-launch',
+    messages: [
+      { id: `u-${threadId}`, role: 'user', parts: [{ type: 'text', content: 'hello' }] },
+      { id: `a-${threadId}`, role: 'assistant', parts: [{ type: 'text', content: 'hi' }] },
+    ],
+    permissionMode: { mode: 'default', available: ['default', 'plan'] },
+    sessionRisk: { level: 'low', signals: 0 },
+    incidents: NO_SESSION_INCIDENTS,
+  })
+  const page = await mountPage({
+    histories: Object.fromEntries([held, other, left, right, adopted].map((threadId) => [threadId, stored(threadId)])),
+  })
+  try {
+    for (const threadId of [held, other, left, right]) {
+      await visitThreadUrl(threadId)
+      await eventually(() => expect(threadListStore.get().map((thread) => thread.threadId)).toContain(threadId))
+    }
+    await flush(async () => {
+      window.history.pushState(null, '', `?thread=${left}&panes=${left},${right}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+    })
+    await flush(async () => {
+      window.history.pushState(null, '', `?thread=${held}&panes=${held},${adopted}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+    })
+    await eventually(() => {
+      const open = threadListStore.get().map((thread) => thread.threadId)
+      expect(open).toContain(adopted)
+      expect(open).toContain(held)
+    })
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
   }
 })
 

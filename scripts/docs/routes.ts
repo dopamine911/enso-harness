@@ -28,6 +28,7 @@ const BUNDLE_PATH = 'packages/web/src/server/bundle-route.ts'
 const LOGS_PATH = 'packages/web/src/server/logs-route.ts'
 const LOGS_TAIL_PATH = 'packages/web/src/server/logs-tail-route.ts'
 const LOGS_STATS_PATH = 'packages/web/src/server/logs-stats-route.ts'
+const RUN_STATES_PATH = 'packages/web/src/server/run-states-route.ts'
 
 interface RouteMetadata {
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -591,6 +592,17 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     success: '200 `EnsoStoredThread[]` JSON',
     errors: '403 untrusted origin; 500 handler failure',
   }),
+  'GET /api/run-states': {
+    handler: 'followRunStates → ThreadRegistry.watchRunStates',
+    input: 'none',
+    success:
+      '200 SSE stream of `EnsoRunStatesFrame` (#911): `run-states`, every thread the server holds with its `busy` and `waiting`, then a `run-state` each time a thread is built, a run takes it, releases it or the thread is dropped — how a page hears a run it has not opened end',
+    errors: '403 untrusted origin',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+    factory: { path: RUN_STATES_PATH, declaration: 'export function followRunStates' },
+  },
   'GET /api/prompts': literalRead({
     handler: 'respondWithPrompts → PromptLibrary.list',
     success:
@@ -893,6 +905,7 @@ export function discoverRoutes(): ResolvedRoute[] {
     [LOGS_PATH]: readFileSync(join(ROOT, LOGS_PATH), 'utf8'),
     [LOGS_TAIL_PATH]: readFileSync(join(ROOT, LOGS_TAIL_PATH), 'utf8'),
     [LOGS_STATS_PATH]: readFileSync(join(ROOT, LOGS_STATS_PATH), 'utf8'),
+    [RUN_STATES_PATH]: readFileSync(join(ROOT, RUN_STATES_PATH), 'utf8'),
   }
 
   const groups = ROUTE_GROUP_PATHS.map(routesIn)

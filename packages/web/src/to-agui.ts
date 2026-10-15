@@ -76,6 +76,11 @@ function custom(observation: EnsoObservation): StreamChunk {
   return { type: EventType.CUSTOM, name: observation.kind, value: observation }
 }
 
+/** An extension's failure as one line: the run's error here, and its ending on the status bar (#914). */
+export function extensionErrorMessage(observation: Extract<EnsoObservation, { kind: 'extension-error' }>): string {
+  return `${observation.extensionPath} failed on ${observation.event}: ${observation.error}`
+}
+
 export function observationToAguiEvents(observation: EnsoObservation, ids: AguiIdentifiers): StreamChunk[] {
   switch (observation.kind) {
     case 'text-delta':
@@ -189,13 +194,7 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       return []
 
     case 'extension-error':
-      return [
-        {
-          type: EventType.RUN_ERROR,
-          runId: ids.runId,
-          message: `${observation.extensionPath} failed on ${observation.event}: ${observation.error}`,
-        },
-      ]
+      return [{ type: EventType.RUN_ERROR, runId: ids.runId, message: extensionErrorMessage(observation) }]
 
     case 'run-ended':
       // ⚠ NOT RUN_FINISHED. `agent_end` is one low-level run and may be followed by an

@@ -5,9 +5,9 @@ import { ensureDom, releaseDom } from './dom-environment.ts'
 
 /**
  * #359: a stats target → the transcript row it names. The transcript on screen is not the branch
- * row for row (a live run is ONE assistant bubble; a prompt another tab queued has no bubble), so
- * these pin the rules that find a row in either shape, and that a row which is not there is not
- * guessed at.
+ * row for row (a live attempt refused before its first token draws no bubble; a prompt another tab
+ * queued has none), so these pin the rules that find a row in either shape, and that a row which is
+ * not there is not guessed at.
  */
 
 ensureDom()
@@ -92,17 +92,17 @@ const STATS: EnsoThreadStats = {
   logDays: [],
 }
 
-/** The shape a LIVE run draws: one assistant bubble per prompt, every turn inside it. */
+/** One bubble per pi message — what a reload draws and, since #921, a live run. */
 function liveTranscript(): HTMLElement {
   const root = document.createElement('div')
   root.innerHTML = `
     <div data-role="user">list the files</div>
-    <div data-role="assistant" id="reply-1">
+    <div data-role="assistant" id="turn-1">
       <details data-tool-call-id="toolu_01|fc_9"><summary>bash</summary></details>
-      three files
     </div>
+    <div data-role="assistant" id="turn-2">three files</div>
     <div data-role="user">now count them</div>
-    <div data-role="assistant" id="reply-2">3</div>`
+    <div data-role="assistant" id="turn-3">3</div>`
   return root
 }
 
@@ -113,10 +113,10 @@ test('a call by its id — an id with CSS-special characters included — and a 
   expect(locateStatsTarget(root, STATS, { kind: 'turn', turn: 1 })).toBe(row ?? undefined)
 })
 
-test("a turn with no call is its prompt's reply: the last assistant bubble before the next prompt", () => {
+test('a turn with no call is its own bubble, at its place among its prompt’s model calls', () => {
   const root = liveTranscript()
-  expect(locateStatsTarget(root, STATS, { kind: 'turn', turn: 2 })?.id).toBe('reply-1')
-  expect(locateStatsTarget(root, STATS, { kind: 'turn', turn: 3 })?.id).toBe('reply-2')
+  expect(locateStatsTarget(root, STATS, { kind: 'turn', turn: 2 })?.id).toBe('turn-2')
+  expect(locateStatsTarget(root, STATS, { kind: 'turn', turn: 3 })?.id).toBe('turn-3')
   expect(locateStatsTarget(root, STATS, { kind: 'prompt', prompt: 2 })?.textContent).toBe('now count them')
 })
 
@@ -128,8 +128,10 @@ test('a target the transcript does not draw is undefined, not the nearest row', 
 
 // PR #360 review: a failed turn pi retries stays on the branch with no call (`_prepareRetry`
 // keeps it in raw history), and the retry follows under the SAME prompt. Resumed, each has its
-// own bubble, and the error turn must land on its own — the one a reader goes looking for.
-test('a retried error turn lands on its own bubble when there is one per turn, on the run bubble live', () => {
+// own bubble, and the error turn must land on its own — the one a reader goes looking for. Live,
+// an attempt refused before its first token draws nothing (PR #986 review): it is no row, and the
+// retry is still its own.
+test('a retried error turn lands on its own bubble; live, where it drew none, it is no row and the retry is still found', () => {
   const retried: EnsoThreadStats = {
     ...STATS,
     turnStats: [{ ...turn(1, 1), stopReason: 'error' }, turn(2, 1)],
@@ -146,6 +148,19 @@ test('a retried error turn lands on its own bubble when there is one per turn, o
   const live = document.createElement('div')
   live.innerHTML = `
     <div data-role="user">list the files</div>
-    <div data-role="assistant" id="run">three files</div>`
-  expect(locateStatsTarget(live, retried, { kind: 'turn', turn: 1 })?.id).toBe('run')
+    <div data-role="assistant" id="retry">three files</div>`
+  expect(locateStatsTarget(live, retried, { kind: 'turn', turn: 1 })).toBeUndefined()
+  expect(locateStatsTarget(live, retried, { kind: 'turn', turn: 2 })?.id).toBe('retry')
+})
+
+// PR #986 review: a missing bubble no unfinished turn accounts for is not guessed at — before,
+// every turn of the prompt landed on its last bubble, an early one included.
+test('fewer bubbles than finished model calls: no turn is found, not the last bubble', () => {
+  const root = document.createElement('div')
+  root.innerHTML = `
+    <div data-role="user">list the files</div>
+    <div data-role="assistant" id="only">three files</div>`
+  const noCalls: EnsoThreadStats = { ...STATS, callStats: [] }
+  expect(locateStatsTarget(root, noCalls, { kind: 'turn', turn: 1 })).toBeUndefined()
+  expect(locateStatsTarget(root, noCalls, { kind: 'turn', turn: 2 })).toBeUndefined()
 })

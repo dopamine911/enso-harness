@@ -51,6 +51,7 @@ export const CONTEXT: FeatureSpec = {
   shows: [
     'Everything pi sends the model with each request is its context: the system prompt, the tool schemas, the conversation so far and every tool result. The **Context** tab shows what the next request will be made of, and how that grew request by request.',
     "It gives you two numbers, and does not choose between them:\n\n- *pi's estimate*, written with `≈`. pi counts characters and divides by four. It can be split by category, so the breakdown uses it.\n- *The provider's count*, written plain. It is exact, but only exists for a request that was sent, and comes as one total.",
+    "While a model request is running, the trend draws it as a dashed bar after the others, labelled `now`. Its input is pi's estimate of the request as it was sent, and its output, hatched on top, grows as the response streams (characters ÷ 4). Under the bars it says `request 3 in progress · 7m 12s` with both figures. Both are estimates: when the request completes, the provider's count replaces the bar. On a thread whose first request is still running, that bar is the only one.",
   ],
   opens: ['{steps}.', 'Or `/context` in the chat, which opens the **Now** card and the Context Browser in a dialog.'],
   shots: [

@@ -480,6 +480,17 @@ test("the snapshot's openDialogs is the complete list: it replaces the card, an 
   expect(noticesBesideModeLines()).toEqual([])
 })
 
+// PR #988 review: the queue is complete like `openDialogs` (#917) — a snapshot that lists it
+// replaces the store, interrupting first, and one without it is "nothing waits", not "unchanged".
+// @pins follow-snapshot-frames/snapshot-lists-complete
+test("the snapshot's queue is the complete list: it replaces what was queued, and a snapshot without one clears it (#917)", () => {
+  observe({ kind: 'queue', interrupting: [], enqueued: ['stale'] })
+  route('snapshot', snapshot({ queue: { interrupting: ['cut in'], enqueued: ['then this'] } }))
+  expect(stores.queue.get()).toEqual(['cut in', 'then this'])
+  route('snapshot', snapshot())
+  expect(stores.queue.get()).toEqual([])
+})
+
 test('a queue observation is the whole queue, interrupting first; a malformed one leaves the last list standing (#75)', () => {
   expect(stores.queue.get()).toEqual([])
   observe({ kind: 'queue', interrupting: ['stop at the tests'], enqueued: ['then this', 'and this'] })
