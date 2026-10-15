@@ -231,19 +231,20 @@ test('prompts count user messages; tool calls count every call, paired or not', 
     user('u2', 'two'),
     assistant('a2', [{ type: 'text', content: 'done' }]),
   ]
-  expect(countThread(messages)).toEqual({ prompts: 2, toolCalls: 2, refused: 0, failed: 0 })
-  expect(countThread([])).toEqual({ prompts: 0, toolCalls: 0, refused: 0, failed: 0 })
+  expect(countThread(messages)).toEqual({ prompts: 2, toolCalls: 2, refused: 0, exited: 0, failed: 0 })
+  expect(countThread([])).toEqual({ prompts: 0, toolCalls: 0, refused: 0, exited: 0, failed: 0 })
 })
 
 // #407: pi hands a refusal and a failed command over as the same error result; only the thread's
 // refusals store says which is which — never the text. A guard's and the engine's alike (#523).
-test('⚠ an error result something refused counts as refused — a guard, a rule, you; the same shape without a refusal counts as failed', () => {
-  const errored = (toolCallId: string): UIMessage['parts'][number] => ({
+// #928: a `bash` command that exited non-zero is an error result too; pi's own status line says so.
+test('⚠ an error result something refused counts as refused — a guard, a rule, you; a non-zero exit as exited; the rest as failed', () => {
+  const errored = (toolCallId: string, content = 'bash command refused'): UIMessage['parts'][number] => ({
     type: 'tool-result',
     toolCallId,
-    content: 'bash command refused',
+    content,
     state: 'error',
-    error: 'bash command refused',
+    error: content,
   })
   const messages = [
     assistant('a1', [
@@ -257,6 +258,11 @@ test('⚠ an error result something refused counts as refused — a guard, a rul
       errored('c4'),
       call('c5', 'bash'),
       errored('c5'),
+      call('c6', 'bash'),
+      errored('c6', '(no output)\n\nCommand exited with code 1'),
+      // The same words from another tool are its own error, not a command's exit.
+      call('c7', 'edit'),
+      errored('c7', 'Command exited with code 1'),
     ]),
   ]
   const refusals = new Map<string, EnsoToolRefusal>([
@@ -264,8 +270,8 @@ test('⚠ an error result something refused counts as refused — a guard, a rul
     ['c4', { by: 'operator' }],
     ['c5', { by: 'rule' }],
   ])
-  expect(countThread(messages, refusals)).toEqual({ prompts: 0, toolCalls: 5, refused: 3, failed: 1 })
-  expect(countThread(messages)).toMatchObject({ refused: 0, failed: 4 })
+  expect(countThread(messages, refusals)).toEqual({ prompts: 0, toolCalls: 7, refused: 3, exited: 1, failed: 2 })
+  expect(countThread(messages)).toMatchObject({ refused: 0, exited: 1, failed: 5 })
 })
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -275,7 +281,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
     <ThreadStatusView
       status={props.status ?? { kind: 'idle' }}
       now={props.now ?? AT}
-      counts={props.counts ?? { prompts: 0, toolCalls: 0, refused: 0, failed: 0 }}
+      counts={props.counts ?? { prompts: 0, toolCalls: 0, refused: 0, exited: 0, failed: 0 }}
       usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
       projectTitle={props.projectTitle}
@@ -299,13 +305,17 @@ test('a fresh session renders idle with zeros — never an empty string', () => 
   expect(rendered).not.toContain('context')
 })
 
-test('refused and failed are said apart, each only when there is one (#407)', () => {
-  const both = render({ counts: { prompts: 1, toolCalls: 4, refused: 2, failed: 1 } })
-  expect(both).toContain('2 refused')
-  expect(both).toContain('1 failed')
-  expect(both).toContain('by policy, not by error')
-  const neither = render({ counts: { prompts: 1, toolCalls: 4, refused: 0, failed: 0 } })
+test('refused, exited non-zero and failed are said apart, each only when there is one (#407, #928)', () => {
+  const all = render({ counts: { prompts: 1, toolCalls: 6, refused: 2, exited: 3, failed: 1 } })
+  expect(all).toContain('2 refused')
+  expect(all).toContain('3 exited non-zero')
+  expect(all).toContain('1 failed')
+  // Who refused is not always a guard (#928): the bar names none of them as the one.
+  expect(all).toContain('by decision, not by error')
+  expect(all).not.toContain('an Enso guard refused')
+  const neither = render({ counts: { prompts: 1, toolCalls: 4, refused: 0, exited: 0, failed: 0 } })
   expect(neither).not.toContain('refused')
+  expect(neither).not.toContain('exited')
   expect(neither).not.toContain('failed')
 })
 
@@ -397,7 +407,7 @@ test('working names the step, how long it has run and how long the run has, and 
       runSince: AT - 10 * MINUTE - 3000,
       request: { startedAt: AT - 42_000, thinking: 18_000, text: 0, tool: 400 },
     },
-    counts: { prompts: 1, toolCalls: 1, refused: 0, failed: 0 },
+    counts: { prompts: 1, toolCalls: 1, refused: 0, exited: 0, failed: 0 },
   })
   expect(rendered).toContain('working')
   expect(rendered).toContain('thinking')
@@ -415,7 +425,7 @@ test('working names the step, how long it has run and how long the run has, and 
       runSince: AT,
       request: { startedAt: AT, thinking: 0, text: 0, tool: 0 },
     },
-    counts: { prompts: 1, toolCalls: 0, refused: 0, failed: 0 },
+    counts: { prompts: 1, toolCalls: 0, refused: 0, exited: 0, failed: 0 },
   })
   expect(quiet).not.toContain('chars')
 })
@@ -426,7 +436,7 @@ test('possibly stuck is an observation, with what has been open and a Stop', () 
       status={{ kind: 'stuck', step: { kind: 'model' }, stepSince: AT, quietSince: AT }}
       now={AT + 3 * MINUTE + 5000}
       onStop={() => undefined}
-      counts={{ prompts: 1, toolCalls: 0, refused: 0, failed: 0 }}
+      counts={{ prompts: 1, toolCalls: 0, refused: 0, exited: 0, failed: 0 }}
     />,
   )
   expect(rendered).toContain('possibly stuck')

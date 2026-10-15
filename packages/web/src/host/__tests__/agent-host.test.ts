@@ -1058,6 +1058,12 @@ test('⚠ a policy the engine would not run is refused with each problem’s pla
   const unknownKey = { ...current.file, yolomode: true }
   const refused = writePermissionPolicy(policyPath, agentDir, unknownKey, { kind: 'matches', etag: current.etag })
   expect(refused.kind).toBe('refused')
+  // A Behaviour value out of the engine's bounds (#935): a zero row budget is refused, not written.
+  const zeroRows = { ...current.file, promptMaxRows: 0 }
+  const refusedKnob = writePermissionPolicy(policyPath, agentDir, zeroRows, { kind: 'matches', etag: current.etag })
+  expect(refusedKnob.kind === 'refused' ? refusedKnob.refusal.problems.map((problem) => problem.at) : []).toContain(
+    '/promptMaxRows',
+  )
 
   expect(readFileSync(policyPath, 'utf8')).toBe(before)
   expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).toBe('deny')
@@ -3879,6 +3885,49 @@ test('⚠⚠ a batch the guard refused whole ends the run; a batch where a call 
   expect(await requestsAfterBatch([refused])).toBe(1)
   expect(await requestsAfterBatch([refused, faux.fauxToolCall('read', { path: 'package.json' })])).toBe(2)
   expect(await requestsAfterBatch([faux.fauxToolCall('bash', { command: 'curl https://example.com' })])).toBe(2)
+})
+
+// ⚠⚠ #922, against pi's real loop: pi prepares every call of a parallel batch — where the guard
+// decides — before it runs any, and the guard learns of a read only from its result. So a read sent
+// beside the edit it was meant to unblock is checked after it, and the edit is refused as stale
+// again; the refusal has to say to send the read on its own. Sent on its own, the read clears the
+// edit — a ranged one too, as in the thread that found this (`offset` 1039, `limit` 1).
+test('⚠⚠ a read in the same batch as an edit of a changed file does not clear stale-write, and the refusal says so; on its own it does (#922)', async () => {
+  const core = createFauxCore()
+  const hosted = await plainWorkspaceSession([fauxModelExtension(core)])
+  await switchMode(hosted, 'acceptEdits')
+  const file = join(hosted.inspect().cwd, 'notes.txt')
+  writeFileSync(file, 'one\ntwo\n')
+  // Each reply that follows a change on disk makes it first: the file changes after the last read.
+  const afterChange = (content: string, reply: unknown) => (): unknown => {
+    writeFileSync(file, content)
+    return reply
+  }
+  const rangedRead = (): unknown => faux.fauxToolCall('read', { path: 'notes.txt', offset: 2, limit: 1 })
+  const edit = (): unknown =>
+    faux.fauxToolCall('edit', { path: 'notes.txt', edits: [{ oldText: 'two', newText: 'TWO' }] })
+  core.setResponses([
+    faux.fauxAssistantMessage(faux.fauxToolCall('read', { path: 'notes.txt' })),
+    afterChange('one\ntwo\nthree\n', faux.fauxAssistantMessage([rangedRead(), edit()])),
+    afterChange('one\ntwo\nthree\nfour\n', faux.fauxAssistantMessage(rangedRead())),
+    faux.fauxAssistantMessage(edit()),
+    faux.fauxAssistantMessage('Done.'),
+  ])
+  const events = collectEvents(hosted)
+  await runPrompt(hosted, 'change two')
+
+  const results = events.flatMap((event) => (event.kind === 'tool-result' && event.complete ? [event] : []))
+  expect(results.filter((result) => result.toolName === 'read').map((result) => result.isError)).toEqual([
+    false,
+    false,
+    false,
+  ])
+  const [batched, alone] = results.filter((result) => result.toolName === 'edit')
+  expect(batched?.isError).toBe(true)
+  expect(batched?.text).toContain('CHANGED')
+  expect(batched?.text).toContain('a read sent in the same batch as this call is checked after it')
+  expect(alone?.isError).toBe(false)
+  expect(readFileSync(file, 'utf8')).toBe('one\nTWO\nthree\nfour\n')
 })
 
 /** The tools a request offered the model: pi's system messages' `toolsAdded` / `toolsRemoved`, folded in order. */

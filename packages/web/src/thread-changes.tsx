@@ -1,12 +1,33 @@
 import { type EnsoGitFileChange, type EnsoGitRepository, EnsoThreadChanges } from '@enso/core'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
-import { type DiffHunk, type DiffLine, hiddenBefore, parsePatch, type SplitRow, splitRows } from './diff-rows.ts'
+import {
+  type Expansion,
+  expansionOf,
+  type FileSyntax,
+  type ReadChangedFile,
+  readChangedFile,
+  useChangedFile,
+  useFileSyntax,
+} from './changed-file.ts'
+import type { SyntaxToken } from './diff-highlight.ts'
+import {
+  type DiffHunk,
+  type DiffLine,
+  type HiddenRun,
+  hiddenAfter,
+  hiddenBefore,
+  hiddenRows,
+  parsePatch,
+  type SplitRow,
+  splitRows,
+} from './diff-rows.ts'
 import { buildFileTree, filesInOrder, type TreeNode } from './file-tree.ts'
 import { type LiveRun, type PendingWrite, runningEmptyText } from './live-request.ts'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, readThreadRoute, type ThreadReadOutcome } from './route-read.ts'
+import { useThreadStores } from './store.ts'
 import { baselineText } from './thread-git.tsx'
 
 /**
@@ -22,9 +43,12 @@ import { baselineText } from './thread-git.tsx'
  * tool result settles or the run flag changes (`moment`), and when the thread's usage moves. The
  * file on screen stays chosen across reads while it still differs.
  *
- * ⚠ ONLY WHAT GIT SENT. Unchanged lines between hunks are git's three lines of context and a count
- * of what it left out; a binary file, one past the size a page is sent, or one git did not diff says
- * so instead of a diff. Nothing here reads the files themselves.
+ * ⚠ GIT'S PATCH, THEN THE FILE WHOLE (#461). The diff is git's patch: three lines of context around
+ * each change and a count of the unchanged lines it left out. Clicking a count shows those lines,
+ * numbered on both sides, from the file read whole (`changed-file.ts`, `GET …/changes/file`) —
+ * the same read colours each side's syntax. A file whose old side is past the size a patch may be
+ * stays unexpandable and says so; a binary file, one past the size a page is sent, or one git did
+ * not diff says so instead of a diff.
  */
 
 /**
@@ -184,60 +208,166 @@ function Side({
   line,
   side,
   marked,
+  syntax,
 }: {
   readonly line: DiffLine | null
   readonly side: 'old' | 'new'
   readonly marked: boolean
+  readonly syntax: FileSyntax
 }): React.ReactNode {
   if (line === null) return <td colSpan={2} aria-hidden="true" className="bg-muted/40" />
   const marker = MARKER[line.kind]
+  const number = side === 'old' ? line.oldNumber : line.newNumber
   return (
     <>
       <td className={`w-12 border-r px-2 text-right text-muted-foreground select-none ${CELL_CLASS[line.kind]}`}>
-        {side === 'old' ? line.oldNumber : line.newNumber}
+        {number}
       </td>
       <td className={`px-2 break-all whitespace-pre-wrap ${CELL_CLASS[line.kind]}`}>
         <span aria-hidden={marked ? undefined : true} className="text-muted-foreground select-none">
           {marker}{' '}
         </span>
-        {line.text}
+        <LineText text={line.text} tokens={number === null ? undefined : syntax[side]?.[number - 1]} />
         {line.noNewline ? <span className="ml-2 text-muted-foreground">(no newline at end of file)</span> : null}
       </td>
     </>
   )
 }
 
+/**
+ * A line's text, in its syntax's tokens when they spell exactly that text (#461) — tokens from a
+ * file that does not match the patch never colour a line they are not — else as it is. A CRLF
+ * line's `\r` is not drawn.
+ */
+function LineText({
+  text,
+  tokens,
+}: {
+  readonly text: string
+  readonly tokens: readonly SyntaxToken[] | undefined
+}): React.ReactNode {
+  const shown = text.replace(/\r$/, '')
+  if (tokens === undefined || tokens.map((token) => token.text).join('') !== shown) return shown
+  let offset = 0
+  return tokens.map((token) => {
+    const at = offset
+    offset += token.text.length
+    return (
+      <span key={at} className={token.className === '' ? undefined : token.className}>
+        {token.text}
+      </span>
+    )
+  })
+}
+
 /** A row's key: its two line numbers, which no other row in its hunk shares. */
 const rowKey = (row: SplitRow): string => `${row.left?.oldNumber ?? ''}:${row.right?.newNumber ?? ''}`
 
+/** What every row of a file is drawn with: whether its markers are heard (#847), and its syntax (#461). */
+interface RowLook {
+  readonly marked: boolean
+  readonly syntax: FileSyntax
+}
+
+function Rows({ rows, look }: { readonly rows: readonly SplitRow[]; readonly look: RowLook }): React.ReactNode {
+  return rows.map((row) => (
+    <tr key={rowKey(row)} className="align-top">
+      <Side line={row.left} side="old" marked={look.marked} syntax={look.syntax} />
+      <Side line={row.right} side="new" marked={look.marked} syntax={look.syntax} />
+    </tr>
+  ))
+}
+
+/** A run of unchanged lines git left out, how the file can show it, and whether it is open (#461). */
+interface RunControl {
+  readonly run: HiddenRun
+  readonly expansion: Expansion
+  readonly open: boolean
+  readonly onToggle: () => void
+}
+
+/**
+ * `⋯ N unchanged lines` — a button that shows them, numbered on both sides, and hides them again,
+ * while the file can show them; plain text, with why not beside it, when it cannot (#461).
+ */
+function RunCount({ control }: { readonly control: RunControl }): React.ReactNode {
+  const { run, expansion, open, onToggle } = control
+  const words = run.count === 1 ? '1 unchanged line' : `${run.count} unchanged lines`
+  if (expansion.kind === 'ready' || expansion.kind === 'reading') {
+    return (
+      <button
+        type="button"
+        aria-expanded={open}
+        title={open ? `Hide the ${words}` : `Show the ${words}`}
+        onClick={onToggle}
+        className="mr-3 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        ⋯ {words}
+      </button>
+    )
+  }
+  return (
+    <span className="mr-3 text-muted-foreground">
+      <span>⋯ {words}</span>
+      {expansion.kind === 'blocked' ? <span title={expansion.detail}> · {expansion.why}</span> : null}
+    </span>
+  )
+}
+
+/** An open run's lines, numbered on both sides — or, while the file is still being read, that it is. */
+function RunRows({ control, look }: { readonly control: RunControl; readonly look: RowLook }): React.ReactNode {
+  const { run, expansion, open } = control
+  if (!open || run.count === 0) return null
+  if (expansion.kind === 'reading') {
+    return (
+      <tr>
+        <td colSpan={4} className="px-3 py-1 text-muted-foreground">
+          reading the file…
+        </td>
+      </tr>
+    )
+  }
+  if (expansion.kind !== 'ready') return null
+  return <Rows rows={hiddenRows(run, expansion.lines, expansion.side)} look={look} />
+}
+
+/** The row a run's count sits in: a hunk's header row, or the row after the last hunk. */
+const COUNT_ROW = 'border-y bg-background px-3 py-1 text-chart-1'
+
 function Hunk({
   hunk,
-  previous,
-  marked,
+  before,
+  look,
 }: {
   readonly hunk: DiffHunk
-  readonly previous: DiffHunk | undefined
-  readonly marked: boolean
+  readonly before: RunControl
+  readonly look: RowLook
 }): React.ReactNode {
-  const hidden = hiddenBefore(hunk, previous)
   return (
     <tbody>
+      <RunRows control={before} look={look} />
       <tr>
-        <td colSpan={4} className="border-y bg-background px-3 py-1 text-chart-1">
-          {hidden === 0 ? null : (
-            <span className="mr-3 text-muted-foreground">
-              ⋯ {hidden === 1 ? '1 unchanged line' : `${hidden} unchanged lines`}
-            </span>
-          )}
+        <td colSpan={4} className={COUNT_ROW}>
+          {before.run.count === 0 ? null : <RunCount control={before} />}
           {hunk.header}
         </td>
       </tr>
-      {splitRows(hunk).map((row) => (
-        <tr key={rowKey(row)} className="align-top">
-          <Side line={row.left} side="old" marked={marked} />
-          <Side line={row.right} side="new" marked={marked} />
-        </tr>
-      ))}
+      <Rows rows={splitRows(hunk)} look={look} />
+    </tbody>
+  )
+}
+
+/** The unchanged lines after the last hunk, once the file is read and says how many (#461). */
+function RunAfter({ control, look }: { readonly control: RunControl; readonly look: RowLook }): React.ReactNode {
+  if (control.run.count === 0) return null
+  return (
+    <tbody>
+      <tr>
+        <td colSpan={4} className={COUNT_ROW}>
+          <RunCount control={control} />
+        </td>
+      </tr>
+      <RunRows control={control} look={look} />
     </tbody>
   )
 }
@@ -264,9 +394,28 @@ function omittedText(change: EnsoGitFileChange): string {
   return 'git reported no line changes: a mode change, or an empty file.'
 }
 
-function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.ReactNode {
-  const hunks = change.patch === null ? [] : parsePatch(change.patch)
+function FileDiff({
+  change,
+  readFile,
+}: {
+  readonly change: EnsoGitFileChange
+  readonly readFile: ReadChangedFile | undefined
+}): React.ReactNode {
+  const hunks = useMemo(() => (change.patch === null ? [] : parsePatch(change.patch)), [change.patch])
+  const outcome = useChangedFile(readFile, change)
+  const syntax = useFileSyntax(change.path, outcome)
+  const expansion = useMemo(() => expansionOf(readFile, outcome, change, hunks), [readFile, outcome, change, hunks])
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
   const oneSided = oneSidedLabel(change.status)
+  const look: RowLook = { marked: oneSided === undefined, syntax }
+  // A run is known by where it starts, so one stays open across a read that moved another.
+  const control = (run: HiddenRun, key: string): RunControl => ({
+    run,
+    expansion,
+    open: opened.has(key),
+    onToggle: () => setOpened((current) => toggled(current, key)),
+  })
+  const last = hunks.at(-1)
   return (
     <section aria-label={`changes to ${change.path}`} className="min-w-0 p-4">
       <header className="flex flex-wrap items-baseline gap-x-3 pb-3">
@@ -278,7 +427,7 @@ function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.Rea
           <Counts added={change.added} removed={change.removed} />
         </span>
       </header>
-      {hunks.length === 0 ? (
+      {last === undefined ? (
         <p className="rounded-sm border bg-card px-3 py-4 text-sm text-muted-foreground">{omittedText(change)}</p>
       ) : (
         // The prototype's `.diff-code` (#417): one bordered card block of relaxed lines; the split view kept.
@@ -290,14 +439,20 @@ function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.Rea
               <col className="w-12" />
               <col />
             </colgroup>
-            {hunks.map((hunk, hunkIndex) => (
-              <Hunk
-                key={hunk.header + String(hunkIndex)}
-                hunk={hunk}
-                previous={hunks[hunkIndex - 1]}
-                marked={oneSided === undefined}
-              />
-            ))}
+            {hunks.map((hunk, hunkIndex) => {
+              const run = hiddenBefore(hunk, hunks[hunkIndex - 1])
+              return (
+                <Hunk
+                  key={hunk.header + String(hunkIndex)}
+                  hunk={hunk}
+                  before={control(run, `${run.oldStart}`)}
+                  look={look}
+                />
+              )
+            })}
+            {expansion.kind === 'ready' ? (
+              <RunAfter control={control(hiddenAfter(last, expansion.lines, expansion.side), 'end')} look={look} />
+            ) : null}
           </table>
         </div>
       )}
@@ -322,11 +477,13 @@ function ChangedFiles({
   files,
   truncated,
   nothingText,
+  readFile,
 }: {
   readonly description: React.ReactNode
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
   readonly nothingText: string
+  readonly readFile: ReadChangedFile | undefined
 }): React.ReactNode {
   const [chosen, setChosen] = useState<string | undefined>(undefined)
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
@@ -368,7 +525,10 @@ function ChangedFiles({
               onToggle={(path: string): void => setClosed((current) => toggled(current, path))}
             />
           </nav>
-          <div className="min-w-0 flex-1 overflow-auto">{shown === undefined ? null : <FileDiff change={shown} />}</div>
+          <div className="min-w-0 flex-1 overflow-auto">
+            {/* Keyed by the file: another file's open runs and reads never carry over. */}
+            {shown === undefined ? null : <FileDiff key={shown.path} change={shown} readFile={readFile} />}
+          </div>
         </div>
       )}
     </div>
@@ -379,11 +539,13 @@ function RepositoryChanges({
   repository,
   files,
   truncated,
+  readFile,
   running,
 }: {
   readonly repository: EnsoGitRepository
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
+  readonly readFile: ReadChangedFile | undefined
   /** What an empty diff says while a run is in progress (#913). */
   readonly running: string | undefined
 }): React.ReactNode {
@@ -406,6 +568,7 @@ function RepositoryChanges({
       }
       files={files}
       truncated={truncated}
+      readFile={readFile}
       nothingText={running ?? 'Nothing differs: the tree matches the baseline.'}
     />
   )
@@ -419,11 +582,13 @@ function CopyChanges({
   project,
   files,
   truncated,
+  readFile,
   running,
 }: {
   readonly project: string
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
+  readonly readFile: ReadChangedFile | undefined
   readonly running: string | undefined
 }): React.ReactNode {
   // The project directory's name; the whole path is its title.
@@ -437,6 +602,7 @@ function CopyChanges({
       }
       files={files}
       truncated={truncated}
+      readFile={readFile}
       nothingText={running ?? 'Nothing differs: the copy matches the project as it was copied.'}
     />
   )
@@ -519,9 +685,11 @@ function PendingWriteCard({ pending }: { readonly pending: PendingWrite }): Reac
 /** What the changes say, the pending write aside. */
 function ChangesBody({
   outcome,
+  readFile,
   running,
 }: {
   readonly outcome: ChangesOutcome
+  readonly readFile: ReadChangedFile | undefined
   readonly running: string | undefined
 }): React.ReactNode {
   if (outcome.kind === 'reading') {
@@ -535,7 +703,9 @@ function ChangesBody({
   }
   const { git, files, truncated, copy } = outcome.payload
   if (copy !== null) {
-    return <CopyChanges project={copy.project} files={files} truncated={truncated} running={running} />
+    return (
+      <CopyChanges project={copy.project} files={files} truncated={truncated} readFile={readFile} running={running} />
+    )
   }
   if (git.kind === 'not-a-repository') {
     return (
@@ -547,19 +717,25 @@ function ChangesBody({
   if (git.kind === 'unavailable') {
     return <p className="px-4 py-6 text-sm text-refuse">git could not answer: {git.reason}</p>
   }
-  return <RepositoryChanges repository={git} files={files} truncated={truncated} running={running} />
+  return (
+    <RepositoryChanges repository={git} files={files} truncated={truncated} readFile={readFile} running={running} />
+  )
 }
 
 /**
  * Pure view of the outcome: every state said as what it is — and, while a run is in flight (#913),
  * the write it is composing above the diff, and an empty diff saying the run is in progress.
+ * `readFile` reads a changed file whole, to expand its unchanged lines and colour its syntax
+ * (#461); without one — a static render — the counts stay counts.
  */
 export function ThreadChangesView({
   outcome,
+  readFile,
   live,
   pending,
 }: {
   readonly outcome: ChangesOutcome
+  readonly readFile?: ReadChangedFile
   readonly live?: LiveRun | undefined
   readonly pending?: PendingWrite | undefined
 }): React.ReactNode {
@@ -572,7 +748,7 @@ export function ThreadChangesView({
     <div className="flex h-full min-h-0 flex-col">
       {pending === undefined ? null : <PendingWriteCard pending={pending} />}
       <div className="min-h-0 flex-1">
-        <ChangesBody outcome={outcome} running={running} />
+        <ChangesBody outcome={outcome} readFile={readFile} running={running} />
       </div>
     </div>
   )
@@ -580,7 +756,8 @@ export function ThreadChangesView({
 
 /**
  * The view wired to its thread: read on open, whenever `moment` changes (a tool result settled, the
- * run started or ended) and whenever the thread's usage moves.
+ * run started or ended) and whenever the thread's usage moves. A changed file is read whole through
+ * the thread's own `fetch`, as its other reads are.
  */
 export function ThreadChanges({
   moment,
@@ -592,5 +769,10 @@ export function ThreadChanges({
   readonly pending?: PendingWrite | undefined
 }): React.ReactNode {
   const outcome = useReadOnUsage<ChangesOutcome>(readThreadChanges, ANALYSIS_READING, moment)
-  return <ThreadChangesView outcome={outcome} live={live} pending={pending} />
+  const stores = useThreadStores()
+  const readFile = useCallback<ReadChangedFile>(
+    (change) => readChangedFile(stores.threadId, change, stores.fetch),
+    [stores],
+  )
+  return <ThreadChangesView outcome={outcome} readFile={readFile} live={live} pending={pending} />
 }
